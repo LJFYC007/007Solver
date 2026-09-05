@@ -1,0 +1,29 @@
+# Build outputs
+/build/
+/tests/oracle/target/
+/desktop/node_modules/
+/desktop/dist/
+/desktop/src-tauri/target/
+/desktop/src-tauri/gen/
+/desktop/src-tauri/binaries/*.exe
+
+# Local tools
+/CMakeUserPresets.json
+/.vs/
+/.idea/
+/.vscode/
+/.venv/
+__pycache__/
+*.py[cod]
+
+# Environment and temporary files
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+Desktop.ini
+Thumbs.db
+*.swp
+*.swo
+*~

@@ -1,0 +1,23 @@
+[package]
+name = "solver007"
+version = "0.1.0"
+description = "A desktop poker solver with live strategy exploration"
+authors = ["007 Solver"]
+edition = "2021"
+
+[[bin]]
+name = "007solver"
+path = "src/main.rs"
+
+[lib]
+name = "solver007_lib"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tokio = { version = "1", features = ["sync"] }

@@ -1,0 +1,14 @@
+{
+    "board": "Ks 9s 2d",
+    "heroPosition": "IP",
+    "villainPosition": "OOP",
+    "heroActsFirst": false,
+    "initialPot": 2.0,
+    "heroStack": 1.0,
+    "villainStack": 1.0,
+    "iterations": 3000000,
+    "ranges": {
+        "IP": { "KQs": 1.0, "JTs": 0.5 },
+        "OOP": { "AQs": 1.0, "QJs": 0.25 }
+    }
+}

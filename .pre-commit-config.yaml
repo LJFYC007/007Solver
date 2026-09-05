@@ -1,0 +1,54 @@
+exclude: ^third_party/
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-json
+      - id: check-yaml
+      - id: check-merge-conflict
+
+  - repo: local
+    hooks:
+      - id: clang-format
+        name: clang-format (local)
+        entry: clang-format -i
+        language: system
+        files: ^(solver/|tests/).*\.(cpp|cc|cxx|h|hpp|hh)$
+
+      - id: eslint
+        name: ESLint (auto-fix)
+        entry: python scripts/run-frontend-tool.py eslint --fix --
+        language: system
+        files: ^desktop/(eslint\.config\.js|vite\.config\.ts|src/.*\.(ts|tsx))$
+
+      - id: prettier
+        name: Prettier (auto-fix)
+        entry: python scripts/run-frontend-tool.py prettier --write --
+        language: system
+        files: ^desktop/.*\.(css|html|js|json|ts|tsx)$
+
+      - id: frontend-typecheck
+        name: TypeScript type check
+        entry: python scripts/run-frontend-tool.py tsc --noEmit --
+        language: system
+        pass_filenames: false
+        files: ^desktop/(package(-lock)?\.json|tsconfig\.json|vite\.config\.ts|src/.*\.(json|ts|tsx))$
+
+      - id: rustfmt
+        name: Rustfmt (auto-fix)
+        entry: rustfmt --edition 2021 desktop/src-tauri/build.rs desktop/src-tauri/src/main.rs desktop/src-tauri/src/lib.rs
+        language: system
+        pass_filenames: false
+        files: ^desktop/src-tauri/(build\.rs|src/.*\.rs)$
+
+      - id: oracle-rustfmt
+        name: Oracle Rustfmt (auto-fix)
+        entry: rustfmt --edition 2021 tests/oracle/src/main.rs
+        language: system
+        pass_filenames: false
+        files: ^tests/oracle/src/.*\.rs$

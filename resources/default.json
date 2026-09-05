@@ -1,0 +1,22 @@
+{
+    "board": "Ac Kh Qs",
+    "heroPosition": "BTN",
+    "villainPosition": "LJ",
+    "heroActsFirst": false,
+    "initialPot": 5.0,
+    "heroStack": 20.0,
+    "villainStack": 20.0,
+    "iterations": 3000000,
+    "ranges": {
+        "BTN": {
+            "AKo": 1.0,
+            "AQo": 1.0,
+            "KK": 1.0
+        },
+        "LJ": {
+            "AA": 1.0,
+            "KK": 1.0,
+            "44": 0.5
+        }
+    }
+}

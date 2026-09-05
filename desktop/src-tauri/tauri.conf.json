@@ -1,0 +1,38 @@
+{
+    "$schema": "https://schema.tauri.app/config/2",
+    "productName": "007 Solver",
+    "version": "0.1.0",
+    "identifier": "com.ljfyc.solver007",
+    "build": {
+        "beforeDevCommand": "npm run dev",
+        "devUrl": "http://127.0.0.1:1420",
+        "beforeBuildCommand": "npm run build:solver && npm run build",
+        "frontendDist": "../dist"
+    },
+    "app": {
+        "windows": [
+            {
+                "label": "main",
+                "title": "007 Solver",
+                "width": 1440,
+                "height": 900,
+                "minWidth": 1120,
+                "minHeight": 720,
+                "center": true
+            }
+        ],
+        "security": {
+            "csp": null
+        }
+    },
+    "bundle": {
+        "active": true,
+        "targets": ["nsis"],
+        "icon": ["icons/icon.ico"],
+        "shortDescription": "Desktop poker solver with live strategy exploration",
+        "externalBin": ["binaries/solver-service"],
+        "resources": {
+            "../../resources/default.json": "default.json"
+        }
+    }
+}
