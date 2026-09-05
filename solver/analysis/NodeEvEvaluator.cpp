@@ -40,11 +40,16 @@ float TraverseNodeHandEv(
     }
 
     const core::HoleCards actingHand = node.State().playerToAct == core::PlayerId::Player0() ? player0Hand : player1Hand;
-    const std::vector<float> strategy = result.Strategy().StrategyOrUniform({nodeId, actingHand});
+    const float* strategy = result.Strategy().FindStrategy({nodeId, actingHand});
+    const float uniformProbability = 1.0f / static_cast<float>(node.BettingEdgeCount());
     float value = 0.0f;
     for (std::size_t childIndex = 0; childIndex < node.BettingEdgeCount(); ++childIndex)
     {
-        value += strategy[childIndex] *
+        const float probability = strategy ? strategy[childIndex] : uniformProbability;
+        if (probability == 0.0f)
+            continue;
+
+        value += probability *
                  TraverseNodeHandEv(result, node.GetBettingEdge(childIndex).NextNode(), evRootNode, player0Hand, player1Hand, player);
     }
     return value;

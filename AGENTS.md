@@ -19,4 +19,6 @@ See [README.md](README.md) for setup, commands and repository layout, [solver/AR
 - Use an independent subagent review for architectural changes and check documentation against the final code.
 - Do not add tests unless explicitly requested. Adapt existing tests when interfaces change, preserving independent expected values and precision. Never replace external references with this solver's output.
 - Run the relevant build and check commands in README.md. Include untracked source files with `pre-commit run --files`; `--all-files` only covers the Git index.
+- Reuse the project's existing build and output directories. Do not create additional build directories under `build/` for verification, logs, backups or reports, unless it is neccessary.
+- After relevant checks pass, repeat or broaden verification only for new changes, failures, or unresolved concerns.
 - Rust formatting hooks name crate roots and their edition explicitly; keep them aligned with Cargo targets. Inspect desktop layout changes using the current build.

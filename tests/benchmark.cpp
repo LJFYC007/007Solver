@@ -1,0 +1,292 @@
+#include "analysis/AnalysisSession.h"
+#include "engine/CpuEscfrSession.h"
+#include "engine/StrategyEvaluator.h"
+#include "game/GameCompiler.h"
+#include "io/ScenarioLoader.h"
+#include "service/JsonAdapter.h"
+#include <Windows.h>
+#include <Psapi.h>
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <numeric>
+#include <string>
+#include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+
+namespace
+{
+using namespace solver;
+using Json = nlohmann::json;
+using Clock = std::chrono::steady_clock;
+constexpr double kTolerance = 1e-5;
+Json report;
+std::filesystem::path reportPath;
+Clock::time_point stageStart;
+
+void SaveReport()
+{
+    std::ofstream stream(reportPath);
+    stream.exceptions(std::ios::failbit | std::ios::badbit);
+    stream << report.dump(2) << '\n';
+}
+
+Json Memory()
+{
+    PROCESS_MEMORY_COUNTERS_EX memory{};
+    if (!GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory)))
+        throw std::runtime_error("GetProcessMemoryInfo failed");
+    return {{"private_committed_bytes", memory.PrivateUsage}, {"peak_working_set_bytes", memory.PeakWorkingSetSize}};
+}
+
+void StartStage(const char* name)
+{
+    report["active_stage"] = name;
+    SaveReport(); // Preserve the last completed phase even if a later phase is interrupted.
+    std::cout << "Starting " << name << std::endl;
+    stageStart = Clock::now();
+}
+
+void FinishStage(const char* name)
+{
+    const double seconds = std::chrono::duration<double>(Clock::now() - stageStart).count();
+    report["stages"][name] = Memory();
+    report["stages"][name]["seconds"] = seconds;
+    report["active_stage"] = nullptr;
+    SaveReport();
+    std::cout << name << ": " << seconds << " s" << std::endl;
+}
+
+Json Metrics(const engine::ExploitabilityMetrics& metrics)
+{
+    return {
+        {"heroBestResponseEv", metrics.player0BestResponseEv},
+        {"villainBestResponseEv", metrics.player1BestResponseEv},
+        {"exploitability", metrics.exploitability}
+    };
+}
+
+void CheckMetrics(const engine::ExploitabilityMetrics& metrics)
+{
+    EXPECT_TRUE(std::isfinite(metrics.player0BestResponseEv));
+    EXPECT_TRUE(std::isfinite(metrics.player1BestResponseEv));
+    EXPECT_TRUE(std::isfinite(metrics.exploitability));
+    EXPECT_GE(metrics.exploitability, -kTolerance);
+    EXPECT_NEAR(metrics.exploitability, (metrics.player0BestResponseEv + metrics.player1BestResponseEv) / 2.0, kTolerance);
+}
+
+class Diagnostics : public testing::EmptyTestEventListener
+{
+    void OnTestPartResult(const testing::TestPartResult& result) override
+    {
+        if (result.failed())
+        {
+            report["failures"].push_back(result.message());
+            SaveReport();
+        }
+    }
+};
+} // namespace
+
+TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
+{
+    StartStage("preparation");
+    const std::string fixturePath = std::string(TEST_FIXTURE_DIR) + "utg-bb-wide.json";
+    const Json input = Json::parse(std::ifstream(fixturePath));
+    report["scenario"] = input;
+    const Json reference = Json::parse(std::ifstream(std::string(TEST_FIXTURE_DIR) + "benchmark-reference.json"));
+    report["oracle"] = reference.at("source");
+    const auto& expected = reference.at("utg-bb-wide");
+    ASSERT_EQ(input, expected.at("scenario"));
+    ASSERT_EQ(input.at("initialPot"), 5.0);
+    ASSERT_EQ(input.at("heroPosition"), "UTG");
+    ASSERT_EQ(input.at("villainPosition"), "BB");
+    ASSERT_EQ(reference.at("source").at("chipScale"), 500.0);
+    ASSERT_EQ(reference.at("source").at("revision"), "9d1509fe5077d019825f833eed04b16d342dfda1");
+    const auto& solved = expected.at("solved");
+    for (const auto* key : {"heroBestResponseEv", "villainBestResponseEv", "exploitability"})
+    {
+        ASSERT_TRUE(std::isfinite(solved.at(key).get<double>()));
+        ASSERT_TRUE(std::isfinite(expected.at("uniform").at(key).get<double>()));
+    }
+    ASSERT_GE(solved.at("exploitability").get<double>(), -kTolerance);
+    ASSERT_LE(solved.at("exploitability").get<double>(), kTolerance);
+    ASSERT_NEAR(
+        solved.at("exploitability").get<double>(),
+        (solved.at("heroBestResponseEv").get<double>() + solved.at("villainBestResponseEv").get<double>()) / 2.0,
+        kTolerance
+    );
+    auto scenario = io::LoadScenario(fixturePath);
+    const auto problem =
+        std::make_shared<const engine::SolveProblem>(engine::SolveProblem{game::CompileGame(scenario.game), std::move(scenario.ranges)});
+    report["iterations"] = scenario.iterations;
+    report["node_count"] = problem->game->NodeCount();
+    std::array<std::size_t, 2> hands{};
+    std::size_t pairs = 0;
+    const auto& board = problem->game->Spec().initialBoard;
+    for (std::uint8_t player = 0; player < 2; ++player)
+        for (const auto& [hand, weight] : problem->ranges.For(core::PlayerId(player)).Entries())
+            if (weight > 0.0f && !core::Overlaps(hand, board))
+                ++hands[player];
+    for (const auto& [hero, heroWeight] : problem->ranges.For(core::PlayerId::Player0()).Entries())
+        for (const auto& [villain, villainWeight] : problem->ranges.For(core::PlayerId::Player1()).Entries())
+            if (heroWeight > 0.0f && villainWeight > 0.0f && !core::Overlaps(hero, board) && !core::Overlaps(villain, board) &&
+                !core::Overlaps(hero, villain))
+                ++pairs;
+    report["legal_hands"] = hands;
+    report["legal_hand_pairs"] = pairs;
+    FinishStage("preparation");
+
+    StartStage("uniform_evaluation");
+    const auto uniform = engine::EvaluateExploitability(*problem, engine::StrategySnapshot(problem->game, {}));
+    report["uniform"] = Metrics(uniform);
+    FinishStage("uniform_evaluation");
+    CheckMetrics(uniform);
+    EXPECT_NEAR(uniform.player0BestResponseEv, expected.at("uniform").at("heroBestResponseEv").get<double>(), kTolerance);
+    EXPECT_NEAR(uniform.player1BestResponseEv, expected.at("uniform").at("villainBestResponseEv").get<double>(), kTolerance);
+    EXPECT_NEAR(uniform.exploitability, expected.at("uniform").at("exploitability").get<double>(), kTolerance);
+    ASSERT_FALSE(HasFailure());
+
+    StartStage("session_initialization");
+    auto session = std::make_unique<engine::CpuEscfrSession>(problem);
+    FinishStage("session_initialization");
+    StartStage("training");
+    session->Run(scenario.iterations);
+    report["training_loop_seconds"] = session->TrainingTimeSeconds();
+    report["completed_iterations"] = session->CompletedIterations();
+    FinishStage("training");
+    EXPECT_EQ(session->CompletedIterations(), scenario.iterations);
+    StartStage("snapshot_export");
+    auto strategy = session->ExportStrategy();
+    FinishStage("snapshot_export");
+    StartStage("training_release");
+    session.reset();
+    FinishStage("training_release");
+
+    StartStage("trained_evaluation");
+    const auto actual = engine::EvaluateExploitability(*problem, strategy);
+    report["trained"] = Metrics(actual);
+    FinishStage("trained_evaluation");
+    CheckMetrics(actual);
+    EXPECT_GE(actual.player0BestResponseEv, -solved.at("villainBestResponseEv").get<double>() - kTolerance);
+    EXPECT_GE(actual.player1BestResponseEv, -solved.at("heroBestResponseEv").get<double>() - kTolerance);
+    EXPECT_LE(actual.exploitability, 0.025); // 0.5% of the fixed initial pot of 5.
+
+    StartStage("analysis_initialization");
+    analysis::AnalysisSession analysis(engine::SolveResult(problem, std::move(strategy), {}));
+    FinishStage("analysis_initialization");
+    StartStage("root_query");
+    auto root = analysis.QueryNode(analysis.RootNode());
+    FinishStage("root_query");
+    ASSERT_EQ(root.kind, game::NodeKind::Decision);
+    ASSERT_EQ(root.actor, core::PlayerId::Player1());
+    EXPECT_EQ(root.hands.size(), hands[1]);
+    EXPECT_EQ(root.state.board, board);
+    EXPECT_EQ(root.state.pot, problem->game->Spec().initialPot);
+    EXPECT_EQ(root.state.stacks, problem->game->Spec().initialStacks);
+    EXPECT_FALSE(root.actions.empty());
+    double mass = 0.0;
+    for (const auto& hand : root.hands)
+    {
+        EXPECT_TRUE(std::isfinite(hand.inputRangeWeight));
+        EXPECT_TRUE(std::isfinite(hand.ownReachWeight));
+        EXPECT_TRUE(std::isfinite(hand.marginalReachMass));
+        EXPECT_GT(hand.inputRangeWeight, 0.0f);
+        EXPECT_EQ(hand.ownReachWeight, hand.inputRangeWeight);
+        EXPECT_GT(hand.marginalReachMass, 0.0f);
+        EXPECT_FALSE(core::Overlaps(hand.cards, board));
+        EXPECT_TRUE(hand.nodeStrategyEv.has_value());
+        if (hand.nodeStrategyEv)
+            EXPECT_TRUE(std::isfinite(*hand.nodeStrategyEv));
+        EXPECT_EQ(hand.strategy.size(), root.actions.size());
+        for (const float probability : hand.strategy)
+        {
+            EXPECT_TRUE(std::isfinite(probability));
+            EXPECT_GE(probability, 0.0f);
+            EXPECT_LE(probability, 1.0f);
+        }
+        EXPECT_NEAR(std::accumulate(hand.strategy.begin(), hand.strategy.end(), 0.0), 1.0, kTolerance);
+        mass += hand.marginalReachMass;
+    }
+    EXPECT_NEAR(mass, 1.0, kTolerance);
+    // Reuse the service serializer so the report includes every current root-query field.
+    service::ServiceMessage message{service::ServiceMessageKind::QuerySucceeded};
+    message.node = std::move(root);
+    report["root"] = Json::parse(service::ServiceMessageToJson(message)).at("node");
+    SaveReport();
+}
+
+int main(int argc, char** argv)
+{
+    const auto start = Clock::now();
+    const auto stamp = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    reportPath = "build/benchmark-results/utg-bb-wide-" + std::to_string(stamp) + "-" + std::to_string(GetCurrentProcessId()) + ".json";
+    for (int i = 1; i < argc;)
+    {
+        const std::string arg = argv[i];
+        if (arg.rfind("--report=", 0) == 0)
+        {
+            reportPath = arg.substr(9);
+            for (int j = i; j + 1 < argc; ++j)
+                argv[j] = argv[j + 1];
+            --argc;
+            argv[argc] = nullptr;
+        }
+        else
+            ++i;
+    }
+    bool reportCreated = false;
+    try
+    {
+        if (reportPath.has_parent_path())
+            std::filesystem::create_directories(reportPath.parent_path());
+        if (std::filesystem::exists(reportPath))
+            throw std::runtime_error("Report already exists; choose a new path: " + reportPath.string());
+        report = {
+            {"scenario_id", "utg-bb-wide"},
+            {"status", "running"},
+            {"failures", Json::array()},
+            {"build",
+             {{"compiler", BENCHMARK_COMPILER},
+              {"configuration", BENCHMARK_CONFIGURATION},
+              {"compiled_at", __DATE__ " " __TIME__},
+              {"pointer_bits", sizeof(void*) * 8}}}
+        };
+        SaveReport();
+        reportCreated = true;
+        testing::InitGoogleTest(&argc, argv);
+        testing::UnitTest::GetInstance()->listeners().Append(new Diagnostics);
+        int result = RUN_ALL_TESTS();
+        if (testing::UnitTest::GetInstance()->successful_test_count() != 1)
+            result = 1;
+        report["status"] = result == 0 ? "passed" : "failed";
+        report["total_seconds"] = std::chrono::duration<double>(Clock::now() - start).count();
+        report["final_memory"] = Memory();
+        SaveReport();
+        std::cout << "Report: " << std::filesystem::absolute(reportPath).string() << std::endl;
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << error.what() << std::endl;
+        if (reportCreated)
+        {
+            report["status"] = "failed";
+            report["failures"].push_back(error.what());
+            report["total_seconds"] = std::chrono::duration<double>(Clock::now() - start).count();
+            try
+            {
+                SaveReport();
+            }
+            catch (const std::exception& writeError)
+            {
+                std::cerr << "Cannot save diagnostic report: " << writeError.what() << std::endl;
+            }
+        }
+        return 1;
+    }
+}

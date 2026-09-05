@@ -4,10 +4,12 @@
 #include "core/PokerTypes.h"
 #include "engine/SolveProblem.h"
 #include "engine/StrategySnapshot.h"
+#include <array>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <random>
-#include <unordered_map>
 #include <vector>
 
 namespace solver::engine
@@ -26,19 +28,34 @@ public:
     double TrainingTimeSeconds() const { return trainingTimeSeconds_; }
 
 private:
-    struct InfoSetState
+    struct RangeHand
     {
-        std::vector<float> regrets;
-        std::vector<float> strategySum;
+        core::HoleCards cards;
+        float weight;
     };
+
+    struct HandPair
+    {
+        std::size_t player0Index;
+        std::size_t player1Index;
+    };
+
+    static constexpr std::uint32_t kMissingOffset = std::numeric_limits<std::uint32_t>::max();
+    static constexpr std::size_t kHandsPerPage = 32;
 
     std::shared_ptr<const SolveProblem> problem_;
     std::default_random_engine rng_{42};
-    std::vector<std::unordered_map<core::HoleCards, InfoSetState, core::HoleCardsHash>> infoSetsByNode_;
+    std::array<std::vector<RangeHand>, 2> hands_;
+    std::vector<std::uint32_t> pageRowsByNode_;
+    std::vector<std::uint32_t> handPageOffsets_;
+    std::vector<std::uint32_t> infoSetOffsets_;
+    std::vector<float> regrets_;
+    std::vector<float> strategySums_;
+    std::size_t visitedInfoSetCount_ = 0;
     int completedIterations_ = 0;
     double trainingTimeSeconds_ = 0.0;
 
-    float SampleTraverse(game::NodeId node, core::PlayerId updatingPlayer, core::HoleCards player0Hand, core::HoleCards player1Hand);
-    InfoSetState& GetInfoSet(game::NodeId node, core::HoleCards hand);
+    float SampleTraverse(game::NodeId node, core::PlayerId updatingPlayer, const HandPair& handPair);
+    std::uint32_t GetInfoSetOffset(game::NodeId node, std::size_t handIndex);
 };
 } // namespace solver::engine

@@ -56,12 +56,18 @@ std::vector<float> TraverseBestResponse(
         {
             const game::ChanceOutcome& outcome = node.GetChanceOutcome(outcomeIndex);
             std::vector<float> childReach(opponentHands.size(), 0.0f);
+            bool hasChildReach = false;
             for (std::size_t handIndex = 0; handIndex < opponentHands.size(); ++handIndex)
             {
                 if (legalOutcomeCounts[handIndex] > 0 && !core::Contains(responderHand, outcome.DealtCard()) &&
                     !core::Contains(opponentHands[handIndex], outcome.DealtCard()))
+                {
                     childReach[handIndex] = opponentReach[handIndex] / static_cast<float>(legalOutcomeCounts[handIndex]);
+                    hasChildReach = hasChildReach || childReach[handIndex] > 0.0f;
+                }
             }
+            if (!hasChildReach)
+                continue;
 
             const std::vector<float> childValues =
                 TraverseBestResponse(problem, strategy, outcome.NextNode(), responderHand, opponentHands, childReach, responder);
@@ -97,23 +103,32 @@ std::vector<float> TraverseBestResponse(
         return bestActionValues;
     }
 
-    std::vector<std::vector<float>> opponentStrategies(opponentHands.size());
+    const float uniformProbability = 1.0f / static_cast<float>(node.BettingEdgeCount());
+    std::vector<const float*> opponentStrategies(opponentHands.size(), nullptr);
     for (std::size_t handIndex = 0; handIndex < opponentHands.size(); ++handIndex)
     {
         if (opponentReach[handIndex] > 0.0f)
         {
-            opponentStrategies[handIndex] = strategy.StrategyOrUniform({nodeId, opponentHands[handIndex]});
+            opponentStrategies[handIndex] = strategy.FindStrategy({nodeId, opponentHands[handIndex]});
         }
     }
 
     for (std::size_t actionIndex = 0; actionIndex < node.BettingEdgeCount(); ++actionIndex)
     {
         std::vector<float> childReach(opponentHands.size(), 0.0f);
+        bool hasChildReach = false;
         for (std::size_t handIndex = 0; handIndex < opponentHands.size(); ++handIndex)
         {
             if (opponentReach[handIndex] > 0.0f)
-                childReach[handIndex] = opponentReach[handIndex] * opponentStrategies[handIndex][actionIndex];
+            {
+                const float* probabilities = opponentStrategies[handIndex];
+                const float probability = probabilities ? probabilities[actionIndex] : uniformProbability;
+                childReach[handIndex] = opponentReach[handIndex] * probability;
+                hasChildReach = hasChildReach || childReach[handIndex] > 0.0f;
+            }
         }
+        if (!hasChildReach)
+            continue;
 
         const std::vector<float> childValues = TraverseBestResponse(
             problem, strategy, node.GetBettingEdge(actionIndex).NextNode(), responderHand, opponentHands, childReach, responder
@@ -121,7 +136,11 @@ std::vector<float> TraverseBestResponse(
         for (std::size_t handIndex = 0; handIndex < opponentHands.size(); ++handIndex)
         {
             if (opponentReach[handIndex] > 0.0f)
-                values[handIndex] += opponentStrategies[handIndex][actionIndex] * childValues[handIndex];
+            {
+                const float* probabilities = opponentStrategies[handIndex];
+                const float probability = probabilities ? probabilities[actionIndex] : uniformProbability;
+                values[handIndex] += probability * childValues[handIndex];
+            }
         }
     }
     return values;

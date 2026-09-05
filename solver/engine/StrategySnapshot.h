@@ -3,7 +3,6 @@
 #include "core/Card.h"
 #include "game/CompiledGame.h"
 #include "game/Identifiers.h"
-#include <map>
 #include <memory>
 #include <vector>
 
@@ -21,13 +20,29 @@ public:
     StrategySnapshot(std::shared_ptr<const game::CompiledGame> game, std::vector<StrategyEntry> entries);
 
     const game::CompiledGame& Game() const { return *game_; }
-    const std::vector<float>* FindStrategy(const game::InfoSetKey& infoSet) const;
+    // Borrowed probabilities: length is the node's action count; invalidated by destruction, move or assignment.
+    const float* FindStrategy(const game::InfoSetKey& infoSet) const;
     std::vector<float> StrategyOrUniform(const game::InfoSetKey& infoSet) const;
 
 private:
-    using NodeStrategies = std::map<core::HoleCards, std::vector<float>>;
+    friend class CpuEscfrSession;
+
+    struct NodeBlock
+    {
+        std::size_t handOffset;
+        std::size_t probabilityOffset;
+    };
+
+    StrategySnapshot(
+        std::shared_ptr<const game::CompiledGame> game,
+        const std::vector<game::InfoSetKey>& infoSets,
+        std::vector<float> probabilities
+    );
+    void BuildIndex(const std::vector<game::InfoSetKey>& infoSets);
 
     std::shared_ptr<const game::CompiledGame> game_;
-    std::vector<NodeStrategies> strategiesByNode_;
+    std::vector<NodeBlock> nodes_;
+    std::vector<core::HoleCards> hands_;
+    std::vector<float> probabilities_;
 };
 } // namespace solver::engine

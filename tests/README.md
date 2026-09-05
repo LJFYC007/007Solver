@@ -1,43 +1,71 @@
-# Solver correctness tests
+# Solver tests
 
-Build `007SolverTests` with the Release preset, then run:
+Run from the repository root in Developer PowerShell.
+
+## Default correctness tests
 
 ```powershell
+cmake --preset windows-msvc-release
+cmake --build --preset windows-msvc-release --target 007SolverTests
 ctest --test-dir build/windows-msvc-release --output-on-failure
 ```
 
-The seven cases run as one CTest entry with a 60-second timeout. GoogleTest filters can select individual cases. No external solver, network, or Rust build is needed for routine tests.
+Seven offline cases cover betting rules, uniform-policy best responses (BR), two reference solves, and fixed-policy node EV/reach. CTest runs one entry, `solver`, with a 60-second timeout and writes `build/windows-msvc-release/solver-test-results.json`. Push/PR CI uses this same suite.
 
-[GitHub Actions](../.github/workflows/tests.yml) builds and runs this suite in Windows/MSVC Release on pushes and pull requests, with an optional manual run. CI uses the checked-in fixtures and the same 60-second CTest timeout.
+The weighted/raise fixtures use 3M/8M updates, require exploitability <= `0.01`, and compare value intervals with external GT to `1e-5`. Fixed-policy expectations are stored in `fixtures/correctness-reference.json`. Performance measurement is handled by the separate benchmark.
 
-| Check | Independent responsibility |
-|---|---|
-| Three betting-rule cases | Full/short raises, unequal effective-stack caps, and sizing bases absent from the small solve fixtures |
-| Uniform-policy best responses | Calibrate exploitability and terminal payoffs on a deliberately exploitable strategy, without training |
-| Weighted flop, 3 million iterations | Detect training that ignores range weights |
-| Raise flop, 8 million iterations | Detect training that omits a third action or raise |
-| Fixed-policy analysis | Concrete board/hand coordinates, node EV baseline, exact conditional reach, own reach and zero-reach behavior |
-
-Both solves start on `Ks 9s 2d` and include turn/river play. The weighted fixture has two actions per decision; the raise fixture also has three-action decisions. They check that the solver's value interval `[-villain BR, hero BR]` intersects the external interval, within `1e-5` rounding tolerance, and that exploitability is at most `0.01` (0.5% of the initial pot). Equilibrium action frequencies are not unique and are not compared.
-
-Analysis uses prescribed strategies, not approximate equilibria. On the weighted flop, OOP checks AQ 25% and QJ 100%; after a check, IP checks KQ 0% and JT 100%. All remaining decisions are uniform. Queries cover blockers, zero reach, concrete turn/river cards `Qc` / `Th`, and a bet/call followed by turn decisions in the raise fixture. Node EV tolerance is `1e-5`; reach uses relative tolerance so small river masses cannot hide a wrong chance denominator.
-
-## Independent reference generation
-
-`fixtures/reference.json` is generated solely by [b-inary/postflop-solver](https://github.com/b-inary/postflop-solver), pinned to commit `9d1509fe5077d019825f833eed04b16d342dfda1`. `oracle/Cargo.lock` pins its dependency graph. The generated file embeds the exact scenario inputs, which tests compare against the scenario files to prevent stale answers.
-
-The adapter multiplies chips by 500 and divides output EVs by 500. It uses 50% pot and maximum bets, maximum raises, no rake, no automatic all-in thresholds and no size merging. These fixtures have no rounding ambiguities. External OOP/IP maps to villain/hero. Root BR values use zero-sum utilities (initial pot / 2 subtracted); node EVs use the queried node as their contribution baseline. The external flop sorting is converted back to the user's original order.
-
-External solves stop at exploitability <= `1e-5` in fixture units, with a 10000-iteration cap; generation fails if this precision is not reached. Fixed-policy EVs are evaluated without training. External normalized hand weights are divided by the initial legal joint range weight and by 45/44 for dealt turn/river cards to obtain this application's marginal reach mass. Paths use zero-based action indices and concrete card strings; `policy` records the only nonuniform strategy entries.
-
-Regenerate in a separate Developer PowerShell session:
+## Explicit wide-range benchmark
 
 ```powershell
-# Compatibility with newer Rust's deny-by-default lint in this pinned older dependency.
-$env:RUSTFLAGS = '-A dangerous_implicit_autorefs -A mismatched_lifetime_syntaxes'
-cargo run --locked --release --manifest-path tests/oracle/Cargo.toml --target-dir build/solver-test-oracle
+cmake --build --preset windows-msvc-release --target 007SolverBenchmark
+./build/windows-msvc-release/007SolverBenchmark.exe
+# Optional: choose a new report path; existing reports are never overwritten.
+./build/windows-msvc-release/007SolverBenchmark.exe --report=build/benchmark-results/sample.json
 ```
 
-Review the generated diff and rerun the C++ suite. Never copy this solver's observed values into the reference file or loosen precision merely to make a regression pass.
+The benchmark is excluded from the default build, CTest, CI and pre-commit execution. It uses `fixtures/utg-bb-wide.json`: UTG/IP versus BB/OOP, flop `Ac Kh Qs`, pot 5, stacks 2.5 each, no rake, default sizing and **200M fixed updates**, retaining complete ranges and turn/river play.
 
-The suite covers the listed rule boundaries, training fixtures and fixed-policy analysis. It does not cover all possible game configurations, desktop navigation or service-process behavior.
+It checks exact input/GT equality, uniform BRs and exploitability within `1e-5`, finite trained metrics, value-interval compatibility, the BR-average identity and exploitability in `[-1e-5, 0.025]`. Root EVs, reach and probabilities must be valid; equilibrium action frequencies and per-hand EVs are not compared.
+
+Unique JSON reports default to `build/benchmark-results/`. They include build/workload information, separate uniform/trained BR timings, training, snapshot export/release, full root query, metrics and process memory. Training state is released before trained evaluation. Failures retain diagnostics and return nonzero; an interrupted `status: running` report is incomplete.
+
+The local Release target is under five minutes, observed rather than asserted. One complete run took **244.10 s**, with exploitability **0.01699954** and peak working set **59.57 MiB**; timing variance was not measured.
+
+### View the latest local result
+
+Rebuild the benchmark target and run it after changing source; CTest and normal builds do not refresh benchmark reports. From the repository root:
+
+```powershell
+$latest = Get-ChildItem build/benchmark-results/*.json | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$latest.FullName
+$result = Get-Content -Raw $latest.FullName | ConvertFrom-Json
+$result | Select-Object status, total_seconds, completed_iterations, failures
+$result.trained
+$result.stages
+```
+
+Check `status` before using the numbers: `failed` is a failed run and `running` is incomplete. Reports are local, ignored build artifacts, and are not uploaded by CI. They record compiler/configuration but not Git revision or dirty state, so the latest file does not by itself identify the latest source version. To keep a result associated with a commit, use a unique `--report` filename containing the commit ID and timestamp, and note any uncommitted changes separately.
+
+## Independent GT generation
+
+`fixtures/correctness-reference.json` and `fixtures/benchmark-reference.json` use [b-inary/postflop-solver](https://github.com/b-inary/postflop-solver) at commit `9d1509fe5077d019825f833eed04b16d342dfda1`, with dependencies pinned by `oracle/Cargo.lock`.
+
+```powershell
+$env:RUSTFLAGS = '-A dangerous_implicit_autorefs -A mismatched_lifetime_syntaxes'
+# Original correctness references only:
+cargo run --locked --release --manifest-path tests/oracle/Cargo.toml --target-dir build/solver-test-oracle
+# Wide benchmark reference only:
+cargo run --locked --release --manifest-path tests/oracle/Cargo.toml --target-dir build/solver-test-oracle -- --wide
+```
+
+Generation requires exploitability <= `1e-5` within 10,000 external iterations; the wide entry fails before writing GT if precision is unmet. GT generation is outside the benchmark time budget. Review generated diffs and rerun the relevant executable; never substitute this solver's output for independent answers or loosen tolerances to pass.
+
+The adapter scales chips/EVs by 500 and maps external OOP/IP to villain/hero. It uses half-pot/maximum bets, maximum raises, and no rake, automatic all-in thresholds or size merging. Current fixture sizes avoid rounding differences. Root BRs use net payoff minus initial pot/2; their average is exploitability. Node EVs use the queried node's contribution baseline. All-in runouts remain complete, with conditional chance denominators 45/44.
+
+### Wide-range source
+
+The fixture transcribes [RangeConverter's 9-max / 100BB Live Cash PDF](https://rangeconverter.com/downloads/9-max-100bb-Poker-Charts-No-Limit-Texas-Holdem-Cash), accessed 2026-09-05: page 3 upper-left UTG RFI opens to **3BB**; page 10 upper-left BB vs UTG contributes only green **Call**, excluding orange **13BB 3-bets**. Page 2 specifies simplified 50% increments: solid opening/calling cells become `1.0`, mixed cells `0.5`, absent cells zero, applied equally to each exact combo.
+
+All positive cells are retained: UTG 28 classes/131 weighted combos, BB 45/178 before blockers. Weights follow the simplified cells, whose totals differ slightly from the graphic footers (10.09%/13.51%); no rescaling is applied. The source does not specify rake. These ranges are fixed inputs to reduced postflop stacks, not a full 100BB equilibrium.
+
+PDF SHA-256: `0feb70db01ab74db6d6a8cb6e9761358f6eb04879468452f8429e027c6770b27`.

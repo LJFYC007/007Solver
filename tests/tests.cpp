@@ -26,7 +26,7 @@ Json Fixture(const std::string& name)
 
 const Json& References()
 {
-    static const Json references = Fixture("reference");
+    static const Json references = Fixture("correctness-reference");
     return references;
 }
 
@@ -41,9 +41,14 @@ std::shared_ptr<const engine::SolveProblem> Problem(const std::string& name)
 void CheckSolve(const std::string& name)
 {
     const auto problem = Problem(name);
-    engine::CpuEscfrSession session(problem);
-    session.Run(Fixture(name).at("iterations").get<int>());
-    const auto strategy = session.ExportStrategy();
+    const int iterations = Fixture(name).at("iterations").get<int>();
+    // Match the service: release training state before best-response evaluation.
+    const auto strategy = [&]
+    {
+        engine::CpuEscfrSession session(problem);
+        session.Run(iterations);
+        return session.ExportStrategy();
+    }();
     const auto actual = engine::EvaluateExploitability(*problem, strategy);
     const auto& expected = References().at(name).at("solved");
     ASSERT_TRUE(std::isfinite(actual.player0BestResponseEv));

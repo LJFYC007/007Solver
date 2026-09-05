@@ -20,7 +20,10 @@ fn game_for(scenario: &Value) -> PostFlopGame {
             .unwrap()
     };
     let cards = CardConfig {
-        range: [range("OOP"), range("IP")],
+        range: [
+            range(scenario["villainPosition"].as_str().unwrap()),
+            range(scenario["heroPosition"].as_str().unwrap()),
+        ],
         flop: flop_from_str(&scenario["board"].as_str().unwrap().replace(' ', "")).unwrap(),
         turn: NOT_DEALT,
         river: NOT_DEALT,
@@ -160,6 +163,42 @@ fn main() {
         "repository": "https://github.com/b-inary/postflop-solver",
         "revision": REVISION, "chipScale": SCALE,
     }});
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    if args == ["--wide"] {
+        let scenario: Value =
+            serde_json::from_str(&fs::read_to_string(fixtures.join("utg-bb-wide.json")).unwrap())
+                .unwrap();
+        // These values avoid different chip rounding / minimum-bet rules in the two solvers.
+        assert_eq!(scenario["initialPot"], 5.0);
+        assert_eq!(scenario["heroStack"], 2.5);
+        let mut game = game_for(&scenario);
+        let uniform = metrics(&game);
+        let exploitability = solve(&mut game, 10000, SCALE * 1e-5, true) / SCALE;
+        assert!(
+            (0.0..=1e-5).contains(&exploitability),
+            "Wide reference did not converge: {exploitability}"
+        );
+        let solved = metrics(&game);
+        for values in [&uniform, &solved] {
+            for key in [
+                "heroBestResponseEv",
+                "villainBestResponseEv",
+                "exploitability",
+            ] {
+                assert!(values[key].as_f64().unwrap().is_finite());
+            }
+        }
+        assert!((0.0..=1e-5).contains(&solved["exploitability"].as_f64().unwrap()));
+        output["utg-bb-wide"] = json!({"scenario": scenario, "uniform": uniform, "solved": solved});
+        // Write only after successful convergence; never publish an approximate answer as GT.
+        fs::write(
+            fixtures.join("benchmark-reference.json"),
+            serde_json::to_string_pretty(&output).unwrap() + "\n",
+        )
+        .unwrap();
+        return;
+    }
+    assert!(args.is_empty(), "Usage: solver-test-oracle [--wide]");
     for name in ["weighted-flop", "raise-flop"] {
         let scenario: Value = serde_json::from_str(
             &fs::read_to_string(fixtures.join(format!("{name}.json"))).unwrap(),
@@ -203,7 +242,7 @@ fn main() {
         }
     }
     fs::write(
-        fixtures.join("reference.json"),
+        fixtures.join("correctness-reference.json"),
         serde_json::to_string_pretty(&output).unwrap() + "\n",
     )
     .unwrap();
