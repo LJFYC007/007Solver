@@ -4,9 +4,9 @@
     "villainPosition": "OOP",
     "heroActsFirst": false,
     "initialPot": 2.0,
-    "heroStack": 2.0,
-    "villainStack": 2.0,
-    "iterations": 8000000,
+    "heroStack": 8.0,
+    "villainStack": 8.0,
+    "iterations": 200,
     "ranges": {
         "IP": { "KQs": 1.0 },
         "OOP": { "AQs": 1.0 }

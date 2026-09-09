@@ -1,6 +1,5 @@
 #include "analysis/AnalysisSession.h"
 #include "engine/CpuDcfrSession.h"
-#include "engine/CpuEscfrSession.h"
 #include "engine/StrategyEvaluator.h"
 #include "game/GameCompiler.h"
 #include "io/ScenarioLoader.h"
@@ -43,22 +42,17 @@ void CheckSolve(const std::string& name)
 {
     const auto problem = Problem(name);
     const int iterations = Fixture(name).at("iterations").get<int>();
-    for (const int workers : {0, 1, 4})
+    for (const int workers : {1, 4})
     {
-        SCOPED_TRACE(workers == 0 ? "escfr" : "dcfr workers=" + std::to_string(workers));
+        SCOPED_TRACE("dcfr workers=" + std::to_string(workers));
         // Match the service: release training state before best-response evaluation.
         const auto strategy = [&]
         {
-            if (workers != 0)
-            {
-                engine::CpuDcfrSession session(problem, workers);
-                session.Run(101);
-                session.Run(99);
-                EXPECT_EQ(session.CompletedIterations(), 200);
-                return session.ExportStrategy();
-            }
-            engine::CpuEscfrSession session(problem);
-            session.Run(iterations);
+            engine::CpuDcfrSession session(problem, workers);
+            // An odd split exercises player alternation across continued runs.
+            session.Run(101);
+            session.Run(iterations - 101);
+            EXPECT_EQ(session.CompletedIterations(), iterations);
             return session.ExportStrategy();
         }();
         const auto actual = engine::EvaluateExploitability(*problem, strategy);
@@ -72,6 +66,7 @@ void CheckSolve(const std::string& name)
         EXPECT_GE(actual.player1BestResponseEv, -expected.at("heroBestResponseEv").get<float>() - roundingTolerance);
         EXPECT_NEAR(actual.exploitability, (actual.player0BestResponseEv + actual.player1BestResponseEv) / 2.0f, roundingTolerance);
         EXPECT_LE(actual.exploitability, 0.01f); // 0.5% of the fixtures' initial pot.
+        ASSERT_FALSE(testing::Test::HasFailure());
     }
 }
 

@@ -83,12 +83,13 @@ fn fixed_policy(game: &mut PostFlopGame) -> Value {
         let entries: Vec<_> = hands
             .iter()
             .zip(&check)
-            .map(|(&hand, &p)| json!({"cards": hand_name(hand), "strategy": [p, 1.0 - p]}))
+            .map(|(&hand, &p)| json!({"cards": hand_name(hand), "strategy": [p, 1.0 - p, 0.0]}))
             .collect();
         let strategy: Vec<_> = check
             .iter()
             .copied()
             .chain(check.iter().map(|p| 1.0 - p))
+            .chain(check.iter().map(|_| 0.0))
             .collect();
         game.lock_current_strategy(&strategy);
         policy.push(json!({"path": vec![0; depth], "hands": entries}));
@@ -170,7 +171,7 @@ fn main() {
                 .unwrap();
         // These values avoid different chip rounding / minimum-bet rules in the two solvers.
         assert_eq!(scenario["initialPot"], 5.0);
-        assert_eq!(scenario["heroStack"], 2.5);
+        assert_eq!(scenario["heroStack"], 7.5);
         let mut game = game_for(&scenario);
         let uniform = metrics(&game);
         let exploitability = solve(&mut game, 10000, SCALE * 1e-5, true) / SCALE;

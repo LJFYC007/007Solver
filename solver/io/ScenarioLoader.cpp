@@ -59,9 +59,8 @@ Scenario LoadScenario(const std::string& jsonPath)
         iterationCount.get<std::uint64_t>() > std::numeric_limits<int>::max())
         throw std::runtime_error("Solve iterations must be an integer between 1 and INT_MAX");
     const int iterations = iterationCount.get<int>();
-    const std::string algorithm = json.value("algorithm", std::string("escfr"));
-    if (algorithm != "escfr" && algorithm != "dcfr")
-        throw std::runtime_error("Solve algorithm must be escfr or dcfr");
+    if (json.value("algorithm", std::string("dcfr")) != "dcfr")
+        throw std::runtime_error("Solve algorithm must be dcfr");
 
     const std::string heroPosition = json.at("heroPosition").get<std::string>();
     const std::string villainPosition = json.at("villainPosition").get<std::string>();
@@ -80,7 +79,6 @@ Scenario LoadScenario(const std::string& jsonPath)
         },
         core::RangeSet(LoadRange(ranges, heroPosition), LoadRange(ranges, villainPosition)),
         iterations,
-        algorithm,
     };
 }
 } // namespace solver::io

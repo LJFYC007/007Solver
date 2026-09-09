@@ -4,7 +4,7 @@
 
 ```text
 Scenario file -> game and ranges -> concrete decision tree
-              -> CPU DCFR / ESCFR training -> strategy snapshot -> exploitability evaluation
+              -> CPU DCFR training -> strategy snapshot -> exploitability evaluation
               -> read-only result -> node analysis <-> NDJSON <-> Rust/Tauri <-> React
 ```
 
@@ -49,9 +49,7 @@ Chance edges list cards absent from the public board. The solver rejects outcome
 
 ## Training, result and evaluation
 
-`SolveProblem` holds a shared immutable game and the two ranges. `CpuEscfrSession` owns its random engine, regrets and strategy sums. `Run(iterations)` performs that many external-sampling updates, alternating the updating player. One iteration updates one player. The random seed is 42; the standard-library random engine is not a cross-toolchain reproducibility guarantee.
-
-ESCFR assigns per-player indexes to positive-weight exact hands compatible with the root board, preserving range order. Each visited decision has a lazily allocated page directory; each visited page holds offsets for up to 32 hands. Regrets and strategy sums occupy separate contiguous float buffers and are appended only when an infoset is first visited. Missing pages and slots remain distinguishable from visited infosets with zero strategy sums. Traversal retains integer offsets across recursive calls because buffer growth can invalidate pointers. Successive `Run()` calls retain the same indexing, random state and updating-player alternation.
+`SolveProblem` holds a shared immutable game and the two ranges. `CpuDcfrSession` owns regrets, strategy sums and traversal buffers.
 
 `CpuDcfrSession` uses DCFR with fixed `(alpha, beta, gamma) = (1.5, 0, 2)`. Each iteration updates one player across the full tree; successive `Run()` calls preserve player alternation and discount counters. OpenMP processes nodes in parallel within each depth.
 
@@ -59,9 +57,9 @@ DCFR own reach starts at one and includes only that player's action probabilitie
 
 The service explicitly trains and exports one `StrategySnapshot`. The training session goes out of scope immediately after export. The service then calls `EvaluateExploitability()` and constructs a `SolveResult`. The result keeps the problem, snapshot and single solve report alive for analysis.
 
-The report records algorithm `dcfr` or `escfr`, execution backend `cpu`, completed iterations, training-loop time and best-response metrics. Iteration counts are not comparable between algorithms. Training time excludes initialization, hand-pair preparation, snapshot export and evaluation.
+The report records algorithm `dcfr`, execution backend `cpu`, completed full-player updates, training-loop time and best-response metrics. Training time excludes session initialization, snapshot export and evaluation.
 
-Snapshots store node offsets, sorted exact hands and a contiguous probability buffer. ESCFR exports visited infosets; DCFR exports all board-compatible hands in each decision's acting range. Both export in node/hand order, using a uniform distribution when strategy sums are zero. The public entry constructor also accepts unsorted fixed policies. Both construction paths check decision-node identity, blockers, action counts, duplicate entries and finite non-negative probabilities summing to one within `1e-5`. `FindStrategy()` returns a borrowed probability pointer or null for a missing entry; its length is the node's action count, and destruction, move or assignment of the snapshot invalidates it. `StrategyOrUniform()` returns an owning vector and explicitly supplies a uniform strategy for infosets not visited by sampling. A result and its snapshot must refer to the same compiled game.
+Snapshots store node offsets, sorted exact hands and a contiguous probability buffer. DCFR exports all board-compatible hands in each decision's acting range in node/hand order, using a uniform distribution when strategy sums are zero. The public entry constructor also accepts unsorted fixed policies. Both construction paths check decision-node identity, blockers, action counts, duplicate entries and finite non-negative probabilities summing to one within `1e-5`. `FindStrategy()` returns a borrowed probability pointer or null for a missing entry; its length is the node's action count, and destruction, move or assignment of the snapshot invalidates it. `StrategyOrUniform()` returns an owning vector and explicitly supplies a uniform strategy for entries absent from a supplied fixed policy. A result and its snapshot must refer to the same compiled game.
 
 `EvaluateExploitability()` computes each player's best response against the fixed snapshot. Exploitability is half the sum of their best-response values. Evaluation is a separate operation from training.
 
@@ -105,6 +103,6 @@ Rust manages the child process and pending requests and passes node JSON through
 
 The full concrete tree, tabular training state and exact evaluation limit the size of practical scenarios. More betting branches and deeper stacks grow the tree; wider ranges increase training and analysis costs.
 
-ESCFR training indexes use 32-bit offsets with a reserved missing value and reject growth beyond that capacity. Paging avoids allocating a full hand row at the first visit, but directory storage, partially used pages and vector spare capacity still cost memory. DCFR allocates dense root-hand rows for all nodes, trading higher memory use for regular full traversals and parallel execution.
+DCFR allocates dense root-hand rows for all nodes, trading higher memory use for regular full traversals and parallel execution.
 
 The desktop uses one bundled flop scenario. There is no scenario editor, hand-history importer, solution storage, GPU implementation or neural model.

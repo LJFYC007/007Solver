@@ -1,6 +1,5 @@
 #include "analysis/AnalysisSession.h"
 #include "engine/CpuDcfrSession.h"
-#include "engine/CpuEscfrSession.h"
 #include "engine/StrategyEvaluator.h"
 #include "game/GameCompiler.h"
 #include "io/ScenarioLoader.h"
@@ -22,7 +21,6 @@
 #include <memory>
 #include <numeric>
 #include <string>
-#include <type_traits>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
@@ -35,7 +33,6 @@ constexpr double kTolerance = 1e-5;
 Json report;
 std::filesystem::path reportPath;
 Clock::time_point stageStart;
-std::string algorithm = "escfr";
 int iterationBudget = 0;
 int workers = 0;
 
@@ -184,35 +181,25 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
     ASSERT_FALSE(HasFailure());
 
     StartStage("session_initialization");
-    const auto train = [&](auto session)
+    auto strategy = [&]
     {
+        auto session = std::make_unique<engine::CpuDcfrSession>(problem, workers);
+        report["workers"] = session->WorkerCount();
         FinishStage("session_initialization");
         StartStage("training");
         session->Run(iterations);
-        if constexpr (std::is_same_v<decltype(session), std::unique_ptr<engine::CpuDcfrSession>>)
-            report["workers"] = session->WorkerCount();
+        report["workers"] = session->WorkerCount();
         report["training_loop_seconds"] = session->TrainingTimeSeconds();
         report["completed_iterations"] = session->CompletedIterations();
         FinishStage("training");
         EXPECT_EQ(session->CompletedIterations(), iterations);
         StartStage("snapshot_export");
-        auto strategy = session->ExportStrategy();
+        auto snapshot = session->ExportStrategy();
         FinishStage("snapshot_export");
         StartStage("training_release");
         session.reset();
         FinishStage("training_release");
-        return strategy;
-    };
-    auto strategy = [&]
-    {
-        if (algorithm == "dcfr")
-        {
-            auto session = std::make_unique<engine::CpuDcfrSession>(problem, workers);
-            report["workers"] = session->WorkerCount();
-            return train(std::move(session));
-        }
-        report["workers"] = 1;
-        return train(std::make_unique<engine::CpuEscfrSession>(problem));
+        return snapshot;
     }();
 
     StartStage("trained_evaluation");
@@ -223,6 +210,7 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
     EXPECT_GE(actual.player0BestResponseEv, -solved.at("villainBestResponseEv").get<double>() - kTolerance);
     EXPECT_GE(actual.player1BestResponseEv, -solved.at("heroBestResponseEv").get<double>() - kTolerance);
     EXPECT_LE(actual.exploitability, 0.025); // 0.5% of the fixed initial pot of 5.
+    ASSERT_FALSE(HasFailure());
 
     StartStage("analysis_initialization");
     analysis::AnalysisSession analysis(engine::SolveResult(problem, std::move(strategy), {}));
@@ -287,7 +275,10 @@ int main(int argc, char** argv)
             if (arg.rfind("--report=", 0) == 0)
                 reportPath = arg.substr(9);
             else if (arg.rfind("--algorithm=", 0) == 0)
-                algorithm = arg.substr(12);
+            {
+                if (arg.substr(12) != "dcfr")
+                    throw std::invalid_argument("Benchmark algorithm must be dcfr");
+            }
             else if (arg.rfind("--iterations=", 0) == 0)
                 iterationBudget = PositiveInteger(arg.substr(13));
             else if (arg.rfind("--workers=", 0) == 0)
@@ -302,20 +293,14 @@ int main(int argc, char** argv)
             --argc;
             argv[argc] = nullptr;
         }
-        if (algorithm != "escfr" && algorithm != "dcfr")
-            throw std::invalid_argument("Benchmark algorithm must be escfr or dcfr");
-        if (algorithm == "dcfr" && iterationBudget == 0)
-            throw std::invalid_argument("DCFR requires an explicit --iterations full-player update budget");
-        if (algorithm == "escfr" && workers != 0)
-            throw std::invalid_argument("ESCFR is single-threaded; --workers requires --algorithm=dcfr");
         if (reportPath.has_parent_path())
             std::filesystem::create_directories(reportPath.parent_path());
         if (std::filesystem::exists(reportPath))
             throw std::runtime_error("Report already exists; choose a new path: " + reportPath.string());
         report = {
             {"scenario_id", "utg-bb-wide"},
-            {"algorithm", algorithm},
-            {"iteration_unit", algorithm == "dcfr" ? "full_player_update" : "sampled_player_update"},
+            {"algorithm", "dcfr"},
+            {"iteration_unit", "full_player_update"},
             {"status", "running"},
             {"failures", Json::array()},
             {"build",

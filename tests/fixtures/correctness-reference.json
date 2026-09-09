@@ -10,33 +10,36 @@
             "cards": "Qd Ad",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.000274348451057449,
-            "nodeStrategyEv": 0.9900568127632141,
+            "nodeStrategyEv": -0.8740489482879639,
             "ownReachWeight": 0.3333333432674408,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Qh Ah",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.000274348451057449,
-            "nodeStrategyEv": 0.9900568127632141,
+            "nodeStrategyEv": -0.8740489482879639,
             "ownReachWeight": 0.3333333432674408,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Qs As",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.000548696902114898,
-            "nodeStrategyEv": 1.6164772510528564,
+            "nodeStrategyEv": 0.6354907155036926,
             "ownReachWeight": 0.3333333432674408,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           }
         ],
@@ -47,8 +50,8 @@
         ],
         "pot": 4.0,
         "stacks": [
-          1.0,
-          1.0
+          7.0,
+          7.0
         ]
       },
       {
@@ -58,23 +61,25 @@
           {
             "cards": "Qd Kd",
             "inputRangeWeight": 1.0,
-            "marginalReachMass": 0.000274348451057449,
-            "nodeStrategyEv": 1.9886362552642822,
+            "marginalReachMass": 0.00018289896252099425,
+            "nodeStrategyEv": 3.7843711376190186,
             "ownReachWeight": 0.3333333432674408,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Qh Kh",
             "inputRangeWeight": 1.0,
-            "marginalReachMass": 0.000274348451057449,
-            "nodeStrategyEv": 1.9886362552642822,
+            "marginalReachMass": 0.00018289896252099425,
+            "nodeStrategyEv": 3.7843711376190186,
             "ownReachWeight": 0.3333333432674408,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           }
         ],
@@ -84,10 +89,10 @@
           "Qc",
           1
         ],
-        "pot": 5.0,
+        "pot": 6.0,
         "stacks": [
-          1.0,
-          0.0
+          7.0,
+          5.0
         ]
       }
     ],
@@ -95,9 +100,9 @@
       "board": "Ks 9s 2d",
       "heroActsFirst": false,
       "heroPosition": "IP",
-      "heroStack": 2.0,
+      "heroStack": 8.0,
       "initialPot": 2.0,
-      "iterations": 8000000,
+      "iterations": 200,
       "ranges": {
         "IP": {
           "KQs": 1.0
@@ -107,12 +112,12 @@
         }
       },
       "villainPosition": "OOP",
-      "villainStack": 2.0
+      "villainStack": 8.0
     },
     "solved": {
-      "exploitability": 2.6245118078804808e-6,
-      "heroBestResponseEv": 0.7420927882194519,
-      "villainBestResponseEv": -0.7420875430107117
+      "exploitability": 2.746581913015689e-7,
+      "heroBestResponseEv": 0.8929298520088196,
+      "villainBestResponseEv": -0.8929293155670166
     }
   },
   "source": {
@@ -128,6 +133,7 @@
             "cards": "Jc Qc",
             "strategy": [
               1.0,
+              0.0,
               0.0
             ]
           },
@@ -135,6 +141,7 @@
             "cards": "Jd Qd",
             "strategy": [
               1.0,
+              0.0,
               0.0
             ]
           },
@@ -142,6 +149,7 @@
             "cards": "Jh Qh",
             "strategy": [
               1.0,
+              0.0,
               0.0
             ]
           },
@@ -149,6 +157,7 @@
             "cards": "Js Qs",
             "strategy": [
               1.0,
+              0.0,
               0.0
             ]
           },
@@ -156,28 +165,32 @@
             "cards": "Qc Ac",
             "strategy": [
               0.25,
-              0.75
+              0.75,
+              0.0
             ]
           },
           {
             "cards": "Qd Ad",
             "strategy": [
               0.25,
-              0.75
+              0.75,
+              0.0
             ]
           },
           {
             "cards": "Qh Ah",
             "strategy": [
               0.25,
-              0.75
+              0.75,
+              0.0
             ]
           },
           {
             "cards": "Qs As",
             "strategy": [
               0.25,
-              0.75
+              0.75,
+              0.0
             ]
           }
         ],
@@ -189,6 +202,7 @@
             "cards": "Tc Jc",
             "strategy": [
               1.0,
+              0.0,
               0.0
             ]
           },
@@ -196,6 +210,7 @@
             "cards": "Td Jd",
             "strategy": [
               1.0,
+              0.0,
               0.0
             ]
           },
@@ -203,6 +218,7 @@
             "cards": "Th Jh",
             "strategy": [
               1.0,
+              0.0,
               0.0
             ]
           },
@@ -210,6 +226,7 @@
             "cards": "Ts Js",
             "strategy": [
               1.0,
+              0.0,
               0.0
             ]
           },
@@ -217,21 +234,24 @@
             "cards": "Qc Kc",
             "strategy": [
               0.0,
-              1.0
+              1.0,
+              0.0
             ]
           },
           {
             "cards": "Qd Kd",
             "strategy": [
               0.0,
-              1.0
+              1.0,
+              0.0
             ]
           },
           {
             "cards": "Qh Kh",
             "strategy": [
               0.0,
-              1.0
+              1.0,
+              0.0
             ]
           }
         ],
@@ -249,10 +269,11 @@
             "cards": "Jc Qc",
             "inputRangeWeight": 0.25,
             "marginalReachMass": 0.04216867312788963,
-            "nodeStrategyEv": 0.6011634469032288,
+            "nodeStrategyEv": 0.9453986883163452,
             "ownReachWeight": 0.25,
             "strategy": [
               1.0,
+              0.0,
               0.0
             ]
           },
@@ -260,10 +281,11 @@
             "cards": "Jd Qd",
             "inputRangeWeight": 0.25,
             "marginalReachMass": 0.04216867312788963,
-            "nodeStrategyEv": 0.6574404835700989,
+            "nodeStrategyEv": 1.0380988121032715,
             "ownReachWeight": 0.25,
             "strategy": [
               1.0,
+              0.0,
               0.0
             ]
           },
@@ -271,10 +293,11 @@
             "cards": "Jh Qh",
             "inputRangeWeight": 0.25,
             "marginalReachMass": 0.04216867312788963,
-            "nodeStrategyEv": 0.6011634469032288,
+            "nodeStrategyEv": 0.9453986883163452,
             "ownReachWeight": 0.25,
             "strategy": [
               1.0,
+              0.0,
               0.0
             ]
           },
@@ -282,10 +305,11 @@
             "cards": "Js Qs",
             "inputRangeWeight": 0.25,
             "marginalReachMass": 0.05421686917543411,
-            "nodeStrategyEv": 0.9104447364807129,
+            "nodeStrategyEv": 1.5394682884216309,
             "ownReachWeight": 0.25,
             "strategy": [
               1.0,
+              0.0,
               0.0
             ]
           },
@@ -293,52 +317,56 @@
             "cards": "Qc Ac",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.1927710771560669,
-            "nodeStrategyEv": 1.0426373481750488,
+            "nodeStrategyEv": 0.6723780632019043,
             "ownReachWeight": 1.0,
             "strategy": [
               0.25,
-              0.75
+              0.75,
+              0.0
             ]
           },
           {
             "cards": "Qd Ad",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.1927710771560669,
-            "nodeStrategyEv": 1.1130918264389038,
+            "nodeStrategyEv": 0.7844992876052856,
             "ownReachWeight": 1.0,
             "strategy": [
               0.25,
-              0.75
+              0.75,
+              0.0
             ]
           },
           {
             "cards": "Qh Ah",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.1927710771560669,
-            "nodeStrategyEv": 1.0426373481750488,
+            "nodeStrategyEv": 0.6723780632019043,
             "ownReachWeight": 1.0,
             "strategy": [
               0.25,
-              0.75
+              0.75,
+              0.0
             ]
           },
           {
             "cards": "Qs As",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.2409638613462448,
-            "nodeStrategyEv": 1.475221037864685,
+            "nodeStrategyEv": 1.3844226598739624,
             "ownReachWeight": 1.0,
             "strategy": [
               0.25,
-              0.75
+              0.75,
+              0.0
             ]
           }
         ],
         "path": [],
         "pot": 2.0,
         "stacks": [
-          1.0,
-          1.0
+          4.0,
+          4.0
         ]
       },
       {
@@ -349,10 +377,11 @@
             "cards": "Tc Jc",
             "inputRangeWeight": 0.5,
             "marginalReachMass": 0.04216867312788963,
-            "nodeStrategyEv": 0.32398083806037903,
+            "nodeStrategyEv": -0.21231579780578613,
             "ownReachWeight": 0.5,
             "strategy": [
               1.0,
+              0.0,
               0.0
             ]
           },
@@ -360,10 +389,11 @@
             "cards": "Td Jd",
             "inputRangeWeight": 0.5,
             "marginalReachMass": 0.04216867312788963,
-            "nodeStrategyEv": 0.38949310779571533,
+            "nodeStrategyEv": -0.07922424376010895,
             "ownReachWeight": 0.5,
             "strategy": [
               1.0,
+              0.0,
               0.0
             ]
           },
@@ -371,10 +401,11 @@
             "cards": "Th Jh",
             "inputRangeWeight": 0.5,
             "marginalReachMass": 0.04216867312788963,
-            "nodeStrategyEv": 0.32398083806037903,
+            "nodeStrategyEv": -0.21231579780578613,
             "ownReachWeight": 0.5,
             "strategy": [
               1.0,
+              0.0,
               0.0
             ]
           },
@@ -382,10 +413,11 @@
             "cards": "Ts Js",
             "inputRangeWeight": 0.5,
             "marginalReachMass": 0.04216867312788963,
-            "nodeStrategyEv": 0.822393536567688,
+            "nodeStrategyEv": 0.8002346754074097,
             "ownReachWeight": 0.5,
             "strategy": [
               1.0,
+              0.0,
               0.0
             ]
           },
@@ -393,33 +425,36 @@
             "cards": "Qc Kc",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.07228915393352509,
-            "nodeStrategyEv": 1.958754301071167,
+            "nodeStrategyEv": 1.6059924364089966,
             "ownReachWeight": 1.0,
             "strategy": [
               0.0,
-              1.0
+              1.0,
+              0.0
             ]
           },
           {
             "cards": "Qd Kd",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.07228915393352509,
-            "nodeStrategyEv": 2.0037038326263428,
+            "nodeStrategyEv": 1.6758522987365723,
             "ownReachWeight": 1.0,
             "strategy": [
               0.0,
-              1.0
+              1.0,
+              0.0
             ]
           },
           {
             "cards": "Qh Kh",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.07228915393352509,
-            "nodeStrategyEv": 1.958754301071167,
+            "nodeStrategyEv": 1.6059924364089966,
             "ownReachWeight": 1.0,
             "strategy": [
               0.0,
-              1.0
+              1.0,
+              0.0
             ]
           }
         ],
@@ -428,8 +463,8 @@
         ],
         "pot": 2.0,
         "stacks": [
-          1.0,
-          1.0
+          4.0,
+          4.0
         ]
       },
       {
@@ -440,88 +475,96 @@
             "cards": "Jc Qc",
             "inputRangeWeight": 0.25,
             "marginalReachMass": 0.024096384644508362,
-            "nodeStrategyEv": -0.1712120920419693,
+            "nodeStrategyEv": 0.06380883604288101,
             "ownReachWeight": 0.25,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Jd Qd",
             "inputRangeWeight": 0.25,
             "marginalReachMass": 0.024096384644508362,
-            "nodeStrategyEv": -0.0919191911816597,
+            "nodeStrategyEv": 0.1870446503162384,
             "ownReachWeight": 0.25,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Jh Qh",
             "inputRangeWeight": 0.25,
             "marginalReachMass": 0.024096384644508362,
-            "nodeStrategyEv": -0.1712120920419693,
+            "nodeStrategyEv": 0.06380883604288101,
             "ownReachWeight": 0.25,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Js Qs",
             "inputRangeWeight": 0.25,
             "marginalReachMass": 0.03614457696676254,
-            "nodeStrategyEv": 0.4164983034133911,
+            "nodeStrategyEv": 0.9772189855575562,
             "ownReachWeight": 0.25,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Qc Ac",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.024096384644508362,
-            "nodeStrategyEv": -0.22929297387599945,
+            "nodeStrategyEv": -0.026459475979208946,
             "ownReachWeight": 0.25,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Qd Ad",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.024096384644508362,
-            "nodeStrategyEv": -0.1323232352733612,
+            "nodeStrategyEv": 0.12424931675195694,
             "ownReachWeight": 0.25,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Qh Ah",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.024096384644508362,
-            "nodeStrategyEv": -0.22929297387599945,
+            "nodeStrategyEv": -0.026459475979208946,
             "ownReachWeight": 0.25,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Qs As",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.03614457696676254,
-            "nodeStrategyEv": 0.42457911372184753,
+            "nodeStrategyEv": 0.9897780418395996,
             "ownReachWeight": 0.25,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           }
         ],
@@ -531,8 +574,8 @@
         ],
         "pot": 3.0,
         "stacks": [
-          0.0,
-          1.0
+          3.0,
+          4.0
         ]
       },
       {
@@ -543,77 +586,84 @@
             "cards": "Jc Qc",
             "inputRangeWeight": 0.25,
             "marginalReachMass": 0.0004016064340248704,
-            "nodeStrategyEv": 1.3986743688583374,
+            "nodeStrategyEv": 1.6488755941390991,
             "ownReachWeight": 0.25,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Jd Qd",
             "inputRangeWeight": 0.25,
             "marginalReachMass": 0.0004016064340248704,
-            "nodeStrategyEv": 1.3986743688583374,
+            "nodeStrategyEv": 1.6488755941390991,
             "ownReachWeight": 0.25,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Jh Qh",
             "inputRangeWeight": 0.25,
             "marginalReachMass": 0.0004016064340248704,
-            "nodeStrategyEv": 1.3986743688583374,
+            "nodeStrategyEv": 1.6488755941390991,
             "ownReachWeight": 0.25,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Js Qs",
             "inputRangeWeight": 0.25,
             "marginalReachMass": 0.0004016064340248704,
-            "nodeStrategyEv": 2.15625,
+            "nodeStrategyEv": 3.1879289150238037,
             "ownReachWeight": 0.25,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Qc Ac",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.0005354752065613866,
-            "nodeStrategyEv": 1.5539772510528564,
+            "nodeStrategyEv": 1.9643815755844116,
             "ownReachWeight": 0.25,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Qd Ad",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.0005354752065613866,
-            "nodeStrategyEv": 1.5539772510528564,
+            "nodeStrategyEv": 1.9643815755844116,
             "ownReachWeight": 0.25,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Qh Ah",
             "inputRangeWeight": 1.0,
             "marginalReachMass": 0.0005354752065613866,
-            "nodeStrategyEv": 1.5539772510528564,
+            "nodeStrategyEv": 1.9643815755844116,
             "ownReachWeight": 0.25,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           }
         ],
@@ -624,8 +674,8 @@
         ],
         "pot": 2.0,
         "stacks": [
-          1.0,
-          1.0
+          4.0,
+          4.0
         ]
       },
       {
@@ -635,45 +685,49 @@
           {
             "cards": "Tc Jc",
             "inputRangeWeight": 0.5,
-            "marginalReachMass": 0.0004016064340248704,
-            "nodeStrategyEv": 2.0208334922790527,
+            "marginalReachMass": 0.0002677376032806933,
+            "nodeStrategyEv": 2.7681758403778076,
             "ownReachWeight": 0.5,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Td Jd",
             "inputRangeWeight": 0.5,
-            "marginalReachMass": 0.00033467201865278184,
-            "nodeStrategyEv": 2.001136541366577,
+            "marginalReachMass": 0.0002231146936537698,
+            "nodeStrategyEv": 2.7288625240325928,
             "ownReachWeight": 0.5,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Th Jh",
             "inputRangeWeight": 0.5,
-            "marginalReachMass": 0.00033467201865278184,
-            "nodeStrategyEv": 2.001136541366577,
+            "marginalReachMass": 0.0002231146936537698,
+            "nodeStrategyEv": 2.7288625240325928,
             "ownReachWeight": 0.5,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Ts Js",
             "inputRangeWeight": 0.5,
-            "marginalReachMass": 0.00033467201865278184,
-            "nodeStrategyEv": 2.096590995788574,
+            "marginalReachMass": 0.0002231146936537698,
+            "nodeStrategyEv": 2.9193789958953857,
             "ownReachWeight": 0.5,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
@@ -701,8 +755,8 @@
         ],
         "pot": 2.0,
         "stacks": [
-          1.0,
-          1.0
+          4.0,
+          4.0
         ]
       },
       {
@@ -712,67 +766,73 @@
           {
             "cards": "Jd Qd",
             "inputRangeWeight": 0.25,
-            "marginalReachMass": 1.5212364132821676e-6,
-            "nodeStrategyEv": 1.125,
-            "ownReachWeight": 0.125,
+            "marginalReachMass": 6.761051167814003e-7,
+            "nodeStrategyEv": 1.111111044883728,
+            "ownReachWeight": 0.0833333358168602,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Jh Qh",
             "inputRangeWeight": 0.25,
-            "marginalReachMass": 2.2818546767666703e-6,
-            "nodeStrategyEv": 1.125,
-            "ownReachWeight": 0.125,
+            "marginalReachMass": 1.014157646750391e-6,
+            "nodeStrategyEv": 1.111111044883728,
+            "ownReachWeight": 0.0833333358168602,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Js Qs",
             "inputRangeWeight": 0.25,
-            "marginalReachMass": 1.5212364132821676e-6,
-            "nodeStrategyEv": 1.125,
-            "ownReachWeight": 0.125,
+            "marginalReachMass": 6.761051167814003e-7,
+            "nodeStrategyEv": 1.111111044883728,
+            "ownReachWeight": 0.0833333358168602,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Qd Ad",
             "inputRangeWeight": 1.0,
-            "marginalReachMass": 2.2818546767666703e-6,
-            "nodeStrategyEv": 0.12499992549419403,
-            "ownReachWeight": 0.125,
+            "marginalReachMass": 1.014157646750391e-6,
+            "nodeStrategyEv": -0.7777778506278992,
+            "ownReachWeight": 0.0833333358168602,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Qh Ah",
             "inputRangeWeight": 1.0,
-            "marginalReachMass": 2.2818546767666703e-6,
-            "nodeStrategyEv": 0.12499992549419403,
-            "ownReachWeight": 0.125,
+            "marginalReachMass": 1.014157646750391e-6,
+            "nodeStrategyEv": -0.7777778506278992,
+            "ownReachWeight": 0.0833333358168602,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           },
           {
             "cards": "Qs As",
             "inputRangeWeight": 1.0,
-            "marginalReachMass": 2.2818546767666703e-6,
-            "nodeStrategyEv": 0.12499992549419403,
-            "ownReachWeight": 0.125,
+            "marginalReachMass": 1.014157646750391e-6,
+            "nodeStrategyEv": -0.7777778506278992,
+            "ownReachWeight": 0.0833333358168602,
             "strategy": [
-              0.5,
-              0.5
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
             ]
           }
         ],
@@ -786,8 +846,8 @@
         ],
         "pot": 2.0,
         "stacks": [
-          1.0,
-          1.0
+          4.0,
+          4.0
         ]
       }
     ],
@@ -795,9 +855,9 @@
       "board": "Ks 9s 2d",
       "heroActsFirst": false,
       "heroPosition": "IP",
-      "heroStack": 1.0,
+      "heroStack": 4.0,
       "initialPot": 2.0,
-      "iterations": 3000000,
+      "iterations": 200,
       "ranges": {
         "IP": {
           "JTs": 0.5,
@@ -809,17 +869,17 @@
         }
       },
       "villainPosition": "OOP",
-      "villainStack": 1.0
+      "villainStack": 4.0
     },
     "solved": {
-      "exploitability": 2.0828247215831652e-6,
-      "heroBestResponseEv": 0.2506795823574066,
-      "villainBestResponseEv": -0.2506754398345947
+      "exploitability": 9.796142876439262e-6,
+      "heroBestResponseEv": 0.5269834995269775,
+      "villainBestResponseEv": -0.5269639492034912
     },
     "uniform": {
-      "exploitability": 0.4103824496269226,
-      "heroBestResponseEv": 0.4461026191711426,
-      "villainBestResponseEv": 0.37466228008270264
+      "exploitability": 0.9547656178474426,
+      "heroBestResponseEv": 1.389739990234375,
+      "villainBestResponseEv": 0.5197912454605103
     }
   }
 }

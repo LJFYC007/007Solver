@@ -8,7 +8,7 @@ Use the shared build/test commands in the [README](../README.md#run-the-solver-t
 
 Seven offline cases cover betting rules, uniform-policy best responses (BR), two reference solves, and fixed-policy node EV/reach. CTest runs one entry, `solver`, with a 60-second timeout and writes `build/solver-test-results.json`. Windows/macOS CI uses this same suite.
 
-The weighted/raise fixtures use 3M/8M ESCFR updates and 200 DCFR updates (1 and 4 workers, including continued runs), require exploitability <= `0.01`, and compare value intervals with external GT to `1e-5`. Fixed-policy expectations are stored in `fixtures/correctness-reference.json`. Performance measurement is handled by the separate benchmark.
+The weighted/raise fixtures use pot 2 with stacks 4/8 respectively and 200 DCFR full-player updates (1 and 4 workers, including continued runs), require exploitability <= `0.01`, and compare value intervals with external GT to `1e-5`. Fixed-policy expectations are stored in `fixtures/correctness-reference.json`. The local Release target is under 20 seconds for the complete correctness suite; the 60-second CTest timeout allows for slower CI machines. Larger-workload performance measurement is handled by the separate benchmark.
 
 ## Explicit wide-range benchmark
 
@@ -18,29 +18,29 @@ cmake --build --preset release --target 007SolverBenchmark
 ./build/007SolverBenchmark
 # Optional: choose a new report path; existing reports are never overwritten.
 ./build/007SolverBenchmark --report=build/benchmark-results/sample.json
-# DCFR requires an explicit iteration budget.
-./build/007SolverBenchmark --algorithm=dcfr --iterations=48 --workers=8
+# Optional: override the fixture's DCFR budget and OpenMP worker count.
+./build/007SolverBenchmark --iterations=200 --workers=8
 ```
 
 On Windows the executable has an `.exe` suffix. Run the benchmark separately from other builds/solves when comparing timings.
 
-The benchmark is excluded from the default build, CTest, CI and pre-commit execution. It uses `fixtures/utg-bb-wide.json`: UTG/IP versus BB/OOP, flop `Ac Kh Qs`, pot 5, stacks 2.5 each, no rake, default sizing and **200M ESCFR sampled updates by default**, retaining complete ranges and turn/river play.
+The benchmark is excluded from the default build, CTest, CI and pre-commit execution. It uses `fixtures/utg-bb-wide.json`: UTG/IP versus BB/OOP, flop `Ac Kh Qs`, pot 5, stacks 7.5 each (stack-to-pot ratio 1.5), no rake, default sizing and **200 DCFR full-player updates by default**, retaining complete ranges and turn/river play. Half-pot bets are distinct from all-ins, allowing raises and betting across streets.
 
-`--algorithm` and `--iterations` select the solver and budget; DCFR requires an explicit budget, and `--workers` applies only to DCFR. Compare time at equal exploitability, since iteration counts measure different work.
+`--iterations` overrides the fixture budget; `--workers` selects the OpenMP worker count (otherwise the runtime default, configurable with `OMP_NUM_THREADS`). The optional `--algorithm=dcfr` spelling is accepted; no other algorithm is supported. Compare time at equal exploitability and record the worker count.
 
 It checks exact input/GT equality, uniform BRs and exploitability within `1e-5`, finite trained metrics, value-interval compatibility, the BR-average identity and exploitability in `[-1e-5, 0.025]`. Root EVs, reach and probabilities must be valid; equilibrium action frequencies and per-hand EVs are not compared.
 
 Unique JSON reports default to `build/benchmark-results/`. They include algorithm, worker count, iterations and unit, build/workload information, phase timings, metrics and process memory. Windows reports private committed bytes and peak working set; macOS reports physical footprint and peak resident bytes. These OS metrics are not interchangeable. Training state is released before trained evaluation. Failures retain diagnostics and return nonzero; `status: running` reports are incomplete.
 
-The local Release performance target is under five minutes; timing is recorded, not asserted. Local JSON reports are measurements, not replacement reference answers.
+The local Release performance target is under five minutes for the complete benchmark, including reference checks and root analysis; timing is recorded, not asserted. Local JSON reports are measurements, not replacement reference answers. Timings from the former stacks-2.5 workload are not directly comparable to this deeper workload.
 
-Seed 42 does not guarantee identical ESCFR sampled strategies across standard libraries; retain the independent reference tolerances on every platform.
+On 2026-09-09, a local Release run on an Apple M4 Pro with 24 GiB RAM completed all seven correctness tests in 19.44 seconds. The wide benchmark completed in 171.66 seconds with 8 workers and 200 updates: 43.75 seconds for uniform evaluation, 6.68 for training, 49.77 for trained evaluation and 71.22 for the root query. Its 164,416-node tree reached exploitability 0.00583 chips (0.117% of the initial pot), within the unchanged 0.025-chip limit.
 
 Rebuild and run after changing source; CTest and normal builds do not refresh benchmark reports. Check `status` before using the numbers. Reports are local, ignored artifacts and record compiler/configuration but not Git revision or dirty state. Use a unique `--report` filename containing the commit ID and timestamp, and note any uncommitted changes separately when comparing implementations.
 
 ## Independent GT generation
 
-`fixtures/correctness-reference.json` and `fixtures/benchmark-reference.json` use [b-inary/postflop-solver](https://github.com/b-inary/postflop-solver) at commit `9d1509fe5077d019825f833eed04b16d342dfda1`, with dependencies pinned by `oracle/Cargo.lock`.
+`fixtures/correctness-reference.json` and `fixtures/benchmark-reference.json` use [b-inary/postflop-solver](https://github.com/b-inary/postflop-solver) at commit `9d1509fe5077d019825f833eed04b16d342dfda1`, with dependencies pinned by `oracle/Cargo.lock`. The oracle enables its existing Rayon support; set `RAYON_NUM_THREADS` to limit reference-generation workers.
 
 On macOS, set `export RUSTFLAGS='-A dangerous_implicit_autorefs -A mismatched_lifetime_syntaxes'` instead of the PowerShell assignment below; the Cargo commands are otherwise identical.
 

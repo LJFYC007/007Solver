@@ -9,9 +9,9 @@
       "board": "Ac Kh Qs",
       "heroActsFirst": false,
       "heroPosition": "UTG",
-      "heroStack": 2.5,
+      "heroStack": 7.5,
       "initialPot": 5.0,
-      "iterations": 200000000,
+      "iterations": 200,
       "ranges": {
         "BB": {
           "22": 1.0,
@@ -92,17 +92,17 @@
         }
       },
       "villainPosition": "BB",
-      "villainStack": 2.5
+      "villainStack": 7.5
     },
     "solved": {
       "exploitability": 9.94873062154511e-6,
-      "heroBestResponseEv": 1.4482460021972656,
-      "villainBestResponseEv": -1.4482260942459106
+      "heroBestResponseEv": 1.5115724802017212,
+      "villainBestResponseEv": -1.5115525722503662
     },
     "uniform": {
-      "exploitability": 1.2822321653366089,
-      "heroBestResponseEv": 2.477525472640991,
-      "villainBestResponseEv": 0.08693894743919373
+      "exploitability": 2.453266143798828,
+      "heroBestResponseEv": 4.888581275939941,
+      "villainBestResponseEv": 0.01795123517513275
     }
   }
 }

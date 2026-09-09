@@ -18,7 +18,7 @@ resources/default.json -> C++ solver service <-> Tauri/Rust <-> React UI
 
 The application currently:
 
-- runs DCFR or external-sampling CFR (ESCFR) over weighted hero and villain ranges;
+- runs CPU DCFR over weighted hero and villain ranges;
 - navigates decision, chance, and terminal nodes along the selected action line;
 - displays a 13 x 13 hand matrix with mixed-strategy colors;
 - reports aggregate action frequencies, combo strategies, and reach weights;
@@ -34,7 +34,7 @@ The application automatically loads the single bundled scenario in [`resources/d
 
 The default scenario uses an `Ac Kh Qs` flop, BTN and LJ weighted ranges, a pot of 5, stacks of 20, and 200 DCFR full-player updates. Edit `resources/default.json` before launching to use a different flop scenario. Range entries use pairs and suited/offsuit hand classes such as `"AA"`, `"AKs"`, and `"AKo"`. Each numeric weight is applied to every exact combo in that class. Amounts are in chips with 0.1-chip precision; the scenario does not define a big-blind conversion. The modeled game has no rake, uses a 0.1-chip minimum bet, and starts a fresh betting round on the flop.
 
-The optional `algorithm` field accepts `dcfr` or `escfr` (the default when omitted). Each iteration updates one player: DCFR traverses the full tree; ESCFR samples a traversal. Their iteration counts are not comparable.
+DCFR is the sole solver. The optional `algorithm` field accepts only `dcfr`, which is also the default. Each iteration updates one player across the full tree.
 
 Training stops at the configured iteration count. The bundled scenario demonstrates the explorer; its default budget does not guarantee convergence. Exploitability is reported in the service diagnostics, and "Solution ready" means the solve has finished without enforcing an accuracy threshold.
 
@@ -106,7 +106,7 @@ ctest --test-dir build --output-on-failure
 
 The suite checks betting rules and settlement, an independent best-response baseline, two small reference solves, and fixed-policy node EVs and reach weights. Reference answers are checked into the repository; routine tests run offline. See [`tests/README.md`](tests/README.md) for coverage and reference generation.
 
-CTest enforces a 60-second timeout for the suite. CI runs the same commands on Windows and macOS.
+The local Release target is under 20 seconds for the whole correctness suite. CTest retains a 60-second timeout to allow for slower CI machines. CI runs the same commands on Windows and macOS.
 
 ## Repository Checks
 
