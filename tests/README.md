@@ -19,22 +19,30 @@ cmake --build --preset release --target 007SolverBenchmark
 # Optional: choose a new report path; existing reports are never overwritten.
 ./build/007SolverBenchmark --report=build/benchmark-results/sample.json
 # Optional: override the fixture's DCFR budget and OpenMP worker count.
-./build/007SolverBenchmark --iterations=200 --workers=8
+./build/007SolverBenchmark --iterations=1900 --workers=12
 ```
 
 On Windows the executable has an `.exe` suffix. Run the benchmark separately from other builds/solves when comparing timings.
 
-The benchmark is excluded from the default build, CTest, CI and pre-commit execution. It uses `fixtures/utg-bb-wide.json`: UTG/IP versus BB/OOP, flop `Ac Kh Qs`, pot 5, stacks 7.5 each (stack-to-pot ratio 1.5), no rake, default sizing and **200 DCFR full-player updates by default**, retaining complete ranges and turn/river play. Half-pot bets are distinct from all-ins, allowing raises and betting across streets.
+The benchmark is excluded from the default build, CTest, CI and pre-commit execution. It uses `fixtures/utg-bb-wide.json`: UTG/IP versus BB/OOP, flop `Ac Kh Qs`, pot 5, stacks 20 each (stack-to-pot ratio 4), no rake, half-pot/pot-sized/all-in bets, all-in raises and **1900 DCFR full-player updates by default**, retaining complete ranges and turn/river play. The benchmark harness and external oracle both read the fixture's `benchmark.betPercentages` list (`[50, 100]`) and append maximum bets/raises. This benchmark-only configuration produces 1,035,060 nodes, retaining distinct action and concrete-card histories.
 
-`--iterations` overrides the fixture budget; `--workers` selects the OpenMP worker count (otherwise the runtime default, configurable with `OMP_NUM_THREADS`). The optional `--algorithm=dcfr` spelling is accepted; no other algorithm is supported. Compare time at equal exploitability and record the worker count.
+`--iterations` overrides the fixture budget; `--workers` selects the OpenMP training worker count (otherwise the runtime default, configurable with `OMP_NUM_THREADS`). Snapshot evaluation and analysis are serial. The optional `--algorithm=dcfr` spelling is accepted; no other algorithm is supported. Compare time at equal exploitability and record the worker count.
 
-It checks exact input/GT equality, uniform BRs and exploitability within `1e-5`, finite trained metrics, value-interval compatibility, the BR-average identity and exploitability in `[-1e-5, 0.025]`. Root EVs, reach and probabilities must be valid; equilibrium action frequencies and per-hand EVs are not compared.
+It checks exact input/GT equality, uniform BRs and exploitability within `1e-5`, finite trained metrics, value-interval compatibility, the BR-average identity and exploitability in `[-1e-5, 0.0005]` (at most 0.01% of the initial pot). Root EVs, reach and probabilities must be valid; equilibrium action frequencies and per-hand EVs are not compared.
 
-Unique JSON reports default to `build/benchmark-results/`. They include algorithm, worker count, iterations and unit, build/workload information, phase timings, metrics and process memory. Windows reports private committed bytes and peak working set; macOS reports physical footprint and peak resident bytes. These OS metrics are not interchangeable. Training state is released before trained evaluation. Failures retain diagnostics and return nonzero; `status: running` reports are incomplete.
+Unique JSON reports default to `build/benchmark-results/`. They include algorithm, worker count, iterations and unit, the exploitability limit, build/workload information, phase timings, metrics and process memory. Windows reports private committed bytes and peak working set; macOS reports physical footprint and peak resident bytes. These OS metrics are not interchangeable. Training state is released before trained evaluation. Failures retain diagnostics and return nonzero; `status: running` reports are incomplete.
 
-The local Release performance target is under five minutes for the complete benchmark, including reference checks and root analysis; timing is recorded, not asserted. Local JSON reports are measurements, not replacement reference answers. Timings from the former stacks-2.5 workload are not directly comparable to this deeper workload.
+The local Release performance target is **two to five minutes** for the complete benchmark, including reference checks and root analysis, on the documented machine with 12 training workers. Timing is recorded, not asserted: faster implementations should finish sooner, and other hardware can differ. Local JSON reports are measurements, not replacement reference answers. The older stacks-2.5 and stacks-7.5 workloads are not directly comparable to this larger tree.
 
-On 2026-09-09, a local Release run on an Apple M4 Pro with 24 GiB RAM completed all seven correctness tests in 19.44 seconds. The wide benchmark completed in 171.66 seconds with 8 workers and 200 updates: 43.75 seconds for uniform evaluation, 6.68 for training, 49.77 for trained evaluation and 71.22 for the root query. Its 164,416-node tree reached exploitability 0.00583 chips (0.117% of the initial pot), within the unchanged 0.025-chip limit.
+Local measurements on 2026-09-09 used the same Release build configuration on an Apple M4 Pro with 24 GiB RAM: 1,035,060 nodes, 1,900 full-player updates and 12 workers. Times below are seconds.
+
+| Implementation | Total | Training | Uniform evaluation | Snapshot export | Trained evaluation | Root query |
+|---|---:|---:|---:|---:|---:|---:|
+| Initial shared traversal baseline | 287.31 | 281.16 | 1.60 | 0.90 | 1.95 | 1.29 |
+| Zero-tie showdown and terminal own-reach fast paths | 225.34 | 219.79 | 1.20 | 1.04 | 1.71 | 1.12 |
+| Action-major backups/regret updates and dynamic terminal batches | **186.96** | **181.49** | 1.17 | 1.02 | 1.67 | 1.08 |
+
+The latest full run passed in **3 minutes 7 seconds**, reducing total time by **17.0%** from the fast-path baseline and **34.9%** from the initial baseline. Training time fell another **17.4%**. Uniform/trained metrics and the complete root report matched the preceding baseline exactly, with the same fixture, iteration budget and independent reference. Final exploitability remained **0.00036353 chips (0.00727% of the initial pot)**, below the 0.0005-chip limit; peak resident memory remained about 6.61 GiB. The latest local reports are `action-major-20260909-204547.json` and `action-major-20260909-204547-comparison.json` under `build/benchmark-results/`. These are single-run measurements, not timing guarantees.
 
 Rebuild and run after changing source; CTest and normal builds do not refresh benchmark reports. Check `status` before using the numbers. Reports are local, ignored artifacts and record compiler/configuration but not Git revision or dirty state. Use a unique `--report` filename containing the commit ID and timestamp, and note any uncommitted changes separately when comparing implementations.
 
@@ -52,9 +60,11 @@ cargo run --locked --release --manifest-path tests/oracle/Cargo.toml --target-di
 cargo run --locked --release --manifest-path tests/oracle/Cargo.toml --target-dir build/solver-test-oracle -- --wide
 ```
 
-Generation requires exploitability <= `1e-5` within 10,000 external iterations; the wide entry fails before writing GT if precision is unmet. GT generation is outside the benchmark time budget. Review generated diffs and rerun the relevant executable; never substitute this solver's output for independent answers or loosen tolerances to pass.
+Generation requires exploitability <= `1e-5` within 10,000 external iterations (each updates both players); the wide entry fails before writing GT if precision is unmet. GT generation is outside the benchmark time budget. Review generated diffs and rerun the relevant executable; never substitute this solver's output for independent answers or loosen tolerances to pass.
 
-The adapter scales chips/EVs by 500 and maps external OOP/IP to villain/hero. It uses half-pot/maximum bets, maximum raises, and no rake, automatic all-in thresholds or size merging. Current fixture sizes avoid rounding differences. Root BRs use net payoff minus initial pot/2; their average is exploitability. Node EVs use the queried node's contribution baseline. All-in runouts remain complete, with conditional chance denominators 45/44.
+The 2026-09-09 wide reference reached `9.94873e-6` chips after 5,680 external iterations, using the pinned solver and 8 Rayon workers. The benchmark iteration budget is metadata and does not affect this independent solve; its recorded budget was updated after timing calibration without changing the generated reference values. The smaller correctness reference was not regenerated.
+
+The adapter scales chips/EVs by 500 and maps external OOP/IP to villain/hero. Correctness fixtures use half-pot/maximum bets; the wide fixture uses half-pot/pot-sized/maximum bets. Both use maximum raises and no rake, automatic all-in thresholds or size merging. Current fixture sizes avoid rounding differences. Root BRs use net payoff minus initial pot/2; their average is exploitability. Node EVs use the queried node's contribution baseline. All-in runouts remain complete, with conditional chance denominators 45/44.
 
 ### Wide-range source
 

@@ -49,11 +49,15 @@ Chance edges list cards absent from the public board. The solver rejects outcome
 
 ## Training, result and evaluation
 
-`SolveProblem` holds a shared immutable game and the two ranges. `CpuDcfrSession` owns regrets, strategy sums and traversal buffers.
+`SolveProblem` holds a shared immutable game and the two ranges. `CpuDcfrSession` owns regrets, strategy sums and traversal buffers. `HandTraversal` supplies the concrete CPU layout and hand-vector kernels used by both training and snapshot evaluation; it owns no regrets or averaging state. Each operation builds its layout for the relevant subtree, retaining original `NodeId` values alongside compact local buffer indices. Its prepared hand/rank tables and action-major strategy offsets are reused throughout that operation.
 
-`CpuDcfrSession` uses DCFR with fixed `(alpha, beta, gamma) = (1.5, 0, 2)`. Each iteration updates one player across the full tree; successive `Run()` calls preserve player alternation and discount counters. OpenMP processes nodes in parallel within each depth.
+`CpuDcfrSession` uses DCFR with fixed `(alpha, beta, gamma) = (1.5, 0, 2)`. Each iteration updates one player across the full tree; successive `Run()` calls preserve player alternation and discount counters. OpenMP statically distributes reach propagation and backups within each depth. Terminal evaluation uses dynamic batches of 64 nodes to balance differing fold/showdown costs. The barriers between phases and depths remain in place, and each terminal writes a separate value row.
+
+Shared value backups and DCFR regret/average updates traverse actions outside and contiguous hands inside. Per-call stack scratch holds up to 1,326 exact hands, avoiding allocation in the hot loops and sharing no mutable scratch between workers. Each hand retains its action accumulation order; shared value sums stay in `double` until the final `float` store, positive-regret sums stay in `float`, and best-response backups retain maximum selection.
 
 DCFR own reach starts at one and includes only that player's action probabilities; opponent reach includes normalized range weights, opponent actions and chance. Terminal values are divided by each hand's fixed compatible root-opponent mass. Reach is not renormalized at each node.
+
+Training propagates own reach only to nonterminal nodes; terminal evaluation reads opponent reach, which is still propagated to every child. Omitted terminal own-reach rows are not cleared or read and are overwritten when that player becomes the opponent on the next update. Shared terminal evaluation skips the compatible-mass baseline for showdowns with exactly zero tie utility, initializing values to zero before the win/loss sweeps. Folds and subtrees with nonzero tie utility retain the full baseline calculation and its small-mass precision fallback.
 
 The service explicitly trains and exports one `StrategySnapshot`. The training session goes out of scope immediately after export. The service then calls `EvaluateExploitability()` and constructs a `SolveResult`. The result keeps the problem, snapshot and single solve report alive for analysis.
 
@@ -61,7 +65,7 @@ The report records algorithm `dcfr`, execution backend `cpu`, completed full-pla
 
 Snapshots store node offsets, sorted exact hands and a contiguous probability buffer. DCFR exports all board-compatible hands in each decision's acting range in node/hand order, using a uniform distribution when strategy sums are zero. The public entry constructor also accepts unsorted fixed policies. Both construction paths check decision-node identity, blockers, action counts, duplicate entries and finite non-negative probabilities summing to one within `1e-5`. `FindStrategy()` returns a borrowed probability pointer or null for a missing entry; its length is the node's action count, and destruction, move or assignment of the snapshot invalidates it. `StrategyOrUniform()` returns an owning vector and explicitly supplies a uniform strategy for entries absent from a supplied fixed policy. A result and its snapshot must refer to the same compiled game.
 
-`EvaluateExploitability()` computes each player's best response against the fixed snapshot. Exploitability is half the sum of their best-response values. Evaluation is a separate operation from training.
+`EvaluateExploitability()` packs the fixed snapshot once and computes each player's best response with the shared hand-vector kernels. Opponent reach is propagated once per public node, terminal values use sorted showdown ranks and blocker masses, and each responding hand chooses its maximum-valued action after aggregating opponent hands. A fixed compatible root-opponent mass normalizes each hand throughout the pass; root aggregation restores the joint range weighting. Exploitability is half the sum of the best-response values. Snapshot evaluation runs serially, allocates only the selected subtree's policy/reach/value buffers, and releases them when the operation finishes. It does not retain training state.
 
 The iteration budget is fixed. The service logs exploitability to stderr and reports ready after evaluation; it does not enforce a convergence threshold.
 
@@ -74,7 +78,7 @@ Two consumers use different baselines:
 - Solver utility starts at the tree root, subtracts half the initial pot from player 0's net payoff, and negates for player 1. These utilities sum to zero.
 - Node strategy EV starts at the queried node. The pot already there is dead money; the two players' EVs sum to that pot.
 
-`AnalysisSession` assembles a `NodeReport`. `ReachCalculator` caches the reach data for queried nodes, deriving it from parent edges. `CalculateNodeHandEv()` evaluates the fixed strategy from the queried node, conditioned on the selected hand and its compatible opponent reach.
+`AnalysisSession` assembles a `NodeReport`. `ReachCalculator` caches the reach data for queried nodes, deriving it from parent edges. `EvaluateNodeStrategyEvs()` evaluates all acting-player hands in one fixed-policy subtree pass, using the same kernels as training and best response, with strategy-weighted backups. Its starting opponent weights are proportional to input weights times that opponent's ancestor action probabilities, computed in `double` and filtered against the queried board. The selected hand's own reach and the earlier chance-probability factor cancel under conditioning. Each hand's compatible starting mass remains the denominator for the whole subtree. Terminal contributions are measured from the queried node; adding half that node's pot to the traversal's zero-sum values restores node net EV for either player. Existing joint reach still determines report eligibility, including null EV for hands with zero joint reach.
 
 Each reported hand carries:
 

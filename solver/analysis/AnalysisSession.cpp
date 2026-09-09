@@ -1,5 +1,6 @@
 #include "analysis/AnalysisSession.h"
-#include "analysis/NodeEvEvaluator.h"
+#include "engine/StrategyEvaluator.h"
+#include <algorithm>
 #include "game/BettingRules.h"
 #include "game/CompiledGame.h"
 #include <utility>
@@ -46,7 +47,6 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
         result_.Problem().ranges.For(player),
         marginalReachMasses,
         player == core::PlayerId::Player0() ? reach.ownReachWeights.player0 : reach.ownReachWeights.player1,
-        reach.jointReachMasses,
         player
     );
 
@@ -69,10 +69,12 @@ std::vector<HandReport> AnalysisSession::BuildHandReports(
     const core::Range& range,
     const ReachCalculator::HandWeights& marginalReachMasses,
     const ReachCalculator::HandWeights& ownReachWeights,
-    const ReachCalculator::JointReachMasses& jointReachMasses,
     core::PlayerId player
 ) const
 {
+    std::map<core::HoleCards, float> evs;
+    if (std::any_of(marginalReachMasses.begin(), marginalReachMasses.end(), [](const auto& entry) { return entry.second > 0.0f; }))
+        evs = engine::EvaluateNodeStrategyEvs(result_.Problem(), result_.Strategy(), nodeId, player);
     std::vector<HandReport> hands;
     const core::Board& board = result_.Problem().game->GetNode(nodeId).State().board;
     for (const auto& [hand, inputRangeWeight] : range.Entries())
@@ -89,9 +91,7 @@ std::vector<HandReport> AnalysisSession::BuildHandReports(
         if (marginalReachMass > 0.0f)
         {
             strategy = result_.Strategy().StrategyOrUniform({nodeId, hand});
-            nodeStrategyEv = CalculateNodeHandEv(
-                result_, nodeId, hand, player, reachCalculator_.BuildOpponentReachMassesForHand(jointReachMasses, player, hand)
-            );
+            nodeStrategyEv = evs.at(hand);
         }
 
         hands.push_back({

@@ -4,9 +4,12 @@
     "villainPosition": "BB",
     "heroActsFirst": false,
     "initialPot": 5.0,
-    "heroStack": 7.5,
-    "villainStack": 7.5,
-    "iterations": 200,
+    "heroStack": 20.0,
+    "villainStack": 20.0,
+    "iterations": 1900,
+    "benchmark": {
+        "betPercentages": [50, 100]
+    },
     "ranges": {
         "UTG": {
             "AA": 1.0,

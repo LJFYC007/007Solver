@@ -63,25 +63,6 @@ ReachCalculator::HandWeights ReachCalculator::BuildMarginalReachMasses(
     return marginalReachMasses;
 }
 
-ReachCalculator::HandWeights ReachCalculator::BuildOpponentReachMassesForHand(
-    const JointReachMasses& jointReachMasses,
-    core::PlayerId player,
-    core::HoleCards hand
-) const
-{
-    HandWeights opponentReachMasses;
-    for (const JointReach& jointReach : jointReachMasses)
-    {
-        const core::HoleCards actingHand = player == core::PlayerId::Player0() ? jointReach.player0Hand : jointReach.player1Hand;
-        if (actingHand != hand)
-            continue;
-
-        const core::HoleCards opponentHand = player == core::PlayerId::Player0() ? jointReach.player1Hand : jointReach.player0Hand;
-        opponentReachMasses[opponentHand] += jointReach.jointReachMass;
-    }
-    return opponentReachMasses;
-}
-
 ReachCalculator::JointReachMasses ReachCalculator::BuildInitialJointReachMasses(
     const core::RangeSet& ranges,
     const core::Board& board

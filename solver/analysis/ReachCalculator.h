@@ -38,11 +38,6 @@ public:
 
     const NodeReach& ReachFor(game::NodeId nodeId);
     HandWeights BuildMarginalReachMasses(const JointReachMasses& jointReachMasses, core::PlayerId player) const;
-    HandWeights BuildOpponentReachMassesForHand(
-        const JointReachMasses& jointReachMasses,
-        core::PlayerId player,
-        core::HoleCards hand
-    ) const;
 
 private:
     const engine::SolveResult& result_;

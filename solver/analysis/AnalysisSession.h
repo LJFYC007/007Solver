@@ -28,7 +28,6 @@ private:
         const core::Range& range,
         const ReachCalculator::HandWeights& marginalReachMasses,
         const ReachCalculator::HandWeights& ownReachWeights,
-        const ReachCalculator::JointReachMasses& jointReachMasses,
         core::PlayerId player
     ) const;
 };

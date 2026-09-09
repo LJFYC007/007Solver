@@ -6,12 +6,18 @@
   },
   "utg-bb-wide": {
     "scenario": {
+      "benchmark": {
+        "betPercentages": [
+          50,
+          100
+        ]
+      },
       "board": "Ac Kh Qs",
       "heroActsFirst": false,
       "heroPosition": "UTG",
-      "heroStack": 7.5,
+      "heroStack": 20.0,
       "initialPot": 5.0,
-      "iterations": 200,
+      "iterations": 1900,
       "ranges": {
         "BB": {
           "22": 1.0,
@@ -92,17 +98,17 @@
         }
       },
       "villainPosition": "BB",
-      "villainStack": 7.5
+      "villainStack": 20.0
     },
     "solved": {
-      "exploitability": 9.94873062154511e-6,
-      "heroBestResponseEv": 1.5115724802017212,
-      "villainBestResponseEv": -1.5115525722503662
+      "exploitability": 9.94873062154511e-06,
+      "heroBestResponseEv": 1.7111692428588867,
+      "villainBestResponseEv": -1.7111493349075317
     },
     "uniform": {
-      "exploitability": 2.453266143798828,
-      "heroBestResponseEv": 4.888581275939941,
-      "villainBestResponseEv": 0.01795123517513275
+      "exploitability": 5.79783296585083,
+      "heroBestResponseEv": 10.945857048034668,
+      "villainBestResponseEv": 0.6498085856437683
     }
   }
 }

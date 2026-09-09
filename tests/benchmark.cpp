@@ -30,6 +30,7 @@ using namespace solver;
 using Json = nlohmann::json;
 using Clock = std::chrono::steady_clock;
 constexpr double kTolerance = 1e-5;
+constexpr double kMaxExploitability = 0.0005; // 0.01% of the initial pot of 5.
 Json report;
 std::filesystem::path reportPath;
 Clock::time_point stageStart;
@@ -149,6 +150,14 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
         kTolerance
     );
     auto scenario = io::LoadScenario(fixturePath);
+    const auto& betPercentages = input.at("benchmark").at("betPercentages");
+    ASSERT_EQ(betPercentages, Json::array({50, 100}));
+    ASSERT_EQ(input.at("heroStack"), 20.0);
+    ASSERT_EQ(input.at("villainStack"), 20.0);
+    // Benchmark-only sizing; the external oracle reads the same fixture list.
+    scenario.game.bettingAbstraction.betSizes.clear();
+    for (const auto& percent : betPercentages)
+        scenario.game.bettingAbstraction.betSizes.push_back({game::BetSizeKind::PotFractionOfCurrentPot, percent.get<int>(), 100, {}});
     const auto problem =
         std::make_shared<const engine::SolveProblem>(engine::SolveProblem{game::CompileGame(scenario.game), std::move(scenario.ranges)});
     const int iterations = iterationBudget == 0 ? scenario.iterations : iterationBudget;
@@ -187,7 +196,18 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
         report["workers"] = session->WorkerCount();
         FinishStage("session_initialization");
         StartStage("training");
-        session->Run(iterations);
+        int lastProgress = 0;
+        session->Run(
+            iterations,
+            [&](int completed)
+            {
+                if (completed - lastProgress >= 100 || completed == iterations)
+                {
+                    std::cout << "Training: " << completed << " / " << iterations << " updates" << std::endl;
+                    lastProgress = completed;
+                }
+            }
+        );
         report["workers"] = session->WorkerCount();
         report["training_loop_seconds"] = session->TrainingTimeSeconds();
         report["completed_iterations"] = session->CompletedIterations();
@@ -209,7 +229,7 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
     CheckMetrics(actual);
     EXPECT_GE(actual.player0BestResponseEv, -solved.at("villainBestResponseEv").get<double>() - kTolerance);
     EXPECT_GE(actual.player1BestResponseEv, -solved.at("heroBestResponseEv").get<double>() - kTolerance);
-    EXPECT_LE(actual.exploitability, 0.025); // 0.5% of the fixed initial pot of 5.
+    EXPECT_LE(actual.exploitability, kMaxExploitability);
     ASSERT_FALSE(HasFailure());
 
     StartStage("analysis_initialization");
@@ -301,6 +321,7 @@ int main(int argc, char** argv)
             {"scenario_id", "utg-bb-wide"},
             {"algorithm", "dcfr"},
             {"iteration_unit", "full_player_update"},
+            {"exploitability_limit", kMaxExploitability},
             {"status", "running"},
             {"failures", Json::array()},
             {"build",

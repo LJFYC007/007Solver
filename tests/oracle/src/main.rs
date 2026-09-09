@@ -28,7 +28,17 @@ fn game_for(scenario: &Value) -> PostFlopGame {
         turn: NOT_DEALT,
         river: NOT_DEALT,
     };
-    let sizes = BetSizeOptions::try_from(("50%, a", "a")).unwrap();
+    let bet_percentages = scenario
+        .get("benchmark")
+        .map(|benchmark| benchmark["betPercentages"].as_array().unwrap().clone())
+        .unwrap_or_else(|| vec![json!(50)]);
+    let mut bets = bet_percentages
+        .iter()
+        .map(|percent| format!("{}%", percent.as_u64().unwrap()))
+        .collect::<Vec<_>>();
+    bets.push("a".to_owned());
+    let bet_sizes = bets.join(", ");
+    let sizes = BetSizeOptions::try_from((bet_sizes.as_str(), "a")).unwrap();
     let tree = TreeConfig {
         initial_state: BoardState::Flop,
         starting_pot: (scenario["initialPot"].as_f64().unwrap() * SCALE as f64).round() as i32,
@@ -171,7 +181,8 @@ fn main() {
                 .unwrap();
         // These values avoid different chip rounding / minimum-bet rules in the two solvers.
         assert_eq!(scenario["initialPot"], 5.0);
-        assert_eq!(scenario["heroStack"], 7.5);
+        assert_eq!(scenario["heroStack"], 20.0);
+        assert_eq!(scenario["benchmark"]["betPercentages"], json!([50, 100]));
         let mut game = game_for(&scenario);
         let uniform = metrics(&game);
         let exploitability = solve(&mut game, 10000, SCALE * 1e-5, true) / SCALE;
