@@ -9,9 +9,6 @@ edition = "2021"
 name = "007solver"
 path = "src/main.rs"
 
-[lib]
-name = "solver007_lib"
-
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

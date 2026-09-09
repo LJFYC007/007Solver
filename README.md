@@ -5,7 +5,7 @@
 <h1 align="center">007 Solver</h1>
 
 <p align="center">
-  A Windows desktop poker solver with a C++17 engine and a React/Tauri strategy explorer.
+  A Windows/macOS desktop poker solver with a C++17 engine and a React/Tauri strategy explorer.
 </p>
 
 ## Overview
@@ -40,96 +40,85 @@ Training stops at the configured iteration count. The bundled scenario demonstra
 
 ## Requirements
 
-- Windows with Visual Studio 2022 or newer and the **Desktop development with C++** workload
-- Microsoft Visual C++ x64 runtime, including `VCOMP140.DLL` (OpenMP)
+- macOS: Xcode Command Line Tools (`xcode-select --install`) and a libomp (OpenMP) runtime compatible with your OS; see the package requirements below
+- Windows: Visual Studio 2022 or newer with **Desktop development with C++**, plus Microsoft Edge WebView2 Runtime
+- Windows: Microsoft Visual C++ x64 runtime, including `VCOMP140.DLL` (OpenMP)
 - CMake 3.20 or newer
 - Ninja
 - Node.js 22 (22.13+) or 24+ and npm
-- Rust stable with the `x86_64-pc-windows-msvc` toolchain
-- Microsoft Edge WebView2 Runtime for the desktop application
+- [Rust stable via rustup](https://rust-lang.org/tools/install/), including rustfmt
 - Python 3, ClangFormat, and pre-commit for repository checks
 
-Run the native commands below from **Developer PowerShell for Visual Studio**, with `cl`, Ninja, and Cargo on `PATH`.
+Use Terminal on macOS or **Developer PowerShell for Visual Studio** on Windows. CMake, Ninja, the native C++ compiler and Cargo must be on `PATH`. Builds are native: Apple Silicon or Intel on macOS, x64 MSVC on Windows. Universal macOS bundles and cross-compilation are not configured. The solver uses the CPU; no NVIDIA GPU or CUDA installation is needed.
+
+On macOS with Homebrew, install CMake, Ninja and OpenMP with `brew install cmake ninja libomp`. Rustup installs the native Rust toolchain; start a new terminal after installation. Tauri is a project dependency installed by npm below, so no global Tauri installation is needed.
 
 ## Set Up the Repository
 
 Clone the repository and initialize its submodules:
 
-```powershell
+```sh
 git clone --recurse-submodules https://github.com/LJFYC007/007Solver.git
-Set-Location 007Solver
+cd 007Solver
 ```
 
 For an existing clone:
 
-```powershell
+```sh
 git submodule update --init --recursive
 ```
 
 Install the desktop dependencies:
 
-```powershell
+```sh
 npm --prefix desktop ci
 ```
 
-## Build the Solver Service
+## Develop and Package
 
-Configure and compile the C++ service:
+From the repository root, the same commands work on Windows and macOS:
 
-```powershell
-chcp 65001
-cmake --preset windows-msvc-release
-cmake --build --preset windows-msvc-release
-```
+| Command | Result |
+|---|---|
+| `npm --prefix desktop run dev` | Build/stage the solver, start Vite, and open the desktop app |
+| `npm --prefix desktop run build` | Build/stage the solver, compile the UI and Rust app, and package it |
+| `npm --prefix desktop run build:solver` | Build/stage only the C++ service |
 
-The build stages the executable in `desktop/src-tauri/binaries/` under the filename expected by Tauri. To build and stage only the service, run `npm --prefix desktop run build:solver`.
+There is one Release/Ninja preset and one C++ output directory, `build/`. CMake stages the native service in `desktop/src-tauri/binaries/` with Tauri's target suffix. Both development and packaging run this step automatically. After changing C++ code during development, restart `npm --prefix desktop run dev` to rebuild and re-solve. React edits reload through Vite.
 
-`chcp 65001` lets Ninja parse localized MSVC header dependencies. DCFR uses OpenMP; set `OMP_NUM_THREADS` to limit its worker count.
+The app shows startup progress and opens the explorer after training, exploitability evaluation and the initial node query finish. It solves `resources/default.json` once per launch.
+
+Packages appear under `desktop/src-tauri/target/release/bundle/`: `macos/007 Solver.app` and `dmg/` on Mac, or `nsis/` on Windows. A local Mac build does not require a Developer ID; public distribution should use [Apple signing and notarization](https://v2.tauri.app/distribute/sign/macos/).
+
+Mac packages currently link to the build machine's Homebrew `libomp` path and do not bundle that runtime. Running a package on another Mac requires a matching `libomp` installation at that path. The deployment target is macOS 11, but the linked runtime can require a newer OS; a current Homebrew bottle does not establish macOS 11 compatibility.
+
+On Windows, run `chcp 65001` before building to let Ninja parse localized MSVC header dependencies. DCFR uses OpenMP; set `OMP_NUM_THREADS` to limit its worker count.
 
 ## Run the Solver Tests
 
-Build and run the GoogleTest executable:
+Build and run the existing offline correctness suite:
 
-```powershell
-cmake --build --preset windows-msvc-release --target 007SolverTests
-ctest --test-dir build/windows-msvc-release --output-on-failure
+```sh
+cmake --preset release
+cmake --build --preset release --target 007SolverTests
+ctest --test-dir build --output-on-failure
 ```
 
 The suite checks betting rules and settlement, an independent best-response baseline, two small reference solves, and fixed-policy node EVs and reach weights. Reference answers are checked into the repository; routine tests run offline. See [`tests/README.md`](tests/README.md) for coverage and reference generation.
 
-CTest enforces a 60-second timeout for the suite.
+CTest enforces a 60-second timeout for the suite. CI runs the same commands on Windows and macOS.
 
 ## Repository Checks
 
 After installing dependencies and building the solver service, run the checks relevant to your changes:
 
-```powershell
+```sh
 npm --prefix desktop run check
 cargo check --manifest-path desktop/src-tauri/Cargo.toml --locked
 pre-commit run --all-files
 ```
 
 Pre-commit may fix formatting. Use `pre-commit run --files` with explicit paths to include new files that have not yet been staged.
-
-## Run in Development
-
-Build the solver service first, then start the desktop application:
-
-```powershell
-npm --prefix desktop run tauri -- dev
-```
-
-The application shows startup progress and opens the strategy explorer after training, exploitability evaluation and the initial node query finish.
-
-## Build the Windows Installer
-
-Build the NSIS installer. This command first configures, builds and stages the C++ service, then builds the frontend and desktop application:
-
-```powershell
-npm --prefix desktop run tauri -- build
-```
-
-The installer is written to `desktop/src-tauri/target/release/bundle/nsis/`.
 
 ## Repository Layout
 

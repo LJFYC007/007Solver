@@ -5,7 +5,7 @@
 /desktop/dist/
 /desktop/src-tauri/target/
 /desktop/src-tauri/gen/
-/desktop/src-tauri/binaries/*.exe
+/desktop/src-tauri/binaries/
 
 # Local tools
 /CMakeUserPresets.json

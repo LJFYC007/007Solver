@@ -5,8 +5,14 @@
 #include "game/GameCompiler.h"
 #include "io/ScenarioLoader.h"
 #include "service/JsonAdapter.h"
+#if defined(_WIN32)
 #include <Windows.h>
 #include <Psapi.h>
+#else
+#include <mach/mach.h>
+#include <sys/resource.h>
+#include <unistd.h>
+#endif
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -51,10 +57,21 @@ void SaveReport()
 
 Json Memory()
 {
+#if defined(_WIN32)
     PROCESS_MEMORY_COUNTERS_EX memory{};
     if (!GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory)))
         throw std::runtime_error("GetProcessMemoryInfo failed");
     return {{"private_committed_bytes", memory.PrivateUsage}, {"peak_working_set_bytes", memory.PeakWorkingSetSize}};
+#else
+    task_vm_info_data_t memory{};
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    rusage usage{};
+    if (task_info(mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&memory), &count) != KERN_SUCCESS ||
+        getrusage(RUSAGE_SELF, &usage) != 0)
+        throw std::runtime_error("Cannot read macOS process memory");
+    // These macOS metrics are not equivalent to Windows private committed memory.
+    return {{"physical_footprint_bytes", memory.phys_footprint}, {"peak_resident_set_bytes", usage.ru_maxrss}};
+#endif
 }
 
 void StartStage(const char* name)
@@ -255,7 +272,12 @@ int main(int argc, char** argv)
 {
     const auto start = Clock::now();
     const auto stamp = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-    reportPath = "build/benchmark-results/utg-bb-wide-" + std::to_string(stamp) + "-" + std::to_string(GetCurrentProcessId()) + ".json";
+#if defined(_WIN32)
+    const auto processId = GetCurrentProcessId();
+#else
+    const auto processId = getpid();
+#endif
+    reportPath = "build/benchmark-results/utg-bb-wide-" + std::to_string(stamp) + "-" + std::to_string(processId) + ".json";
     bool reportCreated = false;
     try
     {

@@ -1,30 +1,28 @@
 # Solver tests
 
-Run from the repository root in Developer PowerShell.
+Run from the repository root in Terminal (macOS) or Developer PowerShell (Windows).
 
 ## Default correctness tests
 
-```powershell
-chcp 65001
-cmake --preset windows-msvc-release
-cmake --build --preset windows-msvc-release --target 007SolverTests
-ctest --test-dir build/windows-msvc-release --output-on-failure
-```
+Use the shared build/test commands in the [README](../README.md#run-the-solver-tests).
 
-Seven offline cases cover betting rules, uniform-policy best responses (BR), two reference solves, and fixed-policy node EV/reach. CTest runs one entry, `solver`, with a 60-second timeout and writes `build/windows-msvc-release/solver-test-results.json`. Push/PR CI uses this same suite.
+Seven offline cases cover betting rules, uniform-policy best responses (BR), two reference solves, and fixed-policy node EV/reach. CTest runs one entry, `solver`, with a 60-second timeout and writes `build/solver-test-results.json`. Windows/macOS CI uses this same suite.
 
 The weighted/raise fixtures use 3M/8M ESCFR updates and 200 DCFR updates (1 and 4 workers, including continued runs), require exploitability <= `0.01`, and compare value intervals with external GT to `1e-5`. Fixed-policy expectations are stored in `fixtures/correctness-reference.json`. Performance measurement is handled by the separate benchmark.
 
 ## Explicit wide-range benchmark
 
-```powershell
-cmake --build --preset windows-msvc-release --target 007SolverBenchmark
-./build/windows-msvc-release/007SolverBenchmark.exe
+```sh
+cmake --preset release
+cmake --build --preset release --target 007SolverBenchmark
+./build/007SolverBenchmark
 # Optional: choose a new report path; existing reports are never overwritten.
-./build/windows-msvc-release/007SolverBenchmark.exe --report=build/benchmark-results/sample.json
+./build/007SolverBenchmark --report=build/benchmark-results/sample.json
 # DCFR requires an explicit iteration budget.
-./build/windows-msvc-release/007SolverBenchmark.exe --algorithm=dcfr --iterations=48 --workers=8
+./build/007SolverBenchmark --algorithm=dcfr --iterations=48 --workers=8
 ```
+
+On Windows the executable has an `.exe` suffix. Run the benchmark separately from other builds/solves when comparing timings.
 
 The benchmark is excluded from the default build, CTest, CI and pre-commit execution. It uses `fixtures/utg-bb-wide.json`: UTG/IP versus BB/OOP, flop `Ac Kh Qs`, pot 5, stacks 2.5 each, no rake, default sizing and **200M ESCFR sampled updates by default**, retaining complete ranges and turn/river play.
 
@@ -32,28 +30,19 @@ The benchmark is excluded from the default build, CTest, CI and pre-commit execu
 
 It checks exact input/GT equality, uniform BRs and exploitability within `1e-5`, finite trained metrics, value-interval compatibility, the BR-average identity and exploitability in `[-1e-5, 0.025]`. Root EVs, reach and probabilities must be valid; equilibrium action frequencies and per-hand EVs are not compared.
 
-Unique JSON reports default to `build/benchmark-results/`. They include algorithm, worker count, iterations and unit, build/workload information, phase timings, metrics and process memory. Training state is released before trained evaluation. Failures retain diagnostics and return nonzero; `status: running` reports are incomplete.
+Unique JSON reports default to `build/benchmark-results/`. They include algorithm, worker count, iterations and unit, build/workload information, phase timings, metrics and process memory. Windows reports private committed bytes and peak working set; macOS reports physical footprint and peak resident bytes. These OS metrics are not interchangeable. Training state is released before trained evaluation. Failures retain diagnostics and return nonzero; `status: running` reports are incomplete.
 
 The local Release performance target is under five minutes; timing is recorded, not asserted. Local JSON reports are measurements, not replacement reference answers.
 
-### View the latest local result
+Seed 42 does not guarantee identical ESCFR sampled strategies across standard libraries; retain the independent reference tolerances on every platform.
 
-Rebuild the benchmark target and run it after changing source; CTest and normal builds do not refresh benchmark reports. From the repository root:
-
-```powershell
-$latest = Get-ChildItem build/benchmark-results/*.json | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-$latest.FullName
-$result = Get-Content -Raw $latest.FullName | ConvertFrom-Json
-$result | Select-Object status, total_seconds, completed_iterations, failures
-$result.trained
-$result.stages
-```
-
-Check `status` before using the numbers: `failed` is a failed run and `running` is incomplete. Reports are local, ignored build artifacts, and are not uploaded by CI. They record compiler/configuration but not Git revision or dirty state, so the latest file does not by itself identify the latest source version. To keep a result associated with a commit, use a unique `--report` filename containing the commit ID and timestamp, and note any uncommitted changes separately.
+Rebuild and run after changing source; CTest and normal builds do not refresh benchmark reports. Check `status` before using the numbers. Reports are local, ignored artifacts and record compiler/configuration but not Git revision or dirty state. Use a unique `--report` filename containing the commit ID and timestamp, and note any uncommitted changes separately when comparing implementations.
 
 ## Independent GT generation
 
 `fixtures/correctness-reference.json` and `fixtures/benchmark-reference.json` use [b-inary/postflop-solver](https://github.com/b-inary/postflop-solver) at commit `9d1509fe5077d019825f833eed04b16d342dfda1`, with dependencies pinned by `oracle/Cargo.lock`.
+
+On macOS, set `export RUSTFLAGS='-A dangerous_implicit_autorefs -A mismatched_lifetime_syntaxes'` instead of the PowerShell assignment below; the Cargo commands are otherwise identical.
 
 ```powershell
 $env:RUSTFLAGS = '-A dangerous_implicit_autorefs -A mismatched_lifetime_syntaxes'

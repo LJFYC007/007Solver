@@ -41,7 +41,7 @@ repos:
 
       - id: rustfmt
         name: Rustfmt (auto-fix)
-        entry: rustfmt --edition 2021 desktop/src-tauri/build.rs desktop/src-tauri/src/main.rs desktop/src-tauri/src/lib.rs
+        entry: rustfmt --edition 2021 desktop/src-tauri/build.rs desktop/src-tauri/src/main.rs
         language: system
         pass_filenames: false
         files: ^desktop/src-tauri/(build\.rs|src/.*\.rs)$

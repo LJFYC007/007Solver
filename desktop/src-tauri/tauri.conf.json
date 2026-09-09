@@ -4,9 +4,9 @@
     "version": "0.1.0",
     "identifier": "com.ljfyc.solver007",
     "build": {
-        "beforeDevCommand": "npm run dev",
+        "beforeDevCommand": "npm run build:solver && npm run dev:ui",
         "devUrl": "http://127.0.0.1:1420",
-        "beforeBuildCommand": "npm run build:solver && npm run build",
+        "beforeBuildCommand": "npm run build:solver && npm run build:ui",
         "frontendDist": "../dist"
     },
     "app": {
@@ -28,7 +28,7 @@
     "bundle": {
         "active": true,
         "targets": ["nsis"],
-        "icon": ["icons/icon.ico"],
+        "icon": ["icons/icon.ico", "icons/icon.icns", "icons/icon.png"],
         "shortDescription": "Desktop poker solver with live strategy exploration",
         "externalBin": ["binaries/solver-service"],
         "resources": {

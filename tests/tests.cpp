@@ -12,90 +12,88 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-namespace feat(solver) : add parallel CPU DCFR training
+namespace
 {
-    namespace analysis = solver::analysis;
-    namespace core = solver::core;
-    namespace engine = solver::engine;
-    namespace game = solver::game;
-    using Json = nlohmann::json;
+namespace analysis = solver::analysis;
+namespace core = solver::core;
+namespace engine = solver::engine;
+namespace game = solver::game;
+using Json = nlohmann::json;
 
-    Json Fixture(const std::string& name)
-    {
-        return Json::parse(std::ifstream(std::string(TEST_FIXTURE_DIR) + name + ".json"));
-    }
+Json Fixture(const std::string& name)
+{
+    return Json::parse(std::ifstream(std::string(TEST_FIXTURE_DIR) + name + ".json"));
+}
 
-    const Json& References()
-    {
-        static const Json references = Fixture("correctness-reference");
-        return references;
-    }
+const Json& References()
+{
+    static const Json references = Fixture("correctness-reference");
+    return references;
+}
 
-    std::shared_ptr<const engine::SolveProblem> Problem(const std::string& name)
-    {
-        // Changing the input requires regenerating its independent reference.
-        EXPECT_EQ(Fixture(name), References().at(name).at("scenario"));
-        auto scenario = solver::io::LoadScenario(std::string(TEST_FIXTURE_DIR) + name + ".json");
-        return std::make_shared<const engine::SolveProblem>(
-            engine::SolveProblem{game::CompileGame(scenario.game), std::move(scenario.ranges)}
-        );
-    }
+std::shared_ptr<const engine::SolveProblem> Problem(const std::string& name)
+{
+    // Changing the input requires regenerating its independent reference.
+    EXPECT_EQ(Fixture(name), References().at(name).at("scenario"));
+    auto scenario = solver::io::LoadScenario(std::string(TEST_FIXTURE_DIR) + name + ".json");
+    return std::make_shared<const engine::SolveProblem>(engine::SolveProblem{game::CompileGame(scenario.game), std::move(scenario.ranges)});
+}
 
-    void CheckSolve(const std::string& name)
+void CheckSolve(const std::string& name)
+{
+    const auto problem = Problem(name);
+    const int iterations = Fixture(name).at("iterations").get<int>();
+    for (const int workers : {0, 1, 4})
     {
-        const auto problem = Problem(name);
-        const int iterations = Fixture(name).at("iterations").get<int>();
-        for (const int workers : {0, 1, 4})
+        SCOPED_TRACE(workers == 0 ? "escfr" : "dcfr workers=" + std::to_string(workers));
+        // Match the service: release training state before best-response evaluation.
+        const auto strategy = [&]
         {
-            SCOPED_TRACE(workers == 0 ? "escfr" : "dcfr workers=" + std::to_string(workers));
-            // Match the service: release training state before best-response evaluation.
-            const auto strategy = [&]
+            if (workers != 0)
             {
-                if (workers != 0)
-                {
-                    engine::CpuDcfrSession session(problem, workers);
-                    session.Run(101);
-                    session.Run(99);
-                    EXPECT_EQ(session.CompletedIterations(), 200);
-                    return session.ExportStrategy();
-                }
-                engine::CpuEscfrSession session(problem);
-                session.Run(iterations);
+                engine::CpuDcfrSession session(problem, workers);
+                session.Run(101);
+                session.Run(99);
+                EXPECT_EQ(session.CompletedIterations(), 200);
                 return session.ExportStrategy();
-            }();
-            const auto actual = engine::EvaluateExploitability(*problem, strategy);
-            const auto& expected = References().at(name).at("solved");
-            ASSERT_TRUE(std::isfinite(actual.player0BestResponseEv));
-            ASSERT_TRUE(std::isfinite(actual.player1BestResponseEv));
-            ASSERT_TRUE(std::isfinite(actual.exploitability));
-            // [-villain BR, hero BR] must intersect the external value interval.
-            constexpr float roundingTolerance = 1e-5f;
-            EXPECT_GE(actual.player0BestResponseEv, -expected.at("villainBestResponseEv").get<float>() - roundingTolerance);
-            EXPECT_GE(actual.player1BestResponseEv, -expected.at("heroBestResponseEv").get<float>() - roundingTolerance);
-            EXPECT_NEAR(actual.exploitability, (actual.player0BestResponseEv + actual.player1BestResponseEv) / 2.0f, roundingTolerance);
-            EXPECT_LE(actual.exploitability, 0.01f); // 0.5% of the fixtures' initial pot.
-        }
-    }
-
-    engine::StrategySnapshot FixedStrategy(const engine::SolveProblem& problem, const Json& policy)
-    {
-        std::vector<engine::StrategyEntry> entries;
-        for (const auto& node : policy)
-        {
-            auto nodeId = problem.game->Root();
-            for (const auto& action : node.at("path"))
-                nodeId = problem.game->GetNode(nodeId).GetBettingEdge(action.get<std::size_t>()).NextNode();
-            for (const auto& hand : node.at("hands"))
-            {
-                entries.push_back({
-                    {nodeId, core::ParseHoleCards(hand.at("cards").get<std::string>())},
-                    hand.at("strategy").get<std::vector<float>>(),
-                });
             }
-        }
-        return engine::StrategySnapshot(problem.game, std::move(entries));
+            engine::CpuEscfrSession session(problem);
+            session.Run(iterations);
+            return session.ExportStrategy();
+        }();
+        const auto actual = engine::EvaluateExploitability(*problem, strategy);
+        const auto& expected = References().at(name).at("solved");
+        ASSERT_TRUE(std::isfinite(actual.player0BestResponseEv));
+        ASSERT_TRUE(std::isfinite(actual.player1BestResponseEv));
+        ASSERT_TRUE(std::isfinite(actual.exploitability));
+        // [-villain BR, hero BR] must intersect the external value interval.
+        constexpr float roundingTolerance = 1e-5f;
+        EXPECT_GE(actual.player0BestResponseEv, -expected.at("villainBestResponseEv").get<float>() - roundingTolerance);
+        EXPECT_GE(actual.player1BestResponseEv, -expected.at("heroBestResponseEv").get<float>() - roundingTolerance);
+        EXPECT_NEAR(actual.exploitability, (actual.player0BestResponseEv + actual.player1BestResponseEv) / 2.0f, roundingTolerance);
+        EXPECT_LE(actual.exploitability, 0.01f); // 0.5% of the fixtures' initial pot.
     }
-} // namespace feat(solver):addparallelCPUDCFRtraining
+}
+
+engine::StrategySnapshot FixedStrategy(const engine::SolveProblem& problem, const Json& policy)
+{
+    std::vector<engine::StrategyEntry> entries;
+    for (const auto& node : policy)
+    {
+        auto nodeId = problem.game->Root();
+        for (const auto& action : node.at("path"))
+            nodeId = problem.game->GetNode(nodeId).GetBettingEdge(action.get<std::size_t>()).NextNode();
+        for (const auto& hand : node.at("hands"))
+        {
+            entries.push_back({
+                {nodeId, core::ParseHoleCards(hand.at("cards").get<std::string>())},
+                hand.at("strategy").get<std::vector<float>>(),
+            });
+        }
+    }
+    return engine::StrategySnapshot(problem.game, std::move(entries));
+}
+} // namespace
 
 TEST(StrategyEvaluatorTest, UniformPolicyMatchesIndependentBestResponses)
 {

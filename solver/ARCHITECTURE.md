@@ -1,6 +1,6 @@
 # Solver Architecture
 
-007 Solver is a Windows desktop application for solving a heads-up postflop game and browsing its strategy. The C++ service performs one solve at startup and then serves node queries.
+007 Solver is a Windows/macOS desktop application for solving a heads-up postflop game and browsing its strategy. The C++ service performs one solve at startup and then serves node queries.
 
 ```text
 Scenario file -> game and ranges -> concrete decision tree

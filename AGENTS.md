@@ -1,6 +1,6 @@
 # Repository Guidelines
 
-007 Solver is a Windows heads-up postflop solver: C++17 engine/service, Rust/Tauri bridge, React/TypeScript UI. It solves `resources/default.json` once at startup. The next priority is CPU solver accuracy and performance.
+007 Solver is a Windows/macOS heads-up postflop solver: C++17 engine/service, Rust/Tauri bridge, React/TypeScript UI. It solves `resources/default.json` once at startup. The next priority is CPU solver accuracy and performance.
 
 See [README.md](README.md) for setup, commands and repository layout, [solver/ARCHITECTURE.md](solver/ARCHITECTURE.md) for data semantics and ownership, and [tests/README.md](tests/README.md) for reference fixtures.
 
