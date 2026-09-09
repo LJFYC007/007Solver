@@ -5,6 +5,7 @@ Run from the repository root in Developer PowerShell.
 ## Default correctness tests
 
 ```powershell
+chcp 65001
 cmake --preset windows-msvc-release
 cmake --build --preset windows-msvc-release --target 007SolverTests
 ctest --test-dir build/windows-msvc-release --output-on-failure
@@ -12,7 +13,7 @@ ctest --test-dir build/windows-msvc-release --output-on-failure
 
 Seven offline cases cover betting rules, uniform-policy best responses (BR), two reference solves, and fixed-policy node EV/reach. CTest runs one entry, `solver`, with a 60-second timeout and writes `build/windows-msvc-release/solver-test-results.json`. Push/PR CI uses this same suite.
 
-The weighted/raise fixtures use 3M/8M updates, require exploitability <= `0.01`, and compare value intervals with external GT to `1e-5`. Fixed-policy expectations are stored in `fixtures/correctness-reference.json`. Performance measurement is handled by the separate benchmark.
+The weighted/raise fixtures use 3M/8M ESCFR updates and 200 DCFR updates (1 and 4 workers, including continued runs), require exploitability <= `0.01`, and compare value intervals with external GT to `1e-5`. Fixed-policy expectations are stored in `fixtures/correctness-reference.json`. Performance measurement is handled by the separate benchmark.
 
 ## Explicit wide-range benchmark
 
@@ -21,15 +22,19 @@ cmake --build --preset windows-msvc-release --target 007SolverBenchmark
 ./build/windows-msvc-release/007SolverBenchmark.exe
 # Optional: choose a new report path; existing reports are never overwritten.
 ./build/windows-msvc-release/007SolverBenchmark.exe --report=build/benchmark-results/sample.json
+# DCFR requires an explicit iteration budget.
+./build/windows-msvc-release/007SolverBenchmark.exe --algorithm=dcfr --iterations=48 --workers=8
 ```
 
-The benchmark is excluded from the default build, CTest, CI and pre-commit execution. It uses `fixtures/utg-bb-wide.json`: UTG/IP versus BB/OOP, flop `Ac Kh Qs`, pot 5, stacks 2.5 each, no rake, default sizing and **200M fixed updates**, retaining complete ranges and turn/river play.
+The benchmark is excluded from the default build, CTest, CI and pre-commit execution. It uses `fixtures/utg-bb-wide.json`: UTG/IP versus BB/OOP, flop `Ac Kh Qs`, pot 5, stacks 2.5 each, no rake, default sizing and **200M ESCFR sampled updates by default**, retaining complete ranges and turn/river play.
+
+`--algorithm` and `--iterations` select the solver and budget; DCFR requires an explicit budget, and `--workers` applies only to DCFR. Compare time at equal exploitability, since iteration counts measure different work.
 
 It checks exact input/GT equality, uniform BRs and exploitability within `1e-5`, finite trained metrics, value-interval compatibility, the BR-average identity and exploitability in `[-1e-5, 0.025]`. Root EVs, reach and probabilities must be valid; equilibrium action frequencies and per-hand EVs are not compared.
 
-Unique JSON reports default to `build/benchmark-results/`. They include build/workload information, separate uniform/trained BR timings, training, snapshot export/release, full root query, metrics and process memory. Training state is released before trained evaluation. Failures retain diagnostics and return nonzero; an interrupted `status: running` report is incomplete.
+Unique JSON reports default to `build/benchmark-results/`. They include algorithm, worker count, iterations and unit, build/workload information, phase timings, metrics and process memory. Training state is released before trained evaluation. Failures retain diagnostics and return nonzero; `status: running` reports are incomplete.
 
-The local Release target is under five minutes, observed rather than asserted. One complete run took **244.10 s**, with exploitability **0.01699954** and peak working set **59.57 MiB**; timing variance was not measured.
+The local Release performance target is under five minutes; timing is recorded, not asserted. Local JSON reports are measurements, not replacement reference answers.
 
 ### View the latest local result
 

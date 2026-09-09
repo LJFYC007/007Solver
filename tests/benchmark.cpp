@@ -1,4 +1,5 @@
 #include "analysis/AnalysisSession.h"
+#include "engine/CpuDcfrSession.h"
 #include "engine/CpuEscfrSession.h"
 #include "engine/StrategyEvaluator.h"
 #include "game/GameCompiler.h"
@@ -15,6 +16,7 @@
 #include <memory>
 #include <numeric>
 #include <string>
+#include <type_traits>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
@@ -27,6 +29,18 @@ constexpr double kTolerance = 1e-5;
 Json report;
 std::filesystem::path reportPath;
 Clock::time_point stageStart;
+std::string algorithm = "escfr";
+int iterationBudget = 0;
+int workers = 0;
+
+int PositiveInteger(const std::string& value)
+{
+    std::size_t parsed = 0;
+    const int number = std::stoi(value, &parsed);
+    if (number <= 0 || parsed != value.size())
+        throw std::invalid_argument("Benchmark counts must be positive integers");
+    return number;
+}
 
 void SaveReport()
 {
@@ -123,7 +137,8 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
     auto scenario = io::LoadScenario(fixturePath);
     const auto problem =
         std::make_shared<const engine::SolveProblem>(engine::SolveProblem{game::CompileGame(scenario.game), std::move(scenario.ranges)});
-    report["iterations"] = scenario.iterations;
+    const int iterations = iterationBudget == 0 ? scenario.iterations : iterationBudget;
+    report["iterations"] = iterations;
     report["node_count"] = problem->game->NodeCount();
     std::array<std::size_t, 2> hands{};
     std::size_t pairs = 0;
@@ -152,20 +167,36 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
     ASSERT_FALSE(HasFailure());
 
     StartStage("session_initialization");
-    auto session = std::make_unique<engine::CpuEscfrSession>(problem);
-    FinishStage("session_initialization");
-    StartStage("training");
-    session->Run(scenario.iterations);
-    report["training_loop_seconds"] = session->TrainingTimeSeconds();
-    report["completed_iterations"] = session->CompletedIterations();
-    FinishStage("training");
-    EXPECT_EQ(session->CompletedIterations(), scenario.iterations);
-    StartStage("snapshot_export");
-    auto strategy = session->ExportStrategy();
-    FinishStage("snapshot_export");
-    StartStage("training_release");
-    session.reset();
-    FinishStage("training_release");
+    const auto train = [&](auto session)
+    {
+        FinishStage("session_initialization");
+        StartStage("training");
+        session->Run(iterations);
+        if constexpr (std::is_same_v<decltype(session), std::unique_ptr<engine::CpuDcfrSession>>)
+            report["workers"] = session->WorkerCount();
+        report["training_loop_seconds"] = session->TrainingTimeSeconds();
+        report["completed_iterations"] = session->CompletedIterations();
+        FinishStage("training");
+        EXPECT_EQ(session->CompletedIterations(), iterations);
+        StartStage("snapshot_export");
+        auto strategy = session->ExportStrategy();
+        FinishStage("snapshot_export");
+        StartStage("training_release");
+        session.reset();
+        FinishStage("training_release");
+        return strategy;
+    };
+    auto strategy = [&]
+    {
+        if (algorithm == "dcfr")
+        {
+            auto session = std::make_unique<engine::CpuDcfrSession>(problem, workers);
+            report["workers"] = session->WorkerCount();
+            return train(std::move(session));
+        }
+        report["workers"] = 1;
+        return train(std::make_unique<engine::CpuEscfrSession>(problem));
+    }();
 
     StartStage("trained_evaluation");
     const auto actual = engine::EvaluateExploitability(*problem, strategy);
@@ -225,29 +256,44 @@ int main(int argc, char** argv)
     const auto start = Clock::now();
     const auto stamp = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     reportPath = "build/benchmark-results/utg-bb-wide-" + std::to_string(stamp) + "-" + std::to_string(GetCurrentProcessId()) + ".json";
-    for (int i = 1; i < argc;)
+    bool reportCreated = false;
+    try
     {
-        const std::string arg = argv[i];
-        if (arg.rfind("--report=", 0) == 0)
+        for (int i = 1; i < argc;)
         {
-            reportPath = arg.substr(9);
+            const std::string arg = argv[i];
+            if (arg.rfind("--report=", 0) == 0)
+                reportPath = arg.substr(9);
+            else if (arg.rfind("--algorithm=", 0) == 0)
+                algorithm = arg.substr(12);
+            else if (arg.rfind("--iterations=", 0) == 0)
+                iterationBudget = PositiveInteger(arg.substr(13));
+            else if (arg.rfind("--workers=", 0) == 0)
+                workers = PositiveInteger(arg.substr(10));
+            else
+            {
+                ++i;
+                continue;
+            }
             for (int j = i; j + 1 < argc; ++j)
                 argv[j] = argv[j + 1];
             --argc;
             argv[argc] = nullptr;
         }
-        else
-            ++i;
-    }
-    bool reportCreated = false;
-    try
-    {
+        if (algorithm != "escfr" && algorithm != "dcfr")
+            throw std::invalid_argument("Benchmark algorithm must be escfr or dcfr");
+        if (algorithm == "dcfr" && iterationBudget == 0)
+            throw std::invalid_argument("DCFR requires an explicit --iterations full-player update budget");
+        if (algorithm == "escfr" && workers != 0)
+            throw std::invalid_argument("ESCFR is single-threaded; --workers requires --algorithm=dcfr");
         if (reportPath.has_parent_path())
             std::filesystem::create_directories(reportPath.parent_path());
         if (std::filesystem::exists(reportPath))
             throw std::runtime_error("Report already exists; choose a new path: " + reportPath.string());
         report = {
             {"scenario_id", "utg-bb-wide"},
+            {"algorithm", algorithm},
+            {"iteration_unit", algorithm == "dcfr" ? "full_player_update" : "sampled_player_update"},
             {"status", "running"},
             {"failures", Json::array()},
             {"build",

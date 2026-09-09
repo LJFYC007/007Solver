@@ -19,7 +19,7 @@ float TraverseNodeHandEv(
     const game::CompiledGame& game = *result.Problem().game;
     const game::GameNode& node = game.GetNode(nodeId);
     if (node.Kind() == game::NodeKind::Terminal)
-        return game::CalculateTerminalSettlement(game.GetNode(evRootNode), node, player0Hand, player1Hand).NetPayoffFromStart(player);
+        return game.CalculateTerminalSettlement(evRootNode, nodeId, player0Hand, player1Hand).NetPayoffFromStart(player);
 
     if (node.Kind() == game::NodeKind::Chance)
     {

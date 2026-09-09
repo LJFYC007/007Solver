@@ -1,25 +1,41 @@
 #include "engine/StrategyEvaluator.h"
+#include <algorithm>
+#include <deque>
 #include <limits>
 #include <stdexcept>
-#include <utility>
 #include <vector>
 
 namespace solver::engine
 {
 namespace
 {
-std::vector<float> TraverseBestResponse(
+struct BestResponseScratch
+{
+    std::vector<float> values;
+    std::vector<float> childReach;
+    std::vector<int> legalOutcomeCounts;
+    std::vector<const float*> opponentStrategies;
+};
+
+const std::vector<float>& TraverseBestResponse(
     const SolveProblem& problem,
     const StrategySnapshot& strategy,
     game::NodeId nodeId,
     core::HoleCards responderHand,
     const std::vector<core::HoleCards>& opponentHands,
     const std::vector<float>& opponentReach,
-    core::PlayerId responder
+    core::PlayerId responder,
+    std::deque<BestResponseScratch>& scratch,
+    std::size_t depth
 )
 {
     const game::GameNode& node = problem.game->GetNode(nodeId);
-    std::vector<float> values(opponentHands.size(), 0.0f);
+    // Deque growth preserves parent buffers and references held across recursive calls.
+    if (scratch.size() == depth)
+        scratch.emplace_back();
+    BestResponseScratch& frame = scratch[depth];
+    std::vector<float>& values = frame.values;
+    values.assign(opponentHands.size(), 0.0f);
 
     if (node.Kind() == game::NodeKind::Terminal)
     {
@@ -40,7 +56,8 @@ std::vector<float> TraverseBestResponse(
 
     if (node.Kind() == game::NodeKind::Chance)
     {
-        std::vector<int> legalOutcomeCounts(opponentHands.size(), 0);
+        std::vector<int>& legalOutcomeCounts = frame.legalOutcomeCounts;
+        legalOutcomeCounts.assign(opponentHands.size(), 0);
         for (std::size_t outcomeIndex = 0; outcomeIndex < node.ChanceOutcomeCount(); ++outcomeIndex)
         {
             const game::ChanceOutcome& outcome = node.GetChanceOutcome(outcomeIndex);
@@ -55,7 +72,8 @@ std::vector<float> TraverseBestResponse(
         for (std::size_t outcomeIndex = 0; outcomeIndex < node.ChanceOutcomeCount(); ++outcomeIndex)
         {
             const game::ChanceOutcome& outcome = node.GetChanceOutcome(outcomeIndex);
-            std::vector<float> childReach(opponentHands.size(), 0.0f);
+            std::vector<float>& childReach = frame.childReach;
+            childReach.assign(opponentHands.size(), 0.0f);
             bool hasChildReach = false;
             for (std::size_t handIndex = 0; handIndex < opponentHands.size(); ++handIndex)
             {
@@ -69,8 +87,9 @@ std::vector<float> TraverseBestResponse(
             if (!hasChildReach)
                 continue;
 
-            const std::vector<float> childValues =
-                TraverseBestResponse(problem, strategy, outcome.NextNode(), responderHand, opponentHands, childReach, responder);
+            const std::vector<float>& childValues = TraverseBestResponse(
+                problem, strategy, outcome.NextNode(), responderHand, opponentHands, childReach, responder, scratch, depth + 1
+            );
             for (std::size_t handIndex = 0; handIndex < opponentHands.size(); ++handIndex)
             {
                 if (legalOutcomeCounts[handIndex] > 0 && childReach[handIndex] > 0.0f)
@@ -84,11 +103,18 @@ std::vector<float> TraverseBestResponse(
     if (isResponderNode)
     {
         float bestValue = -std::numeric_limits<float>::infinity();
-        std::vector<float> bestActionValues;
         for (std::size_t actionIndex = 0; actionIndex < node.BettingEdgeCount(); ++actionIndex)
         {
-            std::vector<float> childValues = TraverseBestResponse(
-                problem, strategy, node.GetBettingEdge(actionIndex).NextNode(), responderHand, opponentHands, opponentReach, responder
+            const std::vector<float>& childValues = TraverseBestResponse(
+                problem,
+                strategy,
+                node.GetBettingEdge(actionIndex).NextNode(),
+                responderHand,
+                opponentHands,
+                opponentReach,
+                responder,
+                scratch,
+                depth + 1
             );
             float actionValue = 0.0f;
             for (std::size_t handIndex = 0; handIndex < opponentHands.size(); ++handIndex)
@@ -97,14 +123,15 @@ std::vector<float> TraverseBestResponse(
             if (actionValue > bestValue)
             {
                 bestValue = actionValue;
-                bestActionValues = std::move(childValues);
+                std::copy(childValues.begin(), childValues.end(), values.begin());
             }
         }
-        return bestActionValues;
+        return values;
     }
 
     const float uniformProbability = 1.0f / static_cast<float>(node.BettingEdgeCount());
-    std::vector<const float*> opponentStrategies(opponentHands.size(), nullptr);
+    std::vector<const float*>& opponentStrategies = frame.opponentStrategies;
+    opponentStrategies.assign(opponentHands.size(), nullptr);
     for (std::size_t handIndex = 0; handIndex < opponentHands.size(); ++handIndex)
     {
         if (opponentReach[handIndex] > 0.0f)
@@ -115,7 +142,8 @@ std::vector<float> TraverseBestResponse(
 
     for (std::size_t actionIndex = 0; actionIndex < node.BettingEdgeCount(); ++actionIndex)
     {
-        std::vector<float> childReach(opponentHands.size(), 0.0f);
+        std::vector<float>& childReach = frame.childReach;
+        childReach.assign(opponentHands.size(), 0.0f);
         bool hasChildReach = false;
         for (std::size_t handIndex = 0; handIndex < opponentHands.size(); ++handIndex)
         {
@@ -130,8 +158,16 @@ std::vector<float> TraverseBestResponse(
         if (!hasChildReach)
             continue;
 
-        const std::vector<float> childValues = TraverseBestResponse(
-            problem, strategy, node.GetBettingEdge(actionIndex).NextNode(), responderHand, opponentHands, childReach, responder
+        const std::vector<float>& childValues = TraverseBestResponse(
+            problem,
+            strategy,
+            node.GetBettingEdge(actionIndex).NextNode(),
+            responderHand,
+            opponentHands,
+            childReach,
+            responder,
+            scratch,
+            depth + 1
         );
         for (std::size_t handIndex = 0; handIndex < opponentHands.size(); ++handIndex)
         {
@@ -155,6 +191,7 @@ float ComputeBestResponseEv(const SolveProblem& problem, const StrategySnapshot&
 
     double totalValue = 0.0;
     double jointRangeWeight = 0.0;
+    std::deque<BestResponseScratch> scratch;
     for (const auto& [myHand, myWeight] : myRange)
     {
         if (myWeight <= 0.0f || core::Overlaps(myHand, rootBoard))
@@ -181,8 +218,8 @@ float ComputeBestResponseEv(const SolveProblem& problem, const StrategySnapshot&
         for (float& opponentWeight : opponentWeights)
             opponentWeight = static_cast<float>(opponentWeight / totalOpponentWeight);
 
-        const std::vector<float> values =
-            TraverseBestResponse(problem, strategy, game.Root(), myHand, opponentHands, opponentWeights, responder);
+        const std::vector<float>& values =
+            TraverseBestResponse(problem, strategy, game.Root(), myHand, opponentHands, opponentWeights, responder, scratch, 0);
         for (std::size_t handIndex = 0; handIndex < opponentHands.size(); ++handIndex)
             totalValue += jointMass * opponentWeights[handIndex] * values[handIndex];
     }

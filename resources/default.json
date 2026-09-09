@@ -6,7 +6,8 @@
     "initialPot": 5.0,
     "heroStack": 20.0,
     "villainStack": 20.0,
-    "iterations": 3000000,
+    "algorithm": "dcfr",
+    "iterations": 200,
     "ranges": {
         "BTN": {
             "AKo": 1.0,

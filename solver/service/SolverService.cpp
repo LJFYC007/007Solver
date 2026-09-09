@@ -1,5 +1,6 @@
 #include "service/SolverService.h"
 #include "analysis/AnalysisSession.h"
+#include "engine/CpuDcfrSession.h"
 #include "engine/CpuEscfrSession.h"
 #include "engine/StrategyEvaluator.h"
 #include "game/GameCompiler.h"
@@ -42,10 +43,9 @@ int SolverService::Run(const std::string& scenarioPath)
 
         diagnostics_ << "Start solving game...\n";
         WriteMessage(output_, {ServiceMessageKind::Solving, 0, 0, scenario.iterations});
-        engine::SolveReport report{"escfr", "cpu"};
-        engine::StrategySnapshot strategy = [&]
+        engine::SolveReport report{scenario.algorithm, "cpu"};
+        const auto train = [&](auto& session)
         {
-            engine::CpuEscfrSession session(problem);
             session.Run(
                 scenario.iterations,
                 [&](int completedIterations)
@@ -54,7 +54,21 @@ int SolverService::Run(const std::string& scenarioPath)
             report.completedIterations = session.CompletedIterations();
             report.trainingTimeSeconds = session.TrainingTimeSeconds();
             return session.ExportStrategy();
+        };
+        engine::StrategySnapshot strategy = [&]
+        {
+            if (scenario.algorithm == "dcfr")
+            {
+                engine::CpuDcfrSession session(problem);
+                auto snapshot = train(session);
+                diagnostics_ << "Algorithm: dcfr, CPU workers: " << session.WorkerCount() << '\n';
+                return snapshot;
+            }
+            engine::CpuEscfrSession session(problem);
+            diagnostics_ << "Algorithm: escfr, CPU workers: 1\n";
+            return train(session);
         }();
+        diagnostics_ << "Training time: " << report.trainingTimeSeconds << " s\n";
 
         diagnostics_ << "Evaluate exploitability...\n";
         report.metrics = engine::EvaluateExploitability(*problem, strategy);

@@ -9,6 +9,8 @@ file(
 
 add_library(solver_lib STATIC ${SOLVER_LIB_SOURCES})
 target_compile_features(solver_lib PUBLIC cxx_std_17)
+find_package(OpenMP REQUIRED COMPONENTS CXX)
+target_link_libraries(solver_lib PRIVATE OpenMP::OpenMP_CXX)
 if(MSVC)
     target_compile_options(solver_lib PRIVATE /utf-8)
 endif()

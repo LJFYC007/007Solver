@@ -26,6 +26,7 @@ public:
 
 private:
     friend class CpuEscfrSession;
+    friend class CpuDcfrSession;
 
     struct NodeBlock
     {

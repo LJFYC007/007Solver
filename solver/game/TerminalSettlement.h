@@ -1,9 +1,7 @@
 #pragma once
 
-#include "core/Card.h"
 #include "core/Chips.h"
 #include "core/PokerTypes.h"
-#include "game/CompiledGame.h"
 #include <array>
 #include <optional>
 #include <utility>
@@ -18,12 +16,5 @@ struct TerminalSettlement
 
     float NetPayoffFromStart(core::PlayerId player) const;
 };
-
-TerminalSettlement CalculateTerminalSettlement(
-    const GameNode& start,
-    const GameNode& terminal,
-    core::HoleCards player0Hand,
-    core::HoleCards player1Hand
-);
 
 } // namespace solver::game

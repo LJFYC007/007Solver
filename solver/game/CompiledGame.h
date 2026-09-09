@@ -4,7 +4,9 @@
 #include "game/GameSpec.h"
 #include "game/Identifiers.h"
 #include "game/PublicState.h"
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -13,6 +15,7 @@
 namespace solver::game
 {
 class GameTreeBuilder;
+struct TerminalSettlement;
 
 enum class NodeKind : std::uint8_t
 {
@@ -99,14 +102,26 @@ public:
     std::size_t NodeCount() const { return nodes_.size(); }
     const GameNode& GetNode(NodeId id) const;
 
+    // Cached rank at a showdown terminal; larger ranks are stronger.
+    int ShowdownRank(NodeId terminalNode, core::HoleCards hand) const;
+
+    TerminalSettlement CalculateTerminalSettlement(
+        NodeId startNode,
+        NodeId terminalNode,
+        core::HoleCards player0Hand,
+        core::HoleCards player1Hand
+    ) const;
     std::pair<float, float> CalculateZeroSumUtility(NodeId terminalNode, core::HoleCards player0Hand, core::HoleCards player1Hand) const;
 
 private:
     friend std::shared_ptr<const CompiledGame> CompileGame(const GameSpec& gameSpec);
 
     CompiledGame(GameSpec spec, std::vector<GameNode> nodes);
+    int ShowdownRank(const core::Board& board, core::HoleCards hand) const;
 
     GameSpec spec_;
     std::vector<GameNode> nodes_;
+    std::array<std::size_t, 1326> showdownRowOffsets_{};
+    std::vector<std::uint16_t> showdownRanks_;
 };
 } // namespace solver::game

@@ -18,7 +18,7 @@ resources/default.json -> C++ solver service <-> Tauri/Rust <-> React UI
 
 The application currently:
 
-- runs external-sampling CFR over weighted hero and villain ranges;
+- runs DCFR or external-sampling CFR (ESCFR) over weighted hero and villain ranges;
 - navigates decision, chance, and terminal nodes along the selected action line;
 - displays a 13 x 13 hand matrix with mixed-strategy colors;
 - reports aggregate action frequencies, combo strategies, and reach weights;
@@ -32,13 +32,16 @@ The C++ module boundaries and dependency direction are documented in [`solver/AR
 
 The application automatically loads the single bundled scenario in [`resources/default.json`](resources/default.json). There is not yet an in-app scenario editor or file picker.
 
-The default scenario uses an `Ac Kh Qs` flop, BTN and LJ weighted ranges, a pot of 5, stacks of 20, and 3,000,000 solver iterations. Edit `resources/default.json` before launching to use a different flop scenario. Range entries use pairs and suited/offsuit hand classes such as `"AA"`, `"AKs"`, and `"AKo"`. Each numeric weight is applied to every exact combo in that class. Amounts are in chips with 0.1-chip precision; the scenario does not define a big-blind conversion. The modeled game has no rake, uses a 0.1-chip minimum bet, and starts a fresh betting round on the flop.
+The default scenario uses an `Ac Kh Qs` flop, BTN and LJ weighted ranges, a pot of 5, stacks of 20, and 200 DCFR full-player updates. Edit `resources/default.json` before launching to use a different flop scenario. Range entries use pairs and suited/offsuit hand classes such as `"AA"`, `"AKs"`, and `"AKo"`. Each numeric weight is applied to every exact combo in that class. Amounts are in chips with 0.1-chip precision; the scenario does not define a big-blind conversion. The modeled game has no rake, uses a 0.1-chip minimum bet, and starts a fresh betting round on the flop.
+
+The optional `algorithm` field accepts `dcfr` or `escfr` (the default when omitted). Each iteration updates one player: DCFR traverses the full tree; ESCFR samples a traversal. Their iteration counts are not comparable.
 
 Training stops at the configured iteration count. The bundled scenario demonstrates the explorer; its default budget does not guarantee convergence. Exploitability is reported in the service diagnostics, and "Solution ready" means the solve has finished without enforcing an accuracy threshold.
 
 ## Requirements
 
 - Windows with Visual Studio 2022 or newer and the **Desktop development with C++** workload
+- Microsoft Visual C++ x64 runtime, including `VCOMP140.DLL` (OpenMP)
 - CMake 3.20 or newer
 - Ninja
 - Node.js 22 (22.13+) or 24+ and npm
@@ -74,11 +77,14 @@ npm --prefix desktop ci
 Configure and compile the C++ service:
 
 ```powershell
+chcp 65001
 cmake --preset windows-msvc-release
 cmake --build --preset windows-msvc-release
 ```
 
 The build stages the executable in `desktop/src-tauri/binaries/` under the filename expected by Tauri. To build and stage only the service, run `npm --prefix desktop run build:solver`.
+
+`chcp 65001` lets Ninja parse localized MSVC header dependencies. DCFR uses OpenMP; set `OMP_NUM_THREADS` to limit its worker count.
 
 ## Run the Solver Tests
 

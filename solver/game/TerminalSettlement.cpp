@@ -1,5 +1,5 @@
 #include "game/TerminalSettlement.h"
-#include "core/Evaluator.h"
+#include "game/CompiledGame.h"
 #include <stdexcept>
 
 namespace solver::game
@@ -25,13 +25,15 @@ float TerminalSettlement::NetPayoffFromStart(core::PlayerId player) const
     return -ToChipUnits(contribution);
 }
 
-TerminalSettlement CalculateTerminalSettlement(
-    const GameNode& start,
-    const GameNode& terminal,
+TerminalSettlement CompiledGame::CalculateTerminalSettlement(
+    NodeId startNode,
+    NodeId terminalNode,
     core::HoleCards player0Hand,
     core::HoleCards player1Hand
-)
+) const
 {
+    const GameNode& start = GetNode(startNode);
+    const GameNode& terminal = GetNode(terminalNode);
     if (terminal.Kind() != NodeKind::Terminal)
         throw std::invalid_argument("Terminal settlement requested for a non-terminal node");
 
@@ -45,8 +47,8 @@ TerminalSettlement CalculateTerminalSettlement(
         return {terminal.State().pot, contributionsSinceStart, foldedPlayer.Other()};
     }
 
-    const int player0Rank = core::EvaluateHoldem(player0Hand, terminal.State().board);
-    const int player1Rank = core::EvaluateHoldem(player1Hand, terminal.State().board);
+    const int player0Rank = ShowdownRank(terminal.State().board, player0Hand);
+    const int player1Rank = ShowdownRank(terminal.State().board, player1Hand);
     if (player0Rank > player1Rank)
         return {terminal.State().pot, contributionsSinceStart, core::PlayerId::Player0()};
     if (player0Rank < player1Rank)
