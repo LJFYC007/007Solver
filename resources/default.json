@@ -1,23 +1,78 @@
 {
-    "board": "Ac Kh Qs",
-    "heroPosition": "BTN",
-    "villainPosition": "LJ",
+    "board": "Ks 9s 2d",
+    "heroPosition": "UTG",
+    "villainPosition": "BB",
     "heroActsFirst": false,
-    "initialPot": 5.0,
-    "heroStack": 20.0,
-    "villainStack": 20.0,
-    "algorithm": "dcfr",
+    "initialPot": 2.0,
+    "heroStack": 4.0,
+    "villainStack": 4.0,
     "iterations": 200,
     "ranges": {
-        "BTN": {
-            "AKo": 1.0,
-            "AQo": 1.0,
-            "KK": 1.0
+        "UTG": {
+            "AKs": 0.326,
+            "QQ": 0.042
         },
-        "LJ": {
-            "AA": 1.0,
-            "KK": 1.0,
-            "44": 0.5
+        "BB": {
+            "KK": 0.41975802,
+            "A5s": 0.19009599040095992
         }
+    },
+    "rangeSource": {
+        "catalog": "resources/gtowizard-preflop",
+        "sha256": "8ffd54ced0567b6c6264e0faee7c18185b71b94e7c7efe1c42d1d3913f150b51",
+        "solution": "8max",
+        "history": [
+            {
+                "actor": "UTG",
+                "action": "Raise 2.5"
+            },
+            {
+                "actor": "UTG1",
+                "action": "Fold"
+            },
+            {
+                "actor": "LJ",
+                "action": "Fold"
+            },
+            {
+                "actor": "HJ",
+                "action": "Fold"
+            },
+            {
+                "actor": "CO",
+                "action": "Fold"
+            },
+            {
+                "actor": "BTN",
+                "action": "Fold"
+            },
+            {
+                "actor": "SB",
+                "action": "Fold"
+            },
+            {
+                "actor": "BB",
+                "action": "Raise 13"
+            },
+            {
+                "actor": "UTG",
+                "action": "Raise 23.5"
+            },
+            {
+                "actor": "BB",
+                "action": "Call"
+            }
+        ],
+        "retainedClasses": {
+            "UTG": [
+                "AKs",
+                "QQ"
+            ],
+            "BB": [
+                "KK",
+                "A5s"
+            ]
+        },
+        "reduction": "Postflop pot/stacks are reduced for runtime; retained hand classes, when listed, are a test subset. Source weights are not rounded or rescaled."
     }
 }

@@ -51,8 +51,13 @@ Scenario LoadScenario(const std::string& jsonPath)
     if (!file.is_open())
         throw std::runtime_error("Cannot open scenario file: " + jsonPath);
 
+    return ReadScenario(file);
+}
+
+Scenario ReadScenario(std::istream& input)
+{
     Json json;
-    file >> json;
+    input >> json;
 
     const Json& iterationCount = json.at("iterations");
     if (!iterationCount.is_number_unsigned() || iterationCount.get<std::uint64_t>() == 0 ||

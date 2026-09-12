@@ -8,6 +8,7 @@
 #include "service/ServiceMessage.h"
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -31,7 +32,16 @@ int SolverService::Run(const std::string& scenarioPath)
 {
     try
     {
-        io::Scenario scenario = io::LoadScenario(scenarioPath);
+        io::Scenario scenario = [&]
+        {
+            if (scenarioPath != "--stdin")
+                return io::LoadScenario(scenarioPath);
+            std::string line;
+            if (!std::getline(input_, line))
+                throw std::invalid_argument("Expected one scenario JSON line on stdin");
+            std::istringstream scenarioInput(line);
+            return io::ReadScenario(scenarioInput);
+        }();
         WriteMessage(output_, {ServiceMessageKind::BuildingTree, 0, 0, scenario.iterations});
 
         diagnostics_ << "Start building decision tree...\n";
@@ -82,7 +92,10 @@ int SolverService::Run(const std::string& scenarioPath)
                     throw std::invalid_argument(request.validationError);
                 ServiceMessage response{ServiceMessageKind::QuerySucceeded};
                 response.requestId = request.requestId;
-                response.node = analysis.QueryNode(*request.nodeId);
+                if (request.equity)
+                    response.equity = analysis.QueryEquity(*request.nodeId);
+                else
+                    response.node = analysis.QueryNode(*request.nodeId);
                 WriteMessage(output_, response);
             }
             catch (const std::exception& error)

@@ -1,15 +1,8 @@
 use crate::solver_protocol::{
-    encode_query_node, parse_service_message, ServiceEvent, ServiceMessage, SolverStatus,
+    encode_query, parse_service_message, ServiceEvent, ServiceMessage, SolverStatus,
 };
 use serde_json::Value;
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Mutex, RwLock,
-    },
-};
+use std::{collections::HashMap, sync::Mutex};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
@@ -19,152 +12,152 @@ use tokio::sync::oneshot;
 
 type PendingResponse = oneshot::Sender<Result<Value, String>>;
 
-pub(crate) struct SolverBridge {
-    child: Mutex<Option<CommandChild>>,
-    next_request_id: AtomicU64,
-    pending: Mutex<HashMap<u64, PendingResponse>>,
-    status: RwLock<SolverStatus>,
+struct BridgeState {
+    child: Option<CommandChild>,
+    generation: u64,
+    next_request_id: u64,
+    pending: HashMap<u64, PendingResponse>,
+    status: SolverStatus,
 }
+
+pub(crate) struct SolverBridge(Mutex<BridgeState>);
 
 impl Default for SolverBridge {
     fn default() -> Self {
-        Self {
-            child: Mutex::new(None),
-            next_request_id: AtomicU64::new(1),
-            pending: Mutex::new(HashMap::new()),
-            status: RwLock::new(SolverStatus::Starting),
+        Self(Mutex::new(BridgeState {
+            child: None,
+            generation: 0,
+            next_request_id: 1,
+            pending: HashMap::new(),
+            status: SolverStatus::Idle,
+        }))
+    }
+}
+
+impl BridgeState {
+    fn fail(&mut self, message: String) {
+        self.status = SolverStatus::Failed {
+            message: message.clone(),
+        };
+        for (_, sender) in self.pending.drain() {
+            let _ = sender.send(Err(message.clone()));
         }
+    }
+
+    fn stop(&mut self) {
+        self.generation += 1;
+        if let Some(child) = self.child.take() {
+            let _ = child.kill();
+        }
+        for (_, sender) in self.pending.drain() {
+            let _ = sender.send(Err("The selected solution changed".to_owned()));
+        }
+        self.status = SolverStatus::Idle;
     }
 }
 
 impl SolverBridge {
     pub(crate) fn status(&self) -> SolverStatus {
-        self.status.read().unwrap().clone()
+        self.0.lock().unwrap().status.clone()
     }
 
-    pub(crate) async fn query_node(&self, node_id: i32) -> Result<Value, String> {
-        let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
-        let mut request = encode_query_node(request_id, node_id)?;
-        request.push(b'\n');
-        let (sender, receiver) = oneshot::channel();
-        {
-            let mut pending = self.pending.lock().unwrap();
-            if !matches!(*self.status.read().unwrap(), SolverStatus::Ready { .. }) {
-                return Err("Solver is not ready".to_owned());
+    pub(crate) async fn query(
+        &self,
+        node_id: i32,
+        generation: u64,
+        command: &'static str,
+    ) -> Result<Value, String> {
+        let receiver = {
+            let mut state = self.0.lock().unwrap();
+            if state.generation != generation || !matches!(state.status, SolverStatus::Ready { .. })
+            {
+                return Err("The selected solution is not ready".to_owned());
             }
-            pending.insert(request_id, sender);
-        }
-
-        let write_result = self
-            .child
-            .lock()
-            .unwrap()
-            .as_mut()
-            .ok_or_else(|| "Solver service is not running".to_owned())
-            .and_then(|child| child.write(&request).map_err(|error| error.to_string()));
-
-        if let Err(error) = write_result {
-            self.pending.lock().unwrap().remove(&request_id);
-            return Err(error);
-        }
-
+            let request_id = state.next_request_id;
+            state.next_request_id += 1;
+            let mut request = encode_query(request_id, node_id, command)?;
+            request.push(b'\n');
+            let (sender, receiver) = oneshot::channel();
+            state
+                .child
+                .as_mut()
+                .ok_or("Solver service is not running")?
+                .write(&request)
+                .map_err(|error| error.to_string())?;
+            state.pending.insert(request_id, sender);
+            receiver
+        };
         receiver
             .await
             .map_err(|_| "Solver service stopped before responding".to_owned())?
     }
 }
 
-fn set_status(app: &AppHandle, status: SolverStatus) {
-    *app.state::<SolverBridge>().status.write().unwrap() = status;
-}
-
-pub(crate) fn fail_solver(app: &AppHandle, message: String) {
-    set_status(
-        app,
-        SolverStatus::Failed {
-            message: message.clone(),
-        },
-    );
-
-    for (_, sender) in app.state::<SolverBridge>().pending.lock().unwrap().drain() {
-        let _ = sender.send(Err(message.clone()));
-    }
-}
-
-fn handle_protocol_message(app: &AppHandle, line: &[u8]) {
+fn handle_protocol_message(state: &mut BridgeState, line: &[u8]) {
     let message = match parse_service_message(line) {
         Ok(message) => message,
         Err(error) => {
-            fail_solver(app, error);
+            state.fail(error);
             return;
         }
     };
-
     match message {
         ServiceMessage::Event(event) => match event {
             ServiceEvent::BuildingTree { total_iterations } => {
-                set_status(app, SolverStatus::BuildingTree { total_iterations });
+                state.status = SolverStatus::BuildingTree { total_iterations };
             }
             ServiceEvent::Solving {
                 completed_iterations,
                 total_iterations,
             } => {
-                set_status(
-                    app,
-                    SolverStatus::Solving {
-                        completed_iterations,
-                        total_iterations,
-                    },
-                );
+                state.status = SolverStatus::Solving {
+                    completed_iterations,
+                    total_iterations,
+                };
             }
             ServiceEvent::Ready {
                 iterations,
                 node_count,
                 root_node_id,
             } => {
-                set_status(
-                    app,
-                    SolverStatus::Ready {
-                        iterations,
-                        node_count,
-                        root_node_id,
-                    },
-                );
+                state.status = SolverStatus::Ready {
+                    iterations,
+                    node_count,
+                    root_node_id,
+                };
             }
-            ServiceEvent::Failed { message } => fail_solver(app, message),
+            ServiceEvent::Failed { message } => state.fail(message),
         },
         ServiceMessage::Response(response) => {
-            let Some(sender) = app
-                .state::<SolverBridge>()
-                .pending
-                .lock()
-                .unwrap()
-                .remove(&response.request_id)
-            else {
-                return;
-            };
-
-            let result = if response.ok {
-                response.node.ok_or_else(|| {
-                    "Invalid response from solver service: successful query has no node".to_owned()
-                })
-            } else {
-                Err(response
-                    .error
-                    .unwrap_or_else(|| "Solver request failed".to_owned()))
-            };
-            let _ = sender.send(result);
+            if let Some(sender) = state.pending.remove(&response.request_id) {
+                let result = if response.ok {
+                    response
+                        .node
+                        .or(response.equity)
+                        .ok_or_else(|| "Successful solver response has no data".to_owned())
+                } else {
+                    Err(response
+                        .error
+                        .unwrap_or_else(|| "Solver request failed".to_owned()))
+                };
+                let _ = sender.send(result);
+            }
         }
     }
 }
 
 async fn read_solver_events(
     app: AppHandle,
+    generation: u64,
     mut receiver: tauri::async_runtime::Receiver<CommandEvent>,
 ) {
     let mut stdout_buffer = Vec::new();
-
     while let Some(event) = receiver.recv().await {
+        let bridge = app.state::<SolverBridge>();
+        let mut state = bridge.0.lock().unwrap();
+        if state.generation != generation {
+            break;
+        }
         match event {
             CommandEvent::Stdout(bytes) => {
                 stdout_buffer.extend(bytes);
@@ -174,26 +167,17 @@ async fn read_solver_events(
                         line.pop();
                     }
                     if !line.is_empty() {
-                        handle_protocol_message(&app, &line);
+                        handle_protocol_message(&mut state, &line);
                     }
                 }
             }
-            CommandEvent::Stderr(bytes) => {
-                eprint!("{}", String::from_utf8_lossy(&bytes));
-            }
-            CommandEvent::Error(error) => {
-                fail_solver(&app, error);
-            }
+            CommandEvent::Stderr(bytes) => eprint!("{}", String::from_utf8_lossy(&bytes)),
+            CommandEvent::Error(error) => state.fail(error),
             CommandEvent::Terminated(payload) => {
-                if !matches!(
-                    *app.state::<SolverBridge>().status.read().unwrap(),
-                    SolverStatus::Failed { .. }
-                ) {
-                    fail_solver(
-                        &app,
-                        format!("Solver service exited unexpectedly: {payload:?}"),
-                    );
+                if !matches!(state.status, SolverStatus::Failed { .. }) {
+                    state.fail(format!("Solver service exited unexpectedly: {payload:?}"));
                 }
+                state.child = None;
                 break;
             }
             _ => {}
@@ -201,38 +185,34 @@ async fn read_solver_events(
     }
 }
 
-fn scenario_path(app: &AppHandle) -> Result<PathBuf, String> {
-    #[cfg(debug_assertions)]
-    {
-        let source_path =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../resources/default.json");
-        if source_path.is_file() {
-            return Ok(source_path);
+pub(crate) fn start_solver(app: &AppHandle, scenario: Value) -> Result<u64, String> {
+    let mut request = serde_json::to_vec(&scenario).map_err(|error| error.to_string())?;
+    request.push(b'\n');
+    let bridge = app.state::<SolverBridge>();
+    let mut state = bridge.0.lock().unwrap();
+    state.stop();
+    state.status = SolverStatus::Starting;
+    let result = (|| {
+        let sidecar = app
+            .shell()
+            .sidecar("solver-service")
+            .map_err(|error| error.to_string())?
+            .args(["--stdin"]);
+        let (receiver, mut child) = sidecar.spawn().map_err(|error| error.to_string())?;
+        if let Err(error) = child.write(&request) {
+            let _ = child.kill();
+            return Err(error.to_string());
         }
+        state.child = Some(child);
+        tauri::async_runtime::spawn(read_solver_events(app.clone(), state.generation, receiver));
+        Ok(state.generation)
+    })();
+    if let Err(error) = &result {
+        state.fail(error.clone());
     }
-
-    app.path()
-        .resource_dir()
-        .map(|directory| directory.join("default.json"))
-        .map_err(|error| error.to_string())
-}
-
-pub(crate) fn start_solver(app: &AppHandle) -> Result<(), String> {
-    let scenario_path = scenario_path(app)?;
-    let sidecar = app
-        .shell()
-        .sidecar("solver-service")
-        .map_err(|error| error.to_string())?
-        .args([scenario_path.to_string_lossy().into_owned()]);
-    let (receiver, child) = sidecar.spawn().map_err(|error| error.to_string())?;
-
-    *app.state::<SolverBridge>().child.lock().unwrap() = Some(child);
-    tauri::async_runtime::spawn(read_solver_events(app.clone(), receiver));
-    Ok(())
+    result
 }
 
 pub(crate) fn stop_solver(app: &AppHandle) {
-    if let Some(child) = app.state::<SolverBridge>().child.lock().unwrap().take() {
-        let _ = child.kill();
-    }
+    app.state::<SolverBridge>().0.lock().unwrap().stop();
 }

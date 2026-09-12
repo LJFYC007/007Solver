@@ -1,6 +1,7 @@
 #pragma once
 
 #include "analysis/NodeReport.h"
+#include "analysis/EquityReport.h"
 #include "analysis/ReachCalculator.h"
 #include "engine/SolveResult.h"
 #include <vector>
@@ -18,6 +19,7 @@ public:
 
     game::NodeId RootNode() const { return result_.Problem().game->Root(); }
     NodeReport QueryNode(game::NodeId nodeId);
+    EquityReport QueryEquity(game::NodeId nodeId);
 
 private:
     engine::SolveResult result_;

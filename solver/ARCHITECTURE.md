@@ -1,9 +1,9 @@
 # Solver Architecture
 
-007 Solver is a Windows/macOS desktop application for solving a heads-up postflop game and browsing its strategy. The C++ service performs one solve at startup and then serves node queries.
+007 Solver is a Windows/macOS desktop application for solving a heads-up postflop game and browsing its strategy. The desktop starts with captured preflop strategies; each C++ service process performs one requested postflop solve and then serves node queries.
 
 ```text
-Scenario file -> game and ranges -> concrete decision tree
+Scenario file or first stdin line -> game and ranges -> concrete decision tree
               -> CPU DCFR training -> strategy snapshot -> exploitability evaluation
               -> read-only result -> node analysis <-> NDJSON <-> Rust/Tauri <-> React
 ```
@@ -93,15 +93,27 @@ The initial joint profile is normalized over legal hand pairs. Products and norm
 
 A hand with zero joint reach has an empty strategy and null node EV in the report. It may still have positive own reach. The UI distinguishes this from a combo excluded by the board or absent from the input range. Matrix fill uses own reach weights; action aggregation uses own reach weights only for hands with an available strategy. With no available strategy, the UI displays an empty state.
 
-Queries compute the requested node's hand EVs synchronously. The service serves one request at a time; it does not support cancellation, re-solving or switching results.
+Queries compute the requested node's hand EVs synchronously. The service serves one request at a time and retains one result. Desktop cancellation or re-solving terminates that process; a new solve uses a new process.
+
+## Preflop input boundary
+
+`resources/gtowizard-preflop/` stores observed GTO Wizard action matrices, solution settings and source histories. `catalog.json` holds shared metadata; each `6max/<actor>.json` or `8max/<actor>.json` holds that acting position's nodes. TypeScript's `catalog.ts` indexes them by solution and full history, rejecting duplicate histories and position/solution mismatches. `preflop.ts` replays a selected line. It normalizes each displayed frequency row, multiplies only the acting player's own range by that action, and drops hands absent from that source matrix. It does not infer missing strategies. JSON catalog details stay outside C++ core/game/engine.
+
+Replay tracks folded seats, total commitments and pending actors. Raises are amount-to, calls match the highest commitment, and folded blinds/contributions remain in the pot. A completed two-player line plus three distinct cards becomes a postflop scenario. Postflop seat order determines OOP/villain (1) and IP/hero (0), independent of who opened. The adapter maps one source bb to one scenario chip; core chip arithmetic is unchanged. Exact combos share their class weight, and the engine applies public-board blockers. The imported heads-up model does not retain folded-player card-removal correlations.
+
+The catalog is frozen at 208 captured decision spots (87 for 6-max and 121 for 8-max); unavailable branches cannot start an invented continuation. The UI retains its preflop history and board while showing a solve. The CLI example and all range-containing fixtures derive from this catalog; test reductions are explicitly recorded in each scenario's `rangeSource` metadata.
 
 ## Desktop boundary
+
+`solver_service <path>` reads a scenario file. `solver_service --stdin` reads the first line as scenario JSON, then uses the remaining stdin lines for node queries. `io::ReadScenario` supplies the same parser and validation to both paths.
 
 The service writes one JSON message per stdout line; diagnostics go to stderr. Startup events are `building_tree`, `solving` and `ready`, or `failed`. Ready provides `iterations`, `nodeCount` and `rootNodeId`.
 
 A `query_node` request carries `requestId` and `nodeId`. Success returns a node with `nodeId`, state, and decision actions or chance outcomes containing `nextNodeId`. The JSON adapter formats cards and chip amounts. Invalid requests receive an error without ending the query loop; errors with no usable request ID use 0.
 
-Rust manages the child process and pending requests and passes node JSON through to React. TypeScript describes the node shape; Rust checks the response envelope rather than duplicating the complete node DTO. Protocol changes must be coordinated across the C++ serializer, Rust envelope and TypeScript consumer.
+A `query_equity` request uses the same request/node IDs and returns `equity` containing both players' overall showdown equity and exact-hand own weights/equities. `AnalysisSession::QueryEquity` uses the current `ReachFor` own ranges, enumerates public runouts, and calls the existing core evaluator. Sorted ranks and per-card blocker mass give each hand's win/tie/compatible mass without traversing future betting actions. Identical hands receive the double-blocker correction; small residual masses use direct compatible-hand summation. Per-hand equity divides by compatible opponent mass; overall equity weights that mass by the player's own weight. Empty joint support yields null equity. Node state also includes both players' board-filtered own-reach combo counts, so the UI need not reconstruct unavailable zero-joint strategies.
+
+Rust starts idle and manages the child process and pending requests under one mutex. Starting or cancelling increments a generation, kills the old child and rejects its pending requests. Child events and queries must match the active generation; React resets its node cache for each generation. Rust passes node and equity JSON through to React. TypeScript describes the node shape; Rust checks the response envelope rather than duplicating the complete node DTO. Protocol changes must be coordinated across the C++ serializer, Rust envelope and TypeScript consumer.
 
 ## Current limits
 
@@ -109,4 +121,4 @@ The full concrete tree, tabular training state and exact evaluation limit the si
 
 DCFR allocates dense root-hand rows for all nodes, trading higher memory use for regular full traversals and parallel execution.
 
-The desktop uses one bundled flop scenario. There is no scenario editor, hand-history importer, solution storage, GPU implementation or neural model.
+The desktop offers a unified preflop-to-river Study workspace with shared inspector and board picker. History selection preserves the current solution. A changed preflop line clears the board and solution; a completed playable heads-up line opens the flop picker automatically. A changed flop invalidates the solution. Board history cards provide the edit entry point. A chance node with either remaining stack at zero is a forced runout: the UI ends the betting line without deleting chance outcomes or asking for more cards. Facing an all-in remains a decision until call/fold resolves it. The inspector shares a fixed-size detail area for Table and Equity chart; selecting a different hand only changes combo tiles. Its SVG uses the observed plot dimensions for rendering and pointer coordinates. At decision nodes, joint-marginal-weighted actor EV and current pot determine both players' EV; at forced showdowns, EV is equity times pot. EQR is explicitly defined as current-node EV / (equity × current pot). Ordinary chance EV is unavailable. React guards stale navigation/equity responses by solution generation and selected node. Multiway postflop solving, arbitrary range editing, hand-history import, solution storage, GPU implementation and neural models are not implemented.

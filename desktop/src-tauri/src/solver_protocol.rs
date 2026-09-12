@@ -4,6 +4,7 @@ use serde_json::Value;
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase", tag = "state")]
 pub(crate) enum SolverStatus {
+    Idle,
     Starting,
     BuildingTree {
         #[serde(rename = "totalIterations")]
@@ -58,6 +59,7 @@ pub(crate) struct ServiceResponse {
     pub request_id: u64,
     pub ok: bool,
     pub node: Option<Value>,
+    pub equity: Option<Value>,
     pub error: Option<String>,
 }
 
@@ -81,10 +83,14 @@ pub(crate) fn parse_service_message(line: &[u8]) -> Result<ServiceMessage, Strin
         .map_err(|error| format!("Invalid response from solver service: {error}"))
 }
 
-pub(crate) fn encode_query_node(request_id: u64, node_id: i32) -> Result<Vec<u8>, String> {
+pub(crate) fn encode_query(
+    request_id: u64,
+    node_id: i32,
+    command: &'static str,
+) -> Result<Vec<u8>, String> {
     serde_json::to_vec(&QueryNodeRequest {
         request_id,
-        command: "query_node",
+        command,
         node_id,
     })
     .map_err(|error| error.to_string())

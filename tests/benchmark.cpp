@@ -152,8 +152,8 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
     auto scenario = io::LoadScenario(fixturePath);
     const auto& betPercentages = input.at("benchmark").at("betPercentages");
     ASSERT_EQ(betPercentages, Json::array({50, 100}));
-    ASSERT_EQ(input.at("heroStack"), 20.0);
-    ASSERT_EQ(input.at("villainStack"), 20.0);
+    ASSERT_EQ(input.at("heroStack"), 15.0);
+    ASSERT_EQ(input.at("villainStack"), 15.0);
     // Benchmark-only sizing; the external oracle reads the same fixture list.
     scenario.game.bettingAbstraction.betSizes.clear();
     for (const auto& percent : betPercentages)

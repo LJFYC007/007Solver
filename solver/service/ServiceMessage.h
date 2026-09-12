@@ -1,6 +1,7 @@
 #pragma once
 
 #include "analysis/NodeReport.h"
+#include "analysis/EquityReport.h"
 #include "game/Identifiers.h"
 #include <cstdint>
 #include <optional>
@@ -28,6 +29,7 @@ struct ServiceMessage
     game::NodeId rootNodeId{0};
     std::string text;
     std::optional<analysis::NodeReport> node;
+    std::optional<analysis::EquityReport> equity;
 };
 
 struct ServiceRequest
@@ -35,5 +37,6 @@ struct ServiceRequest
     std::uint64_t requestId = 0;
     std::optional<game::NodeId> nodeId;
     std::string validationError;
+    bool equity = false;
 };
 } // namespace solver::service

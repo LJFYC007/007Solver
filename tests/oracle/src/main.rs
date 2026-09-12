@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 use std::{fs, path::Path};
 
 const SCALE: f32 = 500.0;
+const MAX_REFERENCE_ITERATIONS: u32 = 100_000;
 const REVISION: &str = "9d1509fe5077d019825f833eed04b16d342dfda1";
 
 fn game_for(scenario: &Value) -> PostFlopGame {
@@ -83,12 +84,12 @@ fn fixed_policy(game: &mut PostFlopGame) -> Value {
                     0.25
                 } else {
                     1.0
-                } // AQ / QJ
+                } // A5s / KK
             } else if ranks.contains(&11) {
                 0.0
             } else {
                 1.0
-            }); // KQ / JT
+            }); // AKs / QQ
         }
         let entries: Vec<_> = hands
             .iter()
@@ -181,11 +182,11 @@ fn main() {
                 .unwrap();
         // These values avoid different chip rounding / minimum-bet rules in the two solvers.
         assert_eq!(scenario["initialPot"], 5.0);
-        assert_eq!(scenario["heroStack"], 20.0);
+        assert_eq!(scenario["heroStack"], 15.0);
         assert_eq!(scenario["benchmark"]["betPercentages"], json!([50, 100]));
         let mut game = game_for(&scenario);
         let uniform = metrics(&game);
-        let exploitability = solve(&mut game, 10000, SCALE * 1e-5, true) / SCALE;
+        let exploitability = solve(&mut game, MAX_REFERENCE_ITERATIONS, SCALE * 1e-5, true) / SCALE;
         assert!(
             (0.0..=1e-5).contains(&exploitability),
             "Wide reference did not converge: {exploitability}"
@@ -218,8 +219,12 @@ fn main() {
         .unwrap();
         let mut game = game_for(&scenario);
         let uniform = metrics(&game);
-        let exploitability = solve(&mut game, 10000, SCALE * 1e-5, false);
-        assert!(exploitability / SCALE <= 1e-5);
+        let exploitability = solve(&mut game, MAX_REFERENCE_ITERATIONS, SCALE * 1e-5, false);
+        assert!(
+            exploitability / SCALE <= 1e-5,
+            "{name} reference did not converge: {}",
+            exploitability / SCALE
+        );
         let solved = metrics(&game);
         let mut game = game_for(&scenario);
         let policy = if name == "weighted-flop" {

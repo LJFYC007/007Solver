@@ -1,0 +1,769 @@
+[
+  {
+    "sourceUrl": "https://app.gtowizard.com/solutions?gametype=Cash6mGeneral_6mcEVR25&depth=100&gmfft_sort_key=0&gmfft_sort_order=desc&solution_type=gwiz&gmfs_solution_tab=ai_sols&soltab=strategy&gmff_rake=cEV&history_spot=8&preflop_actions=R2.5-F-F-F-F-R12.5-R26.5-R53",
+    "actor": "UTG",
+    "history": [
+      {
+        "actor": "UTG",
+        "action": "Raise 2.5"
+      },
+      {
+        "actor": "HJ",
+        "action": "Fold"
+      },
+      {
+        "actor": "CO",
+        "action": "Fold"
+      },
+      {
+        "actor": "BTN",
+        "action": "Fold"
+      },
+      {
+        "actor": "SB",
+        "action": "Fold"
+      },
+      {
+        "actor": "BB",
+        "action": "Raise 12.5"
+      },
+      {
+        "actor": "UTG",
+        "action": "Raise 26.5"
+      },
+      {
+        "actor": "BB",
+        "action": "Raise 53"
+      }
+    ],
+    "actions": [
+      {
+        "code": "RAI",
+        "color": "rgb(103, 18, 47)",
+        "displayedCombos": "5.79 combos",
+        "displayedFrequency": "53.6%",
+        "label": "Allin 100"
+      },
+      {
+        "code": "C",
+        "color": "rgb(106, 194, 103)",
+        "displayedCombos": "0.29 combos",
+        "displayedFrequency": "2.7%",
+        "label": "Call"
+      },
+      {
+        "code": "F",
+        "color": "rgb(13, 112, 156)",
+        "displayedCombos": "4.72 combos",
+        "displayedFrequency": "43.7%",
+        "label": "Fold"
+      }
+    ],
+    "hands": {
+      "88": [0, 9878, 122],
+      "99": [0, 9242, 758],
+      "AA": [9963, 37, 0],
+      "AKs": [9868, 132, 0],
+      "ATs": [0, 217, 9783],
+      "A9s": [0, 1, 9999],
+      "A8s": [0, 0, 10000],
+      "A7s": [0, 1, 9999],
+      "A6s": [0, 0, 10000],
+      "A5s": [0, 38, 9962],
+      "A4s": [0, 33, 9967],
+      "A3s": [0, 0, 10000],
+      "A2s": [0, 0, 10000],
+      "AKo": [9198, 314, 488],
+      "KK": [9450, 550, 0],
+      "KJs": [0, 0, 10000],
+      "KTs": [0, 0, 10000],
+      "K9s": [0, 0, 10000],
+      "K8s": [0, 0, 10000],
+      "K7s": [0, 0, 10000],
+      "K6s": [0, 0, 10000],
+      "AQo": [0, 0, 10000],
+      "JJ": [0, 9983, 17],
+      "TT": [4341, 5231, 428]
+    }
+  },
+  {
+    "sourceUrl": "https://app.gtowizard.com/solutions?gametype=Cash6mGeneral_6mcEVR25&depth=100&gmfft_sort_key=0&gmfft_sort_order=desc&solution_type=gwiz&gmfs_solution_tab=ai_sols&soltab=strategy&gmff_rake=cEV&history_spot=8&preflop_actions=R2.5-F-F-F-F-R12.5-R26.5-RAI",
+    "actor": "UTG",
+    "history": [
+      {
+        "actor": "UTG",
+        "action": "Raise 2.5"
+      },
+      {
+        "actor": "HJ",
+        "action": "Fold"
+      },
+      {
+        "actor": "CO",
+        "action": "Fold"
+      },
+      {
+        "actor": "BTN",
+        "action": "Fold"
+      },
+      {
+        "actor": "SB",
+        "action": "Fold"
+      },
+      {
+        "actor": "BB",
+        "action": "Raise 12.5"
+      },
+      {
+        "actor": "UTG",
+        "action": "Raise 26.5"
+      },
+      {
+        "actor": "BB",
+        "action": "Allin 100"
+      }
+    ],
+    "actions": [
+      {
+        "code": "C",
+        "color": "rgb(106, 194, 103)",
+        "displayedCombos": "6 combos",
+        "displayedFrequency": "55.6%",
+        "label": "Call"
+      },
+      {
+        "code": "F",
+        "color": "rgb(13, 112, 156)",
+        "displayedCombos": "4.8 combos",
+        "displayedFrequency": "44.4%",
+        "label": "Fold"
+      }
+    ],
+    "hands": {
+      "88": [3409, 6591],
+      "99": [6461, 3539],
+      "A2s": [0, 10000],
+      "A3s": [0, 10000],
+      "A4s": [0, 10000],
+      "A5s": [0, 10000],
+      "A6s": [0, 10000],
+      "A7s": [0, 10000],
+      "A8s": [0, 10000],
+      "A9s": [0, 10000],
+      "AA": [10000, 0],
+      "AKo": [9228, 772],
+      "AKs": [10000, 0],
+      "AQo": [0, 10000],
+      "ATs": [0, 10000],
+      "JJ": [9998, 2],
+      "K6s": [0, 10000],
+      "K7s": [0, 10000],
+      "K8s": [0, 10000],
+      "K9s": [0, 10000],
+      "KJs": [0, 10000],
+      "KK": [10000, 0],
+      "KTs": [0, 10000],
+      "TT": [9996, 4]
+    }
+  },
+  {
+    "sourceUrl": "https://app.gtowizard.com/solutions?gametype=Cash6mGeneral_6mcEVR25&depth=100&gmfft_sort_key=0&gmfft_sort_order=desc&solution_type=gwiz&gmfs_solution_tab=ai_sols&soltab=strategy&gmff_rake=cEV&history_spot=6&preflop_actions=R2.5-F-F-F-F-R12.5",
+    "actor": "UTG",
+    "history": [
+      {
+        "actor": "UTG",
+        "action": "Raise 2.5"
+      },
+      {
+        "actor": "HJ",
+        "action": "Fold"
+      },
+      {
+        "actor": "CO",
+        "action": "Fold"
+      },
+      {
+        "actor": "BTN",
+        "action": "Fold"
+      },
+      {
+        "actor": "SB",
+        "action": "Fold"
+      },
+      {
+        "actor": "BB",
+        "action": "Raise 12.5"
+      }
+    ],
+    "actions": [
+      {
+        "code": "RAI",
+        "color": "rgb(103, 18, 47)",
+        "displayedCombos": "6.65 combos",
+        "displayedFrequency": "2.8%",
+        "label": "Allin 100"
+      },
+      {
+        "code": "R26.5",
+        "color": "rgb(199, 34, 91)",
+        "displayedCombos": "10.8 combos",
+        "displayedFrequency": "4.6%",
+        "label": "Raise 26.5"
+      },
+      {
+        "code": "C",
+        "color": "rgb(106, 194, 103)",
+        "displayedCombos": "80.76 combos",
+        "displayedFrequency": "34.3%",
+        "label": "Call"
+      },
+      {
+        "code": "F",
+        "color": "rgb(13, 112, 156)",
+        "displayedCombos": "137.37 combos",
+        "displayedFrequency": "58.3%",
+        "label": "Fold"
+      }
+    ],
+    "hands": {
+      "22": [0, 0, 0, 10000],
+      "33": [0, 0, 1749, 8251],
+      "44": [0, 0, 1185, 8815],
+      "55": [0, 0, 1318, 8682],
+      "66": [0, 0, 3153, 6847],
+      "77": [0, 0, 4723, 5277],
+      "88": [0, 70, 4688, 5242],
+      "99": [0, 29, 4786, 5186],
+      "AA": [1141, 5504, 3355, 0],
+      "AKs": [0, 162, 9838, 0],
+      "AQs": [0, 0, 10000, 0],
+      "AJs": [0, 0, 9999, 1],
+      "ATs": [0, 296, 9693, 10],
+      "A9s": [0, 1009, 2203, 6788],
+      "A8s": [0, 1353, 987, 7660],
+      "A7s": [0, 1115, 19, 8866],
+      "A6s": [0, 86, 0, 9914],
+      "A5s": [0, 959, 8999, 41],
+      "A4s": [0, 1338, 3711, 4952],
+      "A3s": [0, 827, 0, 9173],
+      "A2s": [0, 55, 0, 9945],
+      "AKo": [4193, 1393, 4414, 0],
+      "KK": [1559, 1418, 7023, 0],
+      "KQs": [0, 1, 9997, 1],
+      "KJs": [0, 1735, 3779, 4485],
+      "KTs": [0, 1447, 1074, 7479],
+      "K9s": [0, 497, 0, 9503],
+      "K8s": [0, 9, 0, 9991],
+      "K7s": [0, 8, 0, 9992],
+      "K6s": [0, 1113, 0, 8887],
+      "K5s": [0, 0, 0, 10000],
+      "AQo": [0, 286, 0, 9714],
+      "KQo": [0, 0, 0, 10000],
+      "QQ": [0, 0, 10000, 0],
+      "QJs": [0, 0, 4974, 5026],
+      "QTs": [0, 0, 580, 9420],
+      "Q9s": [0, 0, 0, 10000],
+      "AJo": [0, 0, 0, 10000],
+      "KJo": [0, 0, 0, 10000],
+      "QJo": [0, 0, 0, 10000],
+      "JJ": [0, 7, 9992, 2],
+      "JTs": [0, 0, 5689, 4311],
+      "J9s": [0, 0, 0, 10000],
+      "ATo": [0, 0, 0, 10000],
+      "KTo": [0, 0, 0, 10000],
+      "JTo": [0, 0, 0, 10000],
+      "TT": [0, 358, 5870, 3773],
+      "T9s": [0, 0, 6043, 3957],
+      "T8s": [0, 0, 0, 10000],
+      "98s": [0, 0, 3928, 6072],
+      "87s": [0, 0, 9993, 7],
+      "76s": [0, 0, 9993, 7],
+      "65s": [0, 0, 9997, 3],
+      "54s": [0, 0, 7514, 2486]
+    }
+  },
+  {
+    "sourceUrl": "https://app.gtowizard.com/solutions?gametype=Cash6mGeneral_6mcEVR25&depth=100&gmfft_sort_key=0&gmfft_sort_order=desc&solution_type=gwiz&gmfs_solution_tab=ai_sols&soltab=strategy&gmff_rake=cEV&history_spot=8&preflop_actions=R2.5-F-F-F-R11.5-F-R24-R48",
+    "actor": "UTG",
+    "history": [
+      {
+        "actor": "UTG",
+        "action": "Raise 2.5"
+      },
+      {
+        "actor": "HJ",
+        "action": "Fold"
+      },
+      {
+        "actor": "CO",
+        "action": "Fold"
+      },
+      {
+        "actor": "BTN",
+        "action": "Fold"
+      },
+      {
+        "actor": "SB",
+        "action": "Raise 11.5"
+      },
+      {
+        "actor": "BB",
+        "action": "Fold"
+      },
+      {
+        "actor": "UTG",
+        "action": "Raise 24"
+      },
+      {
+        "actor": "SB",
+        "action": "Raise 48"
+      }
+    ],
+    "actions": [
+      {
+        "code": "RAI",
+        "color": "rgb(103, 18, 47)",
+        "displayedCombos": "7.06 combos",
+        "displayedFrequency": "49.1%",
+        "label": "Allin 100"
+      },
+      {
+        "code": "C",
+        "color": "rgb(106, 194, 103)",
+        "displayedCombos": "1.24 combos",
+        "displayedFrequency": "8.6%",
+        "label": "Call"
+      },
+      {
+        "code": "F",
+        "color": "rgb(13, 112, 156)",
+        "displayedCombos": "6.08 combos",
+        "displayedFrequency": "42.3%",
+        "label": "Fold"
+      }
+    ],
+    "hands": {
+      "66": [0, 9989, 11],
+      "77": [0, 9970, 30],
+      "88": [186, 7784, 2030],
+      "99": [1038, 899, 8063],
+      "87s": [0, 9820, 180],
+      "A3s": [0, 0, 10000],
+      "A4s": [0, 17, 9983],
+      "A5s": [0, 948, 9052],
+      "A6s": [0, 0, 10000],
+      "A7s": [0, 0, 10000],
+      "A8s": [0, 0, 10000],
+      "A9s": [0, 0, 10000],
+      "AA": [8879, 1121, 0],
+      "AJs": [0, 4839, 5161],
+      "AKo": [7666, 714, 1621],
+      "AKs": [9346, 654, 0],
+      "AQo": [0, 0, 10000],
+      "ATs": [0, 275, 9725],
+      "JJ": [2285, 7715, 0],
+      "K9s": [0, 0, 10000],
+      "KJs": [0, 0, 10000],
+      "KK": [9996, 4, 0],
+      "KQs": [0, 0, 10000],
+      "KTs": [0, 0, 10000],
+      "TT": [6499, 2616, 884]
+    }
+  },
+  {
+    "sourceUrl": "https://app.gtowizard.com/solutions?gametype=Cash6mGeneral_6mcEVR25&depth=100&gmfft_sort_key=0&gmfft_sort_order=desc&solution_type=gwiz&gmfs_solution_tab=ai_sols&soltab=strategy&gmff_rake=cEV&history_spot=8&preflop_actions=R2.5-F-F-F-R11.5-F-R24-RAI",
+    "actor": "UTG",
+    "history": [
+      {
+        "actor": "UTG",
+        "action": "Raise 2.5"
+      },
+      {
+        "actor": "HJ",
+        "action": "Fold"
+      },
+      {
+        "actor": "CO",
+        "action": "Fold"
+      },
+      {
+        "actor": "BTN",
+        "action": "Fold"
+      },
+      {
+        "actor": "SB",
+        "action": "Raise 11.5"
+      },
+      {
+        "actor": "BB",
+        "action": "Fold"
+      },
+      {
+        "actor": "UTG",
+        "action": "Raise 24"
+      },
+      {
+        "actor": "SB",
+        "action": "Allin 100"
+      }
+    ],
+    "actions": [
+      {
+        "code": "C",
+        "color": "rgb(106, 194, 103)",
+        "displayedCombos": "8.03 combos",
+        "displayedFrequency": "55.8%",
+        "label": "Call"
+      },
+      {
+        "code": "F",
+        "color": "rgb(13, 112, 156)",
+        "displayedCombos": "6.35 combos",
+        "displayedFrequency": "44.2%",
+        "label": "Fold"
+      }
+    ],
+    "hands": {
+      "66": [96, 9904],
+      "77": [489, 9511],
+      "88": [76, 9924],
+      "99": [706, 9294],
+      "87s": [0, 10000],
+      "A3s": [0, 10000],
+      "A4s": [0, 10000],
+      "A5s": [0, 10000],
+      "A6s": [0, 10000],
+      "A7s": [0, 10000],
+      "A8s": [0, 10000],
+      "A9s": [0, 10000],
+      "AA": [10000, 0],
+      "AJs": [0, 10000],
+      "AKo": [8578, 1422],
+      "AKs": [10000, 0],
+      "AQo": [0, 10000],
+      "ATs": [0, 10000],
+      "JJ": [9989, 11],
+      "K9s": [0, 10000],
+      "KJs": [0, 10000],
+      "KK": [10000, 0],
+      "KQs": [0, 10000],
+      "KTs": [0, 10000],
+      "TT": [9999, 1]
+    }
+  },
+  {
+    "sourceUrl": "https://app.gtowizard.com/solutions?gametype=Cash6mGeneral_6mcEVR25&depth=100&gmfft_sort_key=0&gmfft_sort_order=desc&solution_type=gwiz&gmfs_solution_tab=ai_sols&soltab=strategy&gmff_rake=cEV&history_spot=6&preflop_actions=R2.5-F-F-F-R11.5-F",
+    "actor": "UTG",
+    "history": [
+      {
+        "actor": "UTG",
+        "action": "Raise 2.5"
+      },
+      {
+        "actor": "HJ",
+        "action": "Fold"
+      },
+      {
+        "actor": "CO",
+        "action": "Fold"
+      },
+      {
+        "actor": "BTN",
+        "action": "Fold"
+      },
+      {
+        "actor": "SB",
+        "action": "Raise 11.5"
+      },
+      {
+        "actor": "BB",
+        "action": "Fold"
+      }
+    ],
+    "actions": [
+      {
+        "code": "RAI",
+        "color": "rgb(103, 18, 47)",
+        "displayedCombos": "4.56 combos",
+        "displayedFrequency": "1.9%",
+        "label": "Allin 100"
+      },
+      {
+        "code": "R24",
+        "color": "rgb(199, 34, 91)",
+        "displayedCombos": "14.38 combos",
+        "displayedFrequency": "6.1%",
+        "label": "Raise 24"
+      },
+      {
+        "code": "C",
+        "color": "rgb(106, 194, 103)",
+        "displayedCombos": "88 combos",
+        "displayedFrequency": "37.4%",
+        "label": "Call"
+      },
+      {
+        "code": "F",
+        "color": "rgb(13, 112, 156)",
+        "displayedCombos": "128.63 combos",
+        "displayedFrequency": "54.6%",
+        "label": "Fold"
+      }
+    ],
+    "hands": {
+      "22": [0, 0, 9523, 477],
+      "33": [0, 0, 7089, 2911],
+      "44": [0, 0, 1760, 8240],
+      "55": [0, 0, 638, 9362],
+      "66": [0, 9, 4621, 5370],
+      "77": [0, 22, 4983, 4995],
+      "88": [0, 269, 5631, 4100],
+      "99": [0, 316, 6437, 3247],
+      "54s": [0, 0, 10000, 0],
+      "65s": [0, 0, 10000, 0],
+      "76s": [0, 0, 10000, 0],
+      "87s": [0, 375, 9625, 0],
+      "98s": [0, 0, 2754, 7246],
+      "A2s": [0, 1, 0, 9999],
+      "A3s": [0, 1109, 0, 8891],
+      "A4s": [0, 1304, 3173, 5523],
+      "A5s": [0, 1569, 8412, 19],
+      "A6s": [0, 23, 0, 9977],
+      "A7s": [0, 887, 0, 9113],
+      "A8s": [0, 1616, 7, 8377],
+      "A9s": [0, 436, 814, 8750],
+      "AA": [169, 6833, 2998, 0],
+      "AJo": [0, 0, 0, 10000],
+      "AJs": [0, 261, 9738, 1],
+      "AKo": [2581, 1161, 6258, 0],
+      "AKs": [0, 2118, 7882, 0],
+      "AQo": [0, 406, 0, 9594],
+      "AQs": [0, 0, 10000, 0],
+      "ATo": [0, 0, 0, 10000],
+      "ATs": [0, 296, 9694, 10],
+      "J9s": [0, 0, 0, 10000],
+      "JJ": [0, 436, 9564, 0],
+      "JTo": [0, 0, 0, 10000],
+      "JTs": [0, 0, 9915, 85],
+      "K5s": [0, 0, 0, 10000],
+      "K6s": [0, 29, 0, 9971],
+      "K7s": [0, 2, 0, 9998],
+      "K8s": [0, 1, 0, 9999],
+      "K9s": [0, 287, 0, 9713],
+      "KJo": [0, 0, 0, 10000],
+      "KJs": [0, 3213, 6670, 117],
+      "KK": [2277, 2039, 5684, 0],
+      "KQo": [0, 0, 0, 10000],
+      "KQs": [0, 407, 9593, 0],
+      "KTo": [0, 0, 0, 10000],
+      "KTs": [0, 1742, 781, 7478],
+      "Q9s": [0, 0, 0, 10000],
+      "QJo": [0, 0, 0, 10000],
+      "QJs": [0, 0, 6778, 3222],
+      "QQ": [0, 0, 10000, 0],
+      "QTs": [0, 0, 4, 9996],
+      "T8s": [0, 0, 0, 10000],
+      "T9s": [0, 0, 6645, 3355],
+      "TT": [0, 651, 9313, 36]
+    }
+  },
+  {
+    "sourceUrl": "https://app.gtowizard.com/solutions?gametype=Cash6mGeneral_6mcEVR25&depth=100&gmfft_sort_key=0&gmfft_sort_order=desc&solution_type=gwiz&gmfs_solution_tab=ai_sols&soltab=strategy&gmff_favorite=false&gmff_rake=cEV&history_spot=0",
+    "actor": "UTG",
+    "history": [],
+    "actions": [
+      {
+        "code": "RAI",
+        "color": "rgb(103, 18, 47)",
+        "displayedCombos": "0 combos",
+        "displayedFrequency": "0%",
+        "label": "Allin 100"
+      },
+      {
+        "code": "R2.5",
+        "color": "rgb(199, 34, 91)",
+        "displayedCombos": "235.58 combos",
+        "displayedFrequency": "17.8%",
+        "label": "Raise 2.5"
+      },
+      {
+        "code": "F",
+        "color": "rgb(13, 112, 156)",
+        "displayedCombos": "1090.42 combos",
+        "displayedFrequency": "82.2%",
+        "label": "Fold"
+      }
+    ],
+    "hands": {
+      "22": [0, 219, 9781],
+      "33": [0, 1997, 8003],
+      "44": [0, 5803, 4197],
+      "55": [0, 10000, 0],
+      "66": [0, 10000, 0],
+      "77": [0, 10000, 0],
+      "88": [0, 10000, 0],
+      "99": [0, 10000, 0],
+      "AA": [3, 9997, 0],
+      "AKs": [0, 10000, 0],
+      "AQs": [0, 10000, 0],
+      "AJs": [0, 10000, 0],
+      "ATs": [0, 10000, 0],
+      "A9s": [0, 10000, 0],
+      "A8s": [0, 10000, 0],
+      "A7s": [0, 10000, 0],
+      "A6s": [0, 10000, 0],
+      "A5s": [0, 10000, 0],
+      "A4s": [0, 10000, 0],
+      "A3s": [0, 10000, 0],
+      "A2s": [0, 6618, 3382],
+      "AKo": [0, 10000, 0],
+      "KK": [1, 9999, 0],
+      "KQs": [0, 10000, 0],
+      "KJs": [0, 10000, 0],
+      "KTs": [0, 10000, 0],
+      "K9s": [0, 9999, 1],
+      "K8s": [0, 9970, 30],
+      "K7s": [0, 8022, 1978],
+      "K6s": [0, 174, 9826],
+      "K5s": [0, 305, 9695],
+      "K4s": [0, 0, 10000],
+      "K3s": [0, 0, 10000],
+      "K2s": [0, 0, 10000],
+      "AQo": [0, 10000, 0],
+      "KQo": [0, 10000, 0],
+      "QQ": [0, 10000, 0],
+      "QJs": [0, 10000, 0],
+      "QTs": [0, 10000, 0],
+      "Q9s": [0, 9995, 5],
+      "Q8s": [0, 0, 10000],
+      "Q7s": [0, 0, 10000],
+      "Q6s": [0, 0, 10000],
+      "Q5s": [0, 0, 10000],
+      "Q4s": [0, 0, 10000],
+      "Q3s": [0, 0, 10000],
+      "Q2s": [0, 0, 10000],
+      "AJo": [0, 9994, 6],
+      "KJo": [0, 5009, 4991],
+      "QJo": [0, 2964, 7036],
+      "JJ": [0, 10000, 0],
+      "JTs": [0, 10000, 0],
+      "J9s": [0, 10000, 0],
+      "J8s": [0, 0, 10000],
+      "J7s": [0, 0, 10000],
+      "J6s": [0, 0, 10000],
+      "J5s": [0, 0, 10000],
+      "J4s": [0, 0, 10000],
+      "J3s": [0, 0, 10000],
+      "J2s": [0, 0, 10000],
+      "ATo": [0, 5398, 4602],
+      "KTo": [0, 528, 9472],
+      "QTo": [0, 0, 10000],
+      "JTo": [0, 264, 9736],
+      "TT": [0, 10000, 0],
+      "T9s": [0, 10000, 0],
+      "T8s": [0, 8424, 1576],
+      "T7s": [0, 0, 10000],
+      "T6s": [0, 0, 10000],
+      "T5s": [0, 0, 10000],
+      "T4s": [0, 0, 10000],
+      "T3s": [0, 0, 10000],
+      "T2s": [0, 0, 10000],
+      "A9o": [0, 0, 10000],
+      "K9o": [0, 0, 10000],
+      "Q9o": [0, 0, 10000],
+      "J9o": [0, 0, 10000],
+      "T9o": [0, 0, 10000],
+      "98s": [0, 4770, 5230],
+      "97s": [0, 0, 10000],
+      "96s": [0, 0, 10000],
+      "95s": [0, 0, 10000],
+      "94s": [0, 0, 10000],
+      "93s": [0, 0, 10000],
+      "92s": [0, 0, 10000],
+      "A8o": [0, 0, 10000],
+      "K8o": [0, 0, 10000],
+      "Q8o": [0, 0, 10000],
+      "J8o": [0, 0, 10000],
+      "T8o": [0, 0, 10000],
+      "98o": [0, 0, 10000],
+      "87s": [0, 3248, 6752],
+      "86s": [0, 0, 10000],
+      "85s": [0, 0, 10000],
+      "84s": [0, 0, 10000],
+      "83s": [0, 0, 10000],
+      "82s": [0, 0, 10000],
+      "A7o": [0, 0, 10000],
+      "K7o": [0, 0, 10000],
+      "Q7o": [0, 0, 10000],
+      "J7o": [0, 0, 10000],
+      "T7o": [0, 0, 10000],
+      "97o": [0, 0, 10000],
+      "87o": [0, 0, 10000],
+      "76s": [0, 3670, 6330],
+      "75s": [0, 0, 10000],
+      "74s": [0, 0, 10000],
+      "73s": [0, 0, 10000],
+      "72s": [0, 0, 10000],
+      "A6o": [0, 0, 10000],
+      "K6o": [0, 0, 10000],
+      "Q6o": [0, 0, 10000],
+      "J6o": [0, 0, 10000],
+      "T6o": [0, 0, 10000],
+      "96o": [0, 0, 10000],
+      "86o": [0, 0, 10000],
+      "76o": [0, 0, 10000],
+      "65s": [0, 5682, 4318],
+      "64s": [0, 0, 10000],
+      "63s": [0, 0, 10000],
+      "62s": [0, 0, 10000],
+      "A5o": [0, 0, 10000],
+      "K5o": [0, 0, 10000],
+      "Q5o": [0, 0, 10000],
+      "J5o": [0, 0, 10000],
+      "T5o": [0, 0, 10000],
+      "95o": [0, 0, 10000],
+      "85o": [0, 0, 10000],
+      "75o": [0, 0, 10000],
+      "65o": [0, 0, 10000],
+      "54s": [0, 3569, 6431],
+      "53s": [0, 0, 10000],
+      "52s": [0, 0, 10000],
+      "A4o": [0, 0, 10000],
+      "K4o": [0, 0, 10000],
+      "Q4o": [0, 0, 10000],
+      "J4o": [0, 0, 10000],
+      "T4o": [0, 0, 10000],
+      "94o": [0, 0, 10000],
+      "84o": [0, 0, 10000],
+      "74o": [0, 0, 10000],
+      "64o": [0, 0, 10000],
+      "54o": [0, 0, 10000],
+      "43s": [0, 0, 10000],
+      "42s": [0, 0, 10000],
+      "A3o": [0, 0, 10000],
+      "K3o": [0, 0, 10000],
+      "Q3o": [0, 0, 10000],
+      "J3o": [0, 0, 10000],
+      "T3o": [0, 0, 10000],
+      "93o": [0, 0, 10000],
+      "83o": [0, 0, 10000],
+      "73o": [0, 0, 10000],
+      "63o": [0, 0, 10000],
+      "53o": [0, 0, 10000],
+      "43o": [0, 0, 10000],
+      "32s": [0, 0, 10000],
+      "A2o": [0, 0, 10000],
+      "K2o": [0, 0, 10000],
+      "Q2o": [0, 0, 10000],
+      "J2o": [0, 0, 10000],
+      "T2o": [0, 0, 10000],
+      "92o": [0, 0, 10000],
+      "82o": [0, 0, 10000],
+      "72o": [0, 0, 10000],
+      "62o": [0, 0, 10000],
+      "52o": [0, 0, 10000],
+      "42o": [0, 0, 10000],
+      "32o": [0, 0, 10000]
+    }
+  }
+]

@@ -69,6 +69,26 @@ Json FormatHoleCards(core::HoleCards hand)
     return Json::array({core::FormatCard(cards[0]), core::FormatCard(cards[1])});
 }
 
+Json BuildEquityJson(const analysis::EquityReport& report)
+{
+    Json players = Json::object();
+    for (std::size_t player = 0; player < 2; ++player)
+    {
+        const auto& data = report.players[player];
+        Json hands = Json::array();
+        for (const auto& hand : data.hands)
+            hands.push_back(
+                {{"cards", FormatHoleCards(hand.cards)},
+                 {"ownReachWeight", hand.ownReachWeight},
+                 {"equity", hand.equity ? Json(*hand.equity) : Json(nullptr)}}
+            );
+        players[player == 0 ? "hero" : "villain"] = {
+            {"equity", data.equity ? Json(*data.equity) : Json(nullptr)}, {"hands", std::move(hands)}
+        };
+    }
+    return {{"nodeId", report.nodeId.Value()}, {"players", std::move(players)}};
+}
+
 Json BuildNodeJson(const analysis::NodeReport& node)
 {
     Json jsonNode = {
@@ -78,6 +98,7 @@ Json BuildNodeJson(const analysis::NodeReport& node)
              {"street", StreetCode(node.state.street)},
              {"board", FormatBoard(node.state.board)},
              {"pot", ToChipUnits(node.state.pot)},
+             {"rangeCombos", {{"hero", node.state.rangeCombos[0]}, {"villain", node.state.rangeCombos[1]}}},
              {"stacks",
               {
                   {"hero", ToChipUnits(node.state.stacks[0])},
@@ -156,7 +177,9 @@ ServiceRequest ParseServiceRequest(const std::string& jsonLine)
         if (!json.at("requestId").is_number_unsigned())
             throw std::invalid_argument("requestId must be a non-negative integer");
         request.requestId = json.at("requestId").get<std::uint64_t>();
-        if (json.at("command").get<std::string>() != "query_node")
+        const auto command = json.at("command").get<std::string>();
+        request.equity = command == "query_equity";
+        if (command != "query_node" && !request.equity)
             throw std::invalid_argument("Unknown solver command");
 
         const Json& nodeId = json.at("nodeId");
@@ -198,7 +221,11 @@ std::string ServiceMessageToJson(const ServiceMessage& message)
         json = {{"event", "failed"}, {"message", message.text}};
         break;
     case ServiceMessageKind::QuerySucceeded:
-        json = {{"requestId", message.requestId}, {"ok", true}, {"node", BuildNodeJson(*message.node)}};
+        json = {{"requestId", message.requestId}, {"ok", true}};
+        if (message.equity)
+            json["equity"] = BuildEquityJson(*message.equity);
+        else
+            json["node"] = BuildNodeJson(*message.node);
         break;
     case ServiceMessageKind::QueryFailed:
         json = {{"requestId", message.requestId}, {"ok", false}, {"error", message.text}};

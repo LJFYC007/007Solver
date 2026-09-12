@@ -1,11 +1,12 @@
 # Repository Guidelines
 
-007 Solver is a Windows/macOS heads-up postflop solver: C++17 engine/service, Rust/Tauri bridge, React/TypeScript UI. It solves `resources/default.json` once at startup. The next priority is CPU solver accuracy and performance.
+007 Solver is a Windows/macOS heads-up postflop solver: C++17 engine/service, Rust/Tauri bridge, React/TypeScript UI. It starts in the GTO Wizard preflop browser and solves the selected heads-up line and flop on demand. The next priority is CPU solver accuracy and performance.
 
 See [README.md](README.md) for setup, commands and repository layout, [solver/ARCHITECTURE.md](solver/ARCHITECTURE.md) for data semantics and ownership, and [tests/README.md](tests/README.md) for reference fixtures.
 
 ## Project constraints
 
+- Use `resources/gtowizard-preflop/` for application and test ranges. Do not introduce custom strategy ranges or fill missing source branches with estimates. Derive small test subsets with `scripts/sync-preflop-fixtures.py`; regenerate expected answers with the independent oracle.
 - Keep JSON and presentation details out of core, game and engine. Coordinate protocol changes across C++ serialization, Rust envelopes and TypeScript types; Rust passes node JSON through.
 - Each `NodeId` identifies one complete action and concrete-card history in one tree. `InfoSetKey` is a node plus an exact private hand. Preserve original suits and flop input order; use `Card.h` helpers.
 - Amounts use tenths of a chip, with no BB conversion. Player 0 is hero and player 1 is villain on the wire.

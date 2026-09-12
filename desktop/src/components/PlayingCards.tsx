@@ -1,22 +1,35 @@
 import { SUIT_SYMBOLS } from "../solver";
 
-export function Card({ card, compact = false }: { card: string; compact?: boolean }) {
+export function Card({ card }: { card: string }) {
     const rank = card[0] ?? "?";
     const suit = card[1] ?? "s";
     return (
-        <span className={`playing-card suit-${suit}${compact ? " compact" : ""}`}>
+        <span className={`playing-card suit-${suit}`}>
             <span>{rank}</span>
             <span>{SUIT_SYMBOLS[suit] ?? suit}</span>
         </span>
     );
 }
 
-export function Board({ board }: { board: string[] }) {
+export function BoardCard({ card, locked = false }: { card?: string; locked?: boolean }) {
     return (
-        <div className="board-cards" aria-label={`Board ${board.join(" ")}`}>
-            {board.map((card, index) => (
-                <Card card={card} key={`${card}-${index}`} />
-            ))}
-        </div>
+        <span className={`board-card ${card ? `suit-${card[1]}` : "empty"}`}>
+            {card && (
+                <>
+                    <span className="card-watermark" aria-hidden="true">
+                        {SUIT_SYMBOLS[card[1]]}
+                    </span>
+                    <b>{card[0]}</b>
+                    <span className="card-suit" aria-hidden="true">
+                        {SUIT_SYMBOLS[card[1]]}
+                    </span>
+                </>
+            )}
+            {locked && (
+                <span className="card-lock" aria-label="Locked">
+                    ▣
+                </span>
+            )}
+        </span>
     );
 }

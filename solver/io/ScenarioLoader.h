@@ -2,6 +2,7 @@
 
 #include "core/Range.h"
 #include "game/GameSpec.h"
+#include <istream>
 #include <string>
 
 namespace solver::io
@@ -14,4 +15,5 @@ struct Scenario
 };
 
 Scenario LoadScenario(const std::string& jsonPath);
+Scenario ReadScenario(std::istream& input);
 } // namespace solver::io

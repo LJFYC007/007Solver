@@ -1,8 +1,10 @@
-import type { DecisionAction, DecisionNode, HandStrategy, Player } from "./types";
+import type { DecisionAction, DecisionNode, HandStrategy, SolverNode } from "./types";
+
+export const isForcedRunout = (node?: SolverNode) =>
+    node?.kind === "chance" && (node.state.stacks.hero === 0 || node.state.stacks.villain === 0);
 
 export interface AggregatedAction {
-    amountTo: number;
-    chipsCommitted: number;
+    combos: number;
     color: string;
     index: number;
     isAllIn: boolean;
@@ -14,12 +16,12 @@ export interface AggregatedAction {
 export interface HandGroup {
     actions: AggregatedAction[];
     hands: HandStrategy[];
-    label: string;
     ownReachWeight: number;
 }
 
 export const RANKS = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"] as const;
 export const SUITS = ["s", "h", "d", "c"] as const;
+export const HAND_CLASSES = RANKS.flatMap((_, row) => RANKS.map((__, column) => matrixLabel(row, column)));
 export const SUIT_SYMBOLS: Record<string, string> = {
     c: "♣",
     d: "♦",
@@ -27,26 +29,21 @@ export const SUIT_SYMBOLS: Record<string, string> = {
     s: "♠",
 };
 
-export function playerLabel(player: Player): string {
-    return player === "hero" ? "Hero" : "Villain";
-}
-
 export function actionLabel(action: Pick<DecisionAction, "amountTo" | "chipsCommitted" | "isAllIn" | "kind">): string {
-    const allInSuffix = action.isAllIn ? " (all-in)" : "";
     if (action.kind === "fold") return "Fold";
     if (action.kind === "check") return "Check";
-    if (action.kind === "call") return `Call ${formatNumber(action.chipsCommitted)}${allInSuffix}`;
-    if (action.kind === "bet") return `Bet ${formatNumber(action.amountTo)}${allInSuffix}`;
-    return `Raise to ${formatNumber(action.amountTo)}${allInSuffix}`;
+    if (action.kind === "call") return "Call";
+    if (action.isAllIn) return `Allin ${formatNumber(action.amountTo)}`;
+    return `${action.kind === "bet" ? "Bet" : "Raise"} ${formatNumber(action.amountTo)}`;
 }
 
 export function actionColor(action: Pick<DecisionAction, "isAllIn" | "kind">): string {
-    if (action.isAllIn) return "#74102f";
-    if (action.kind === "fold") return "#147a9f";
-    if (action.kind === "call") return "#65c261";
-    if (action.kind === "check") return "#54ad63";
-    if (action.kind === "bet" || action.kind === "raise") return "#c91f59";
-    return "#777c79";
+    if (action.kind === "fold") return "var(--action-fold)";
+    if (action.kind === "call") return "var(--action-call)";
+    if (action.kind === "check") return "var(--action-check)";
+    if (action.isAllIn) return "var(--action-allin)";
+    if (action.kind === "bet" || action.kind === "raise") return "var(--action-raise)";
+    return "var(--action-other)";
 }
 
 function actionDisplayOrder(action: Pick<DecisionAction, "isAllIn" | "kind">): number {
@@ -74,8 +71,7 @@ export function aggregateActions(node: DecisionNode, hands: HandStrategy[] = nod
         );
 
         return {
-            amountTo: action.amountTo,
-            chipsCommitted: action.chipsCommitted,
+            combos: weightedProbability,
             color: actionColor(action),
             index,
             isAllIn: action.isAllIn,
@@ -124,7 +120,6 @@ export function groupHands(node: DecisionNode): Map<string, HandGroup> {
                 {
                     actions: aggregateActions(node, hands),
                     hands,
-                    label,
                     ownReachWeight:
                         hands.reduce((sum, hand) => sum + hand.ownReachWeight, 0) / Math.max(1, availableComboCount),
                 },
@@ -163,8 +158,8 @@ export function matrixLabel(row: number, column: number): string {
     return `${RANKS[column]}${RANKS[row]}o`;
 }
 
-export function strategyGradient(actions: AggregatedAction[]): string | undefined {
-    const visibleActions = orderedActions(actions).filter((action) => action.probability > 0.000001);
+export function strategyGradient(actions: readonly { color: string; probability: number }[]): string | undefined {
+    const visibleActions = actions.filter((action) => action.probability > 0);
     const total = visibleActions.reduce((sum, action) => sum + action.probability, 0);
     if (total <= 0) return undefined;
 
@@ -177,17 +172,6 @@ export function strategyGradient(actions: AggregatedAction[]): string | undefine
     }
 
     return `linear-gradient(90deg, ${stops.join(", ")})`;
-}
-
-export function formatPercent(value: number): string {
-    const percentage = Math.max(0, value) * 100;
-    if (percentage > 0 && percentage < 0.1) return "<0.1%";
-    return `${percentage.toFixed(1)}%`;
-}
-
-export function formatEv(value: number | null): string {
-    if (value === null) return "—";
-    return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
 }
 
 export function formatNumber(value: number): string {

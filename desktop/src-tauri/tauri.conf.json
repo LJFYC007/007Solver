@@ -30,9 +30,6 @@
         "targets": ["nsis"],
         "icon": ["icons/icon.ico", "icons/icon.icns", "icons/icon.png"],
         "shortDescription": "Desktop poker solver with live strategy exploration",
-        "externalBin": ["binaries/solver-service"],
-        "resources": {
-            "../../resources/default.json": "default.json"
-        }
+        "externalBin": ["binaries/solver-service"]
     }
 }

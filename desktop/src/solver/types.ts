@@ -8,6 +8,7 @@ export interface NodeState {
         villain: number;
     };
     street: "flop" | "turn" | "river";
+    rangeCombos: Record<Player, number>;
 }
 
 export interface HandStrategy {
@@ -63,6 +64,7 @@ export interface TerminalNode {
 export type SolverNode = ChanceNode | DecisionNode | TerminalNode;
 
 export type SolverStatus =
+    | { state: "idle" }
     | {
           state: "starting";
       }
@@ -85,3 +87,14 @@ export type SolverStatus =
           message: string;
           state: "failed";
       };
+
+export interface EquityReport {
+    nodeId: number;
+    players: Record<
+        Player,
+        {
+            equity: number | null;
+            hands: { cards: string[]; ownReachWeight: number; equity: number | null }[];
+        }
+    >;
+}

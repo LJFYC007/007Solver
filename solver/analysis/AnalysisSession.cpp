@@ -18,6 +18,14 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
         {node.State().street, node.State().board, node.State().pot, node.State().stacks},
     };
 
+    const auto& currentReach = reachCalculator_.ReachFor(nodeId);
+    for (const auto& [hand, weight] : currentReach.ownReachWeights.player0)
+        if (!core::Overlaps(hand, node.State().board))
+            report.state.rangeCombos[0] += weight;
+    for (const auto& [hand, weight] : currentReach.ownReachWeights.player1)
+        if (!core::Overlaps(hand, node.State().board))
+            report.state.rangeCombos[1] += weight;
+
     if (node.Kind() == game::NodeKind::Terminal)
     {
         report.terminal = node.Terminal();

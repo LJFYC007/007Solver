@@ -6,7 +6,7 @@ mod solver_protocol;
 use serde_json::Value;
 use solver_bridge::{start_solver, stop_solver, SolverBridge};
 use solver_protocol::SolverStatus;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 fn solver_status(state: State<'_, SolverBridge>) -> SolverStatus {
@@ -14,21 +14,44 @@ fn solver_status(state: State<'_, SolverBridge>) -> SolverStatus {
 }
 
 #[tauri::command]
-async fn query_solver_node(node_id: i32, state: State<'_, SolverBridge>) -> Result<Value, String> {
-    state.query_node(node_id).await
+async fn query_solver_node(
+    node_id: i32,
+    generation: u64,
+    state: State<'_, SolverBridge>,
+) -> Result<Value, String> {
+    state.query(node_id, generation, "query_node").await
+}
+
+#[tauri::command]
+async fn query_solver_equity(
+    node_id: i32,
+    generation: u64,
+    state: State<'_, SolverBridge>,
+) -> Result<Value, String> {
+    state.query(node_id, generation, "query_equity").await
+}
+
+#[tauri::command]
+fn solve_scenario(app: AppHandle, scenario: Value) -> Result<u64, String> {
+    start_solver(&app, scenario)
+}
+
+#[tauri::command]
+fn cancel_solver(app: AppHandle) {
+    stop_solver(&app);
 }
 
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(SolverBridge::default())
-        .invoke_handler(tauri::generate_handler![solver_status, query_solver_node])
-        .setup(|app| {
-            if let Err(error) = start_solver(app.handle()) {
-                solver_bridge::fail_solver(app.handle(), error);
-            }
-            Ok(())
-        })
+        .invoke_handler(tauri::generate_handler![
+            solver_status,
+            query_solver_node,
+            query_solver_equity,
+            solve_scenario,
+            cancel_solver
+        ])
         .build(tauri::generate_context!())
         .expect("error while running 007 Solver");
 
