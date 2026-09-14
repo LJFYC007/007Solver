@@ -48,8 +48,9 @@ struct HandTraversal
         std::vector<float> childValues;
         std::vector<double> accumulated;
         std::vector<float> parallelValues;
+        std::vector<float> strategies;
     };
-    using Update = std::function<void(std::uint32_t, const double*, const float*, const float*)>;
+    using Update = std::function<void(std::uint32_t, const double*, const float*, const float*, const float*)>;
     std::array<std::vector<Hand>, 2> hands;
     std::vector<Node> nodes;
     std::vector<std::uint32_t> children;
@@ -63,20 +64,22 @@ struct HandTraversal
 
     HandTraversal(const SolveProblem& problem, game::NodeId root);
     Workspace MakeWorkspace(bool parallel = false) const;
-    std::vector<float> LoadStrategy(const StrategySnapshot& strategy) const;
     std::vector<double> OpponentReachAtRoot(const StrategySnapshot& strategy, std::size_t opponentPlayer) const;
     std::vector<double> CompatibleMasses(std::size_t player, const double* opponentReach) const;
+    // Training supplies regrets and an update callback; evaluation supplies a fixed
+    // snapshot. Both paths retain the entry policy in a workspace row at each depth.
     void Walk(
         std::uint32_t node,
         std::size_t player,
-        const float* strategy,
+        const StrategySnapshot* strategy,
         const double* divisors,
         bool bestResponse,
         Workspace& workspace,
         std::size_t depth,
         float* values,
         const Update& update = {},
-        std::vector<Workspace>* workers = nullptr
+        std::vector<Workspace>* workers = nullptr,
+        const float* regrets = nullptr
     ) const;
 
 private:

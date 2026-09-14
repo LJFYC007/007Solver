@@ -3,6 +3,7 @@
 #include <algorithm>
 #include "game/BettingRules.h"
 #include "game/CompiledGame.h"
+#include <cstdint>
 #include <utility>
 
 namespace solver::analysis
@@ -34,11 +35,28 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
 
     if (node.Kind() == game::NodeKind::Chance)
     {
-        const bool hasJointReach = !reachCalculator_.ReachFor(nodeId).jointReachMasses.empty();
+        // A card is unavailable only if every supported private pair blocks it.
+        // Inspect the current reach without populating caches for unvisited children.
+        std::uint64_t blockedByAll = (std::uint64_t{1} << 52) - 1;
+        bool hasJointReach = false;
+        for (const auto& jointReach : currentReach.jointReachMasses)
+        {
+            if (jointReach.jointReachMass <= 0.0f)
+                continue;
+            hasJointReach = true;
+            std::uint64_t blocked = 0;
+            for (core::Card card : jointReach.player0Hand.Cards())
+                blocked |= std::uint64_t{1} << card.Index();
+            for (core::Card card : jointReach.player1Hand.Cards())
+                blocked |= std::uint64_t{1} << card.Index();
+            blockedByAll &= blocked;
+            if (blockedByAll == 0)
+                break;
+        }
         for (std::size_t edgeIndex = 0; edgeIndex < node.ChanceOutcomeCount(); ++edgeIndex)
         {
             const game::ChanceOutcome& outcome = node.GetChanceOutcome(edgeIndex);
-            if (reachCalculator_.ReachFor(outcome.NextNode()).jointReachMasses.empty() && hasJointReach)
+            if (hasJointReach && (blockedByAll & (std::uint64_t{1} << outcome.DealtCard().Index())) != 0)
                 continue;
 
             report.outcomes.push_back({outcome.DealtCard(), outcome.NextNode()});

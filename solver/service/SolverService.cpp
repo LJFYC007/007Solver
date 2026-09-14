@@ -6,7 +6,6 @@
 #include "io/ScenarioLoader.h"
 #include "service/JsonAdapter.h"
 #include "service/ServiceMessage.h"
-#include "service/MemoryBudget.h"
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -51,18 +50,9 @@ int SolverService::Run(const std::string& scenarioPath)
 
         auto problem = std::make_shared<const engine::SolveProblem>(engine::SolveProblem{game, std::move(scenario.ranges)});
         const auto estimate = engine::EstimateCpuMemory(*problem);
-        const auto budget = scenario.memoryBudgetBytes ? scenario.memoryBudgetBytes : AvailableSolveMemory();
         diagnostics_ << "Tree estimate: " << estimate.logicalNodes << " logical nodes, " << estimate.topologyNodes << " topology nodes, "
                      << estimate.traversalNodes << " active nodes, " << estimate.strategyEntries
-                     << " strategy entries; solve peak estimate " << estimate.peakBytes << " bytes; budget " << budget << " bytes\n";
-        if (estimate.peakBytes > budget)
-        {
-            std::ostringstream message;
-            message << "Estimated solve memory " << (estimate.peakBytes + 1048575) / 1048576 << " MiB exceeds the " << budget / 1048576
-                    << " MiB memory budget. Free memory or choose a smaller game. "
-                    << "CLI scenarios can set memoryBudgetMiB explicitly.";
-            throw std::runtime_error(message.str());
-        }
+                     << " strategy entries; solve peak estimate " << estimate.peakBytes << " bytes\n";
 
         diagnostics_ << "Start solving game...\n";
         const auto progress = [&](int completed)
@@ -80,7 +70,7 @@ int SolverService::Run(const std::string& scenarioPath)
             report.completedIterations = session.CompletedIterations();
             report.trainingTimeSeconds = session.TrainingTimeSeconds();
             diagnostics_ << "Algorithm: dcfr, configured CPU worker limit: " << session.WorkerCount() << '\n';
-            return session.ExportStrategy();
+            return std::move(session).ExportStrategy();
         }();
         diagnostics_ << "Training time: " << report.trainingTimeSeconds << " s\n";
 

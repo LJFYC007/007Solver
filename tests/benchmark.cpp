@@ -22,6 +22,7 @@
 #include <memory>
 #include <numeric>
 #include <string>
+#include <utility>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
@@ -229,7 +230,7 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
         FinishStage("training");
         EXPECT_EQ(session->CompletedIterations(), iterations);
         StartStage("snapshot_export");
-        auto snapshot = session->ExportStrategy();
+        auto snapshot = std::move(*session).ExportStrategy();
         FinishStage("snapshot_export");
         StartStage("training_release");
         session.reset();

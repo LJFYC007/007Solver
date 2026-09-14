@@ -18,7 +18,8 @@ public:
 
     // One iteration is a full update of one player, alternating across successive runs.
     void Run(int iterations, const std::function<void(int completedIterations)>& progressCallback = {});
-    StrategySnapshot ExportStrategy() const;
+    // Final export consumes training state; this session must not be run again.
+    StrategySnapshot ExportStrategy() &&;
     int CompletedIterations() const { return completedIterations_; }
     double TrainingTimeSeconds() const { return trainingTimeSeconds_; }
     // Configured workspace/team limit; the OpenMP runtime may use fewer threads.
@@ -31,7 +32,6 @@ private:
     // Action-major rows, with a fixed root-hand stride for the acting player.
     std::vector<float> regrets_;
     std::vector<float> strategySums_;
-    std::vector<float> strategies_;
     HandTraversal::Workspace workspace_;
     std::vector<HandTraversal::Workspace> workers_;
     std::vector<float> rootValues_;
@@ -44,6 +44,7 @@ private:
         std::uint32_t node,
         std::size_t updatingPlayer,
         const double* ownReach,
+        const float* strategy,
         const float* children,
         const float* values,
         float positiveDiscount,

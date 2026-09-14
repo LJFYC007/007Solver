@@ -1,5 +1,4 @@
 #include "analysis/AnalysisSession.h"
-#include "core/Evaluator.h"
 #include <algorithm>
 #include <array>
 #include <map>
@@ -32,7 +31,8 @@ struct Mass
 
 EquityReport AnalysisSession::QueryEquity(game::NodeId nodeId)
 {
-    const auto board = result_.Problem().game->GetNode(nodeId).State().board;
+    const auto& game = *result_.Problem().game;
+    const auto board = game.GetNode(nodeId).State().board;
     const auto& reach = reachCalculator_.ReachFor(nodeId);
     EquityReport report{nodeId};
     const std::array<const ReachCalculator::HandWeights*, 2> weights{&reach.ownReachWeights.player0, &reach.ownReachWeights.player1};
@@ -64,7 +64,7 @@ EquityReport AnalysisSession::QueryEquity(game::NodeId nodeId)
             for (std::size_t index = 0; index < hands.size(); ++index)
                 if (!core::Overlaps(hands[index].cards, river))
                 {
-                    ranks[player].push_back({index, core::EvaluateHoldem(hands[index].cards, river)});
+                    ranks[player].push_back({index, game.ShowdownRank(river, hands[index].cards)});
                     totals[player].Add(hands[index]);
                 }
             std::sort(ranks[player].begin(), ranks[player].end(), [](auto a, auto b) { return a.rank < b.rank; });

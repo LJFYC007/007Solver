@@ -20,14 +20,10 @@ CpuDcfrSession::CpuDcfrSession(std::shared_ptr<const SolveProblem> problem, int 
         throw std::invalid_argument("CPU DCFR worker count must be positive");
     regrets_.resize(traversal_.strategySize, 0.0f);
     strategySums_.resize(traversal_.strategySize, 0.0f);
-    strategies_.resize(traversal_.strategySize);
     for (const HandTraversal::Node& node : traversal_.nodes)
     {
         if (node.kind == game::NodeKind::Decision)
         {
-            std::fill_n(
-                strategies_.data() + node.strategyOffset, node.childCount * traversal_.hands[node.actor].size(), 1.0f / node.childCount
-            );
             for (const HandTraversal::Hand& hand : traversal_.hands[node.actor])
                 if (!(hand.mask & node.boardMask))
                     ++infoSetCount_;
@@ -62,19 +58,21 @@ void CpuDcfrSession::Run(int iterations, const std::function<void(int)>& progres
                 workspace_.reach[player][hand] = player == updatingPlayer ? 1.0f : traversal_.hands[player][hand].weight;
         }
 
-        const HandTraversal::Update update = [&](std::uint32_t node, const double* ownReach, const float* children, const float* values)
-        { UpdateRegrets(node, updatingPlayer, ownReach, children, values, positiveDiscount, averageDiscount); };
+        const HandTraversal::Update update =
+            [&](std::uint32_t node, const double* ownReach, const float* strategy, const float* children, const float* values)
+        { UpdateRegrets(node, updatingPlayer, ownReach, strategy, children, values, positiveDiscount, averageDiscount); };
         traversal_.Walk(
             0,
             updatingPlayer,
-            strategies_.data(),
+            nullptr,
             divisors_[updatingPlayer].data(),
             false,
             workspace_,
             0,
             rootValues_.data(),
             update,
-            workerCount_ > 1 ? &workers_ : nullptr
+            workerCount_ > 1 ? &workers_ : nullptr,
+            regrets_.data()
         );
         ++completedIterations_;
         if (progressCallback)
@@ -94,6 +92,7 @@ void CpuDcfrSession::UpdateRegrets(
     std::uint32_t nodeIndex,
     std::size_t updatingPlayer,
     const double* ownReach,
+    const float* strategy,
     const float* children,
     const float* values,
     float positiveDiscount,
@@ -103,8 +102,6 @@ void CpuDcfrSession::UpdateRegrets(
     const HandTraversal::Node& node = traversal_.nodes[nodeIndex];
     const std::size_t count = traversal_.hands[updatingPlayer].size();
     // Traverse contiguous hand rows while retaining each hand's action accumulation order.
-    std::array<float, HandTraversal::kMaxHands> positiveRegrets;
-    std::fill_n(positiveRegrets.data(), count, 0.0f);
     for (std::size_t action = 0; action < node.childCount; ++action)
     {
         const std::size_t offset = node.strategyOffset + action * count;
@@ -113,47 +110,56 @@ void CpuDcfrSession::UpdateRegrets(
         {
             const float regret = regrets_[offset + hand] + (childValues[hand] - values[hand]);
             regrets_[offset + hand] = regret * (regret > 0.0f ? positiveDiscount : 0.5f);
-            positiveRegrets[hand] += std::max(0.0f, regrets_[offset + hand]);
             strategySums_[offset + hand] =
-                static_cast<float>(averageDiscount * (strategySums_[offset + hand] + ownReach[hand] * strategies_[offset + hand]));
+                static_cast<float>(averageDiscount * (strategySums_[offset + hand] + ownReach[hand] * strategy[action * count + hand]));
         }
-    }
-    for (std::size_t action = 0; action < node.childCount; ++action)
-    {
-        const std::size_t offset = node.strategyOffset + action * count;
-        for (std::size_t hand = 0; hand < count; ++hand)
-            strategies_[offset + hand] =
-                positiveRegrets[hand] > 0.0f ? std::max(0.0f, regrets_[offset + hand]) / positiveRegrets[hand] : 1.0f / node.childCount;
     }
 }
 
-StrategySnapshot CpuDcfrSession::ExportStrategy() const
+StrategySnapshot CpuDcfrSession::ExportStrategy() &&
 {
-    std::vector<game::InfoSetKey> infoSets;
-    std::vector<float> probabilities;
-    infoSets.reserve(infoSetCount_);
-    probabilities.reserve(strategySums_.size());
-    // The active traversal is preorder, hence already sorted by logical NodeId.
+    // Only the cumulative strategy and traversal layout are needed below. Release
+    // training allocations before the snapshot probability and index arrays coexist.
+    std::vector<float>().swap(regrets_);
+    workspace_ = {};
+    std::vector<HandTraversal::Workspace>().swap(workers_);
+    std::vector<float>().swap(rootValues_);
+    for (auto& divisors : divisors_)
+        std::vector<double>().swap(divisors);
+
+    std::vector<StrategySnapshot::NodeBlock> nodes;
+    std::vector<core::HoleCards> snapshotHands;
+    snapshotHands.reserve(infoSetCount_);
+    const auto maxHands = std::max(traversal_.hands[0].size(), traversal_.hands[1].size());
+    std::vector<float> nodeSums(traversal_.maxActions * maxHands);
+    std::size_t writeOffset = 0;
+    // Copy each action-major node before writing its compact hand-major output.
+    // Output never extends beyond the original node block, so later inputs survive.
     for (const HandTraversal::Node& node : traversal_.nodes)
     {
         if (node.kind != game::NodeKind::Decision)
             continue;
         const auto& hands = traversal_.hands[node.actor];
+        std::copy_n(strategySums_.data() + node.strategyOffset, node.childCount * hands.size(), nodeSums.data());
+        const auto handOffset = snapshotHands.size();
+        const auto probabilityOffset = writeOffset;
         for (std::size_t hand = 0; hand < hands.size(); ++hand)
         {
             if (hands[hand].mask & node.boardMask)
                 continue;
             double total = 0.0;
             for (std::size_t action = 0; action < node.childCount; ++action)
-                total += strategySums_[node.strategyOffset + action * hands.size() + hand];
-            infoSets.push_back({node.id, hands[hand].cards});
+                total += nodeSums[action * hands.size() + hand];
+            snapshotHands.push_back(hands[hand].cards);
             for (std::size_t action = 0; action < node.childCount; ++action)
-                probabilities.push_back(
-                    total > 0.0 ? static_cast<float>(strategySums_[node.strategyOffset + action * hands.size() + hand] / total)
-                                : 1.0f / node.childCount
-                );
+                strategySums_[writeOffset++] =
+                    total > 0.0 ? static_cast<float>(nodeSums[action * hands.size() + hand] / total) : 1.0f / node.childCount;
         }
+        if (snapshotHands.size() != handOffset)
+            nodes.push_back({node.id, handOffset, probabilityOffset, snapshotHands.size() - handOffset, node.childCount});
     }
-    return StrategySnapshot(problem_->game, infoSets, std::move(probabilities));
+    // Keep the allocation: shrinking capacity would require another large buffer.
+    strategySums_.resize(writeOffset);
+    return StrategySnapshot(problem_->game, std::move(nodes), std::move(snapshotHands), std::move(strategySums_));
 }
 } // namespace solver::engine

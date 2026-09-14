@@ -35,12 +35,15 @@ MemoryEstimate EstimateCpuMemory(const SolveProblem& problem, int workers)
         1176 * (4 * totalHands + 2 * sizeof(std::vector<HandTraversal::RankedHand>)) + 2 * totalHands * sizeof(HandTraversal::Hand);
     const std::uint64_t stack = 8 * (size.depth + 1) * totalHands + size.depth * maxHands * (4 * size.maxActions + 8);
     // Include the bounded runout/regret scratch and per-team runtime overhead.
-    const std::uint64_t workspace = stack * (count > 1 ? count + 1 : 1) + 52 * 4 * maxHands + (count + 1) * 128 * 1024;
-    // During export, input infoset keys, snapshot hands and probability arrays coexist
-    // with all three training tables. Sparse node indices allow vector growth headroom.
-    const std::uint64_t exportPeak = 16 * entries + 12 * infosets + 80 * decisions + workspace;
-    const std::uint64_t evaluationPeak = 8 * entries + 4 * infosets + 80 * decisions + stack;
-    const std::uint64_t peak = size.storageBytes + layout + ranks + std::max(exportPeak, evaluationPeak);
+    const std::uint64_t policyStack = stack + 4 * size.depth * size.maxActions * maxHands;
+    const std::uint64_t workspace = policyStack * (count > 1 ? count + 1 : 1) + 52 * 4 * maxHands + (count + 1) * 128 * 1024;
+    // Training retains regrets and strategy sums; current policies live in depth rows.
+    const std::uint64_t trainingPeak = 8 * entries + workspace;
+    // Final export releases regrets and workspaces before allocating the snapshot.
+    // Snapshot probabilities reuse the strategy-sum allocation; indices are built directly.
+    const std::uint64_t exportPeak = 4 * entries + 4 * infosets + 80 * decisions + 4 * size.maxActions * maxHands;
+    const std::uint64_t evaluationPeak = 4 * entries + 4 * infosets + 80 * decisions + policyStack;
+    const std::uint64_t peak = size.storageBytes + layout + ranks + std::max({trainingPeak, exportPeak, evaluationPeak});
     return {size.logicalNodes, size.topologyNodes, size.traversalNodes, entries, peak + peak / 8 + 64 * 1024 * 1024, count};
 }
 } // namespace solver::engine

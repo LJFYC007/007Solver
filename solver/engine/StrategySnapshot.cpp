@@ -25,99 +25,104 @@ StrategySnapshot::StrategySnapshot(std::shared_ptr<const game::CompiledGame> gam
 
     std::size_t probabilityCount = 0;
     for (const StrategyEntry& entry : entries)
-    {
-        if (entry.probabilities.size() != game_->GetNode(entry.infoSet.node).BettingEdgeCount())
-            throw std::invalid_argument("Strategy probability count does not match the node action count");
         probabilityCount += entry.probabilities.size();
-    }
     probabilities_.reserve(probabilityCount);
-    std::vector<game::InfoSetKey> infoSets;
-    infoSets.reserve(entries.size());
+    hands_.reserve(entries.size());
     for (const StrategyEntry& entry : entries)
     {
-        infoSets.push_back(entry.infoSet);
+        if (nodes_.empty() || nodes_.back().node != entry.infoSet.node)
+            nodes_.push_back(
+                {entry.infoSet.node, hands_.size(), probabilities_.size(), 0, game_->GetNode(entry.infoSet.node).BettingEdgeCount()}
+            );
+        if (entry.probabilities.size() != nodes_.back().actionCount)
+            throw std::invalid_argument("Strategy probability count does not match the node action count");
+        ++nodes_.back().handCount;
+        hands_.push_back(entry.infoSet.hand);
         probabilities_.insert(probabilities_.end(), entry.probabilities.begin(), entry.probabilities.end());
     }
-    BuildIndex(infoSets);
+    Validate();
 }
 
 StrategySnapshot::StrategySnapshot(
     std::shared_ptr<const game::CompiledGame> game,
-    const std::vector<game::InfoSetKey>& infoSets,
+    std::vector<NodeBlock> nodes,
+    std::vector<core::HoleCards> hands,
     std::vector<float> probabilities
 )
-    : game_(std::move(game)), probabilities_(std::move(probabilities))
+    : game_(std::move(game)), nodes_(std::move(nodes)), hands_(std::move(hands)), probabilities_(std::move(probabilities))
 {
-    BuildIndex(infoSets);
+    Validate();
 }
 
-void StrategySnapshot::BuildIndex(const std::vector<game::InfoSetKey>& infoSets)
+void StrategySnapshot::Validate() const
 {
     if (!game_)
         throw std::invalid_argument("Strategy snapshot requires a compiled game");
 
-    hands_.reserve(infoSets.size());
-    std::size_t probabilityOffset = 0;
-    const game::InfoSetKey* previous = nullptr;
-    auto node = game_->GetNode(game_->Root());
-    for (const game::InfoSetKey& infoSet : infoSets)
+    std::size_t handOffset = 0, probabilityOffset = 0;
+    const NodeBlock* previous = nullptr;
+    for (const NodeBlock& block : nodes_)
     {
-        if (node.Id() != infoSet.node)
-            node = game_->GetNode(infoSet.node);
+        const auto node = game_->GetNode(block.node);
         if (node.Kind() != game::NodeKind::Decision || node.BettingEdgeCount() == 0)
             throw std::invalid_argument("Strategy entry must refer to a decision node with actions");
-        if (core::Overlaps(infoSet.hand, node.State().board))
-            throw std::invalid_argument("Strategy entry hand overlaps the public board");
-        if (previous && previous->node == infoSet.node && previous->hand == infoSet.hand)
-            throw std::invalid_argument("Strategy snapshot contains a duplicate infoset");
-        if (previous && (infoSet.node < previous->node || (infoSet.node == previous->node && infoSet.hand < previous->hand)))
-            throw std::invalid_argument("Packed strategy entries must be sorted by node and hand");
-
-        const std::size_t actionCount = node.BettingEdgeCount();
-        if (actionCount > probabilities_.size() - probabilityOffset)
-            throw std::invalid_argument("Strategy probability count does not match the node action count");
-
-        double totalProbability = 0.0;
-        for (std::size_t actionIndex = 0; actionIndex < actionCount; ++actionIndex)
+        if (previous && !(previous->node < block.node))
+            throw std::invalid_argument("Packed strategy nodes must be sorted and unique");
+        if (block.handOffset != handOffset || block.probabilityOffset != probabilityOffset ||
+            block.handCount > hands_.size() - handOffset || block.actionCount != node.BettingEdgeCount() ||
+            block.handCount > (probabilities_.size() - probabilityOffset) / block.actionCount)
+            throw std::invalid_argument("Strategy block size does not match its hands and actions");
+        for (std::size_t hand = 0; hand < block.handCount; ++hand)
         {
-            const float probability = probabilities_[probabilityOffset + actionIndex];
-            if (!std::isfinite(probability) || probability < 0.0f)
-                throw std::invalid_argument("Strategy probabilities must be finite and non-negative");
-            totalProbability += probability;
+            const auto cards = hands_[handOffset + hand];
+            if (core::Overlaps(cards, node.State().board))
+                throw std::invalid_argument("Strategy entry hand overlaps the public board");
+            if (hand > 0 && !(hands_[handOffset + hand - 1] < cards))
+                throw std::invalid_argument("Packed strategy hands must be sorted and unique");
+            double totalProbability = 0.0;
+            for (std::size_t action = 0; action < block.actionCount; ++action)
+            {
+                const float probability = probabilities_[probabilityOffset++];
+                if (!std::isfinite(probability) || probability < 0.0f)
+                    throw std::invalid_argument("Strategy probabilities must be finite and non-negative");
+                totalProbability += probability;
+            }
+            constexpr double normalizationTolerance = 1e-5;
+            if (std::abs(totalProbability - 1.0) > normalizationTolerance)
+                throw std::invalid_argument("Strategy probabilities must sum to one");
         }
-        constexpr double normalizationTolerance = 1e-5;
-        if (std::abs(totalProbability - 1.0) > normalizationTolerance)
-            throw std::invalid_argument("Strategy probabilities must sum to one");
-
-        if (nodes_.empty() || nodes_.back().node != infoSet.node)
-            nodes_.push_back({infoSet.node, hands_.size(), probabilityOffset, 0, actionCount});
-        ++nodes_.back().handCount;
-        hands_.push_back(infoSet.hand);
-        probabilityOffset += actionCount;
-        previous = &infoSet;
+        handOffset += block.handCount;
+        previous = &block;
     }
-    if (probabilityOffset != probabilities_.size())
+    if (handOffset != hands_.size() || probabilityOffset != probabilities_.size())
         throw std::invalid_argument("Strategy probability count does not match the node action count");
+}
+
+std::optional<StrategySnapshot::NodeStrategyView> StrategySnapshot::FindNodeStrategy(game::NodeId node) const
+{
+    const auto found =
+        std::lower_bound(nodes_.begin(), nodes_.end(), node, [](const NodeBlock& block, game::NodeId id) { return block.node < id; });
+    if (found == nodes_.end() || found->node != node)
+        return std::nullopt;
+    return NodeStrategyView{
+        hands_.data() + found->handOffset, probabilities_.data() + found->probabilityOffset, found->handCount, found->actionCount
+    };
 }
 
 const float* StrategySnapshot::FindStrategy(const game::InfoSetKey& infoSet) const
 {
-    const auto found = std::lower_bound(
-        nodes_.begin(), nodes_.end(), infoSet.node, [](const NodeBlock& block, game::NodeId id) { return block.node < id; }
-    );
-    if (found == nodes_.end() || found->node != infoSet.node)
+    const auto block = FindNodeStrategy(infoSet.node);
+    if (!block)
     {
         if (game_->GetNode(infoSet.node).Kind() != game::NodeKind::Decision)
             throw std::invalid_argument("Strategy lookup requires a decision node with actions");
         return nullptr;
     }
-    const NodeBlock& block = *found;
-    const auto begin = hands_.begin() + block.handOffset;
-    const auto end = begin + block.handCount;
-    const auto hand = std::lower_bound(begin, end, infoSet.hand);
+    const auto end = block->hands + block->handCount;
+    const auto hand = std::lower_bound(block->hands, end, infoSet.hand);
     if (hand == end || *hand != infoSet.hand)
         return nullptr;
-    return probabilities_.data() + block.probabilityOffset + static_cast<std::size_t>(hand - begin) * block.actionCount;
+    return block->probabilities + static_cast<std::size_t>(hand - block->hands) * block->actionCount;
 }
 
 std::vector<float> StrategySnapshot::StrategyOrUniform(const game::InfoSetKey& infoSet) const

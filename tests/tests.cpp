@@ -7,6 +7,7 @@
 #include <cmath>
 #include <fstream>
 #include <string>
+#include <utility>
 #include <vector>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -53,7 +54,7 @@ void CheckSolve(const std::string& name)
             session.Run(101);
             session.Run(iterations - 101);
             EXPECT_EQ(session.CompletedIterations(), iterations);
-            return session.ExportStrategy();
+            return std::move(session).ExportStrategy();
         }();
         const auto actual = engine::EvaluateExploitability(*problem, strategy);
         const auto& expected = References().at(name).at("solved");

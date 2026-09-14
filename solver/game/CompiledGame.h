@@ -40,7 +40,7 @@ class BettingEdge
 {
 public:
     BettingEdge(BettingAction action, NodeId nextNode) : action_(action), nextNode_(nextNode) {}
-    const BettingAction& Action() const { return action_; }
+    BettingAction Action() const { return action_; }
     NodeId NextNode() const { return nextNode_; }
 
 private:
@@ -82,8 +82,9 @@ class GameNode
 public:
     NodeId Id() const { return id_; }
     NodeKind Kind() const { return Shape().kind; }
-    const PublicState& State() const { return state_; }
-    const std::optional<ParentEdge>& Parent() const { return parent_; }
+    const PublicState& State() const& { return state_; }
+    PublicState State() const&& { return state_; }
+    std::optional<ParentEdge> Parent() const { return parent_; }
     const TerminalOutcome& Terminal() const;
     bool IsForcedRunout() const;
     std::size_t SubtreeNodeCount() const { return Shape().logicalNodes; }

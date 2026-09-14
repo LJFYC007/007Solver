@@ -4,6 +4,7 @@
 #include "game/CompiledGame.h"
 #include "game/Identifiers.h"
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace solver::engine
@@ -18,6 +19,17 @@ class StrategySnapshot
 {
 public:
     StrategySnapshot(std::shared_ptr<const game::CompiledGame> game, std::vector<StrategyEntry> entries);
+
+    // Borrows one node's sorted hands and hand-major probabilities from this snapshot.
+    // Destruction, move or assignment of the snapshot invalidates the view.
+    struct NodeStrategyView
+    {
+        const core::HoleCards* hands;
+        const float* probabilities;
+        std::size_t handCount;
+        std::size_t actionCount;
+    };
+    std::optional<NodeStrategyView> FindNodeStrategy(game::NodeId node) const;
 
     const game::CompiledGame& Game() const { return *game_; }
     // Borrowed probabilities: length is the node's action count; invalidated by destruction, move or assignment.
@@ -38,10 +50,11 @@ private:
 
     StrategySnapshot(
         std::shared_ptr<const game::CompiledGame> game,
-        const std::vector<game::InfoSetKey>& infoSets,
+        std::vector<NodeBlock> nodes,
+        std::vector<core::HoleCards> hands,
         std::vector<float> probabilities
     );
-    void BuildIndex(const std::vector<game::InfoSetKey>& infoSets);
+    void Validate() const;
 
     std::shared_ptr<const game::CompiledGame> game_;
     std::vector<NodeBlock> nodes_;

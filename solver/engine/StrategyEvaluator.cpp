@@ -17,7 +17,7 @@ void CheckProblem(const SolveProblem& problem, const StrategySnapshot& strategy)
 // A fixed snapshot needs opponent reach only, and no regrets or average-strategy buffers.
 std::vector<float> EvaluateHands(
     const HandTraversal& traversal,
-    const std::vector<float>& strategy,
+    const StrategySnapshot& strategy,
     std::size_t player,
     const std::vector<double>& rootReach,
     const std::vector<double>& divisors,
@@ -28,7 +28,7 @@ std::vector<float> EvaluateHands(
     auto workspace = traversal.MakeWorkspace();
     std::copy(rootReach.begin(), rootReach.end(), workspace.reach[1 - player].begin());
     std::vector<float> values(count);
-    traversal.Walk(0, player, strategy.data(), divisors.data(), bestResponse, workspace, 0, values.data());
+    traversal.Walk(0, player, &strategy, divisors.data(), bestResponse, workspace, 0, values.data());
     return values;
 }
 } // namespace
@@ -37,13 +37,12 @@ ExploitabilityMetrics EvaluateExploitability(const SolveProblem& problem, const 
 {
     CheckProblem(problem, strategy);
     const HandTraversal traversal(problem, problem.game->Root());
-    const auto packed = traversal.LoadStrategy(strategy);
     std::array<float, 2> bestResponses{};
     for (std::size_t player = 0; player < 2; ++player)
     {
         const auto reach = traversal.OpponentReachAtRoot(strategy, 1 - player);
         const auto divisors = traversal.CompatibleMasses(player, reach.data());
-        const auto values = EvaluateHands(traversal, packed, player, reach, divisors, true);
+        const auto values = EvaluateHands(traversal, strategy, player, reach, divisors, true);
         double totalValue = 0.0;
         double totalMass = 0.0;
         for (std::size_t hand = 0; hand < values.size(); ++hand)
@@ -66,10 +65,9 @@ std::map<core::HoleCards, float> EvaluateNodeStrategyEvs(
 {
     CheckProblem(problem, strategy);
     const HandTraversal traversal(problem, node);
-    const auto packed = traversal.LoadStrategy(strategy);
     const auto reach = traversal.OpponentReachAtRoot(strategy, player.Other().Index());
     const auto divisors = traversal.CompatibleMasses(player.Index(), reach.data());
-    const auto values = EvaluateHands(traversal, packed, player.Index(), reach, divisors, false);
+    const auto values = EvaluateHands(traversal, strategy, player.Index(), reach, divisors, false);
     std::map<core::HoleCards, float> evs;
     for (std::size_t hand = 0; hand < values.size(); ++hand)
     {
