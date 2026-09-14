@@ -3,6 +3,7 @@
 #include "analysis/NodeReport.h"
 #include "analysis/EquityReport.h"
 #include "game/Identifiers.h"
+#include "engine/MemoryEstimate.h"
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -30,6 +31,7 @@ struct ServiceMessage
     std::string text;
     std::optional<analysis::NodeReport> node;
     std::optional<analysis::EquityReport> equity;
+    std::optional<engine::MemoryEstimate> estimate;
 };
 
 struct ServiceRequest

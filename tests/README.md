@@ -24,9 +24,9 @@ cmake --build --preset release --target 007SolverBenchmark
 
 On Windows the executable has an `.exe` suffix. Run the benchmark separately from other builds/solves when comparing timings.
 
-The benchmark is excluded from the default build, CTest, CI and pre-commit execution. It uses `fixtures/utg-bb-wide.json`: UTG/IP versus BB/OOP, flop `Ac Kh Qs`, pot 5, stacks 15 each (stack-to-pot ratio 3), no rake, half-pot/pot-sized/all-in bets, all-in raises and **3000 DCFR full-player updates by default**, retaining complete ranges and turn/river play. The benchmark harness and external oracle both read the fixture's `benchmark.betPercentages` list (`[50, 100]`) and append maximum bets/raises. This configuration produces 922,164 nodes, retaining distinct action and concrete-card histories.
+The benchmark is excluded from the default build, CTest, CI and pre-commit execution. It uses `fixtures/utg-bb-wide.json`: UTG/IP versus BB/OOP, flop `Ac Kh Qs`, pot 5, stacks 15 each (stack-to-pot ratio 3), no rake, half-pot/pot-sized/all-in bets, all-in raises and **3000 DCFR full-player updates by default**, retaining complete ranges and turn/river play. The benchmark harness and external oracle both read the fixture's `benchmark.betPercentages` list (`[50, 100]`) and append maximum bets/raises. This configuration produces 922,164 logical nodes, retaining distinct action and concrete-card histories. The compact topology is shared across runouts; all-in runouts are streamed without descendant traversal storage. Reports include logical/template/active node counts and a conservative solve-memory estimate.
 
-`--iterations` overrides the fixture budget; `--workers` selects the OpenMP training worker count (otherwise the runtime default, configurable with `OMP_NUM_THREADS`). Snapshot evaluation and analysis are serial. The optional `--algorithm=dcfr` spelling is accepted; no other algorithm is supported. Compare time at equal exploitability and record the worker count.
+`--iterations` overrides the fixture budget; `--workers` selects the OpenMP training worker count (otherwise the runtime default, configurable with `OMP_NUM_THREADS`). Snapshot evaluation and analysis are serial and reuse bounded depth-first workspaces. Training workers are a configured upper limit (capped at 49); the OpenMP runtime can use fewer threads. The optional `--algorithm=dcfr` spelling is accepted; no other algorithm is supported. Compare time at equal exploitability and record the worker count.
 
 It checks exact input/GT equality, uniform BRs and exploitability within `1e-5`, finite trained metrics, value-interval compatibility, the BR-average identity and exploitability in `[-1e-5, 0.0005]` (at most 0.01% of the initial pot). Root EVs, reach and probabilities must be valid; equilibrium action frequencies and per-hand EVs are not compared.
 
@@ -37,6 +37,8 @@ The local Release performance target is **within about five minutes** for the co
 The GTO Wizard migration changes the benchmark ranges, so earlier RangeConverter timings and reference values do not describe this fixture. Compare only runs with identical scenario inputs and independent references.
 
 On the local Apple M4 Pro (Release, AppleClang 21, 12 workers), the sourced 3-bet fixture passed at 3000 updates in **256.50 seconds**: training 252.20s, trained evaluation 1.31s, root query 0.88s, exploitability **0.000263937**. It contains 100/174 legal hero/villain hands and 15,523 compatible hand pairs. The report is `build/benchmark-results/gtowizard-2b088a1-dirty-20260910-001323.json` (uncommitted migration changes). The 1900-update calibration took 162.48s but missed the unchanged precision limit at 0.000674300; 3000 is the calibrated default.
+
+With the compact implementation, the same benchmark passed on the local AMD Ryzen 9 9950X (Windows, Release, MSVC 19.50, 12 workers) in **287.48 seconds**: training 265.80s, trained evaluation 2.24s, root query 1.79s, exploitability **0.000263937**. Its 922,164 logical nodes use 569 topology templates and 846,606 active traversal nodes. Training private commit was 1,398,652,928 bytes; the process peak working set was 2,318,426,112 bytes (2.16 GiB), reached during snapshot export, below the conservative 2,771,975,920-byte solve estimate (2.58 GiB). The report is `build/benchmark-results/compact-20260913-235632.json` (uncommitted architecture changes). These measurements concern the benchmark's larger betting preset, not the desktop-preset comparison below; cross-machine timings do not establish a speedup.
 
 Rebuild and run after changing source; CTest and normal builds do not refresh benchmark reports. Check `status` before using the numbers. Reports are local, ignored artifacts and record compiler/configuration but not Git revision or dirty state. Use a unique `--report` filename containing the commit ID and timestamp, and note any uncommitted changes separately when comparing implementations.
 
@@ -56,11 +58,11 @@ cargo run --locked --release --manifest-path tests/oracle/Cargo.toml --target-di
 
 Generation requires exploitability <= `1e-5` within 100,000 external iterations (each updates both players). Generation fails before writing GT if precision is unmet. GT generation is outside the benchmark time budget. Review generated diffs and rerun the relevant executable; never substitute this solver's output for independent answers or loosen tolerances to pass.
 
-The regenerated correctness references reached `9.91821e-6` chips for weighted-flop and `8.78906e-6` for raise-flop. The 3-bet benchmark reference reached `9.97925e-6` after 18,860 external iterations. The Release correctness suite passed in 15.98 seconds on the local Apple M4 Pro; this is a measurement, not a timing guarantee.
+The 2026-09-13 references for the new raise preset reached `9.97925e-6` chips for weighted-flop and `9.79614e-6` for raise-flop. The unchanged seven-case suite passed in 21.72 seconds on Windows/MSVC using its existing 1/4-worker checks and 200-update budgets. No precision tolerance was relaxed. The benchmark reference remains unchanged because its betting tree is unchanged. The 3-bet benchmark reference reached `9.97925e-6` after 18,860 external iterations. For historical context, the old preset and implementation passed the Release correctness suite in 15.98 seconds on the Apple M4 Pro; that is not a measurement of this change.
 
 The oracle enables JSON float round-tripping so copied scenario weights retain their original `f64` values. The first 3-bet reference required correcting two copied weights by one `f64` rounding step; both had identical `f32` values in the external range parser, and all computed reference metrics were preserved.
 
-The adapter scales chips/EVs by 500 and maps external OOP/IP to villain/hero. Correctness fixtures use half-pot/maximum bets; the wide fixture uses half-pot/pot-sized/maximum bets. Both use maximum raises and no rake, automatic all-in thresholds or size merging. Current fixture sizes avoid rounding differences. Root BRs use net payoff minus initial pot/2; their average is exploitability. Node EVs use the queried node's contribution baseline. All-in runouts remain complete, with conditional chance denominators 45/44.
+The adapter scales chips/EVs by 500 and maps external OOP/IP to villain/hero. Correctness fixtures use the desktop preset: half-pot bets and half-pot-after-call raises, one ordinary raise per street followed by maximum-only aggression, and legal size clamping. The oracle builds its own legal action tree and prunes the extra raise/all-in branches through its public tree-editing API. The fixed-policy fixture now has two root actions. The wide fixture deliberately retains half-pot/pot-sized/maximum bets and maximum-only raises, independently of the desktop default. Both use no rake, automatic all-in thresholds or size merging. Current fixture sizes avoid rounding differences. Root BRs use net payoff minus initial pot/2; their average is exploitability. Node EVs use the queried node's contribution baseline. All-in runouts remain complete, with conditional chance denominators 45/44.
 
 ### GTO Wizard range source
 
@@ -83,3 +85,15 @@ python3 scripts/sync-preflop-fixtures.py
 ```
 
 Then regenerate both independent reference files with the commands above and rerun the correctness suite and benchmark. The input generator never produces expected solver values. The fixed-policy oracle intentionally prescribes mixed and zero actions over the sourced hands to exercise own/joint reach and node EV; that policy is an analysis reference, not a replacement preflop strategy.
+
+## Tree-size comparison
+
+The following counts use the same sourced inputs and compare the old desktop preset (50%/maximum bets, maximum raises) with the new desktop preset (50% bets/raises, one ordinary raise per street then maximum). They are not the benchmark's extra-100%-bet tree.
+
+| Input | Old logical nodes | New logical nodes | Stored new topology templates | Active new traversal nodes |
+|---|---:|---:|---:|---:|
+| weighted-flop | 372,568 | 391,580 | 257 | 363,258 |
+| raise-flop | 485,464 | 731,444 | 425 | 703,122 |
+| Wide sourced ranges, pot 5 / stacks 15, desktop preset | 372,568 | 391,580 | 257 | 363,258 |
+
+For the last row (100/174 board-compatible exact hands), the old full-node training arrays would use 1,591,245,440 bytes. The new tree with the old layout would use 1,677,407,824 bytes. With the new bounded layout and a 12-worker limit, the new tree's principal training arrays use 547,474,304 bytes, including persistent regrets/current/average strategy and heap traversal workspace. These are allocation-formula figures, not process peaks; topology, ranks, export coexistence and runtime costs are additional. The service's conservative full-solve estimate is 1,227,229,690 bytes. Stored topology counts do not imply shared strategy entries.

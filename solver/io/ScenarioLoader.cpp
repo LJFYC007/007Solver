@@ -70,6 +70,15 @@ Scenario ReadScenario(std::istream& input)
     const std::string heroPosition = json.at("heroPosition").get<std::string>();
     const std::string villainPosition = json.at("villainPosition").get<std::string>();
     const Json& ranges = json.at("ranges");
+    std::uint64_t memoryBudgetBytes = 0;
+    if (json.contains("memoryBudgetMiB"))
+    {
+        const auto& value = json.at("memoryBudgetMiB");
+        if (!value.is_number_unsigned() || value.get<std::uint64_t>() == 0 ||
+            value.get<std::uint64_t>() > std::numeric_limits<std::uint64_t>::max() / (1024 * 1024))
+            throw std::invalid_argument("memoryBudgetMiB must be a positive integer within the supported range");
+        memoryBudgetBytes = value.get<std::uint64_t>() * 1024 * 1024;
+    }
     return {
         {
             core::ParseBoard(json.at("board").get<std::string>(), 3),
@@ -84,6 +93,7 @@ Scenario ReadScenario(std::istream& input)
         },
         core::RangeSet(LoadRange(ranges, heroPosition), LoadRange(ranges, villainPosition)),
         iterations,
+        memoryBudgetBytes,
     };
 }
 } // namespace solver::io

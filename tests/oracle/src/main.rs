@@ -6,6 +6,31 @@ const SCALE: f32 = 500.0;
 const MAX_REFERENCE_ITERATIONS: u32 = 100_000;
 const REVISION: &str = "9d1509fe5077d019825f833eed04b16d342dfda1";
 
+// Use the independent engine's legal actions and public tree editing API. Keep one
+// ordinary raise per street, then only a shove; reset the count at chance boundaries.
+fn cap_raises(tree: &mut ActionTree, raises: usize) {
+    if tree.is_terminal_node() {
+        return;
+    }
+    let raises = if tree.is_chance_node() { 0 } else { raises };
+    let actions = tree.available_actions().to_vec();
+    let ordinary_raise = actions.iter().any(|a| matches!(a, Action::Raise(_)));
+    for action in actions {
+        if (raises >= 1 && matches!(action, Action::Raise(_)))
+            || (raises == 0 && ordinary_raise && matches!(action, Action::AllIn(_)))
+        {
+            tree.remove_action(action).unwrap();
+            continue;
+        }
+        tree.play(action).unwrap();
+        cap_raises(
+            tree,
+            raises + usize::from(matches!(action, Action::Raise(_))),
+        );
+        tree.undo().unwrap();
+    }
+}
+
 fn game_for(scenario: &Value) -> PostFlopGame {
     assert_eq!(scenario["heroActsFirst"], false);
     assert_eq!(scenario["heroStack"], scenario["villainStack"]);
@@ -37,9 +62,13 @@ fn game_for(scenario: &Value) -> PostFlopGame {
         .iter()
         .map(|percent| format!("{}%", percent.as_u64().unwrap()))
         .collect::<Vec<_>>();
-    bets.push("a".to_owned());
+    let wide = scenario.get("benchmark").is_some();
+    if wide {
+        bets.push("a".to_owned());
+    }
     let bet_sizes = bets.join(", ");
-    let sizes = BetSizeOptions::try_from((bet_sizes.as_str(), "a")).unwrap();
+    let sizes =
+        BetSizeOptions::try_from((bet_sizes.as_str(), if wide { "a" } else { "50%, a" })).unwrap();
     let tree = TreeConfig {
         initial_state: BoardState::Flop,
         starting_pot: (scenario["initialPot"].as_f64().unwrap() * SCALE as f64).round() as i32,
@@ -50,7 +79,11 @@ fn game_for(scenario: &Value) -> PostFlopGame {
         // Defaults disable rake, automatic all-in and size merging.
         ..Default::default()
     };
-    let mut game = PostFlopGame::with_config(cards, ActionTree::new(tree).unwrap()).unwrap();
+    let mut tree = ActionTree::new(tree).unwrap();
+    if !wide {
+        cap_raises(&mut tree, 0);
+    }
+    let mut game = PostFlopGame::with_config(cards, tree).unwrap();
     game.allocate_memory(false);
     game
 }
@@ -94,13 +127,12 @@ fn fixed_policy(game: &mut PostFlopGame) -> Value {
         let entries: Vec<_> = hands
             .iter()
             .zip(&check)
-            .map(|(&hand, &p)| json!({"cards": hand_name(hand), "strategy": [p, 1.0 - p, 0.0]}))
+            .map(|(&hand, &p)| json!({"cards": hand_name(hand), "strategy": [p, 1.0 - p]}))
             .collect();
         let strategy: Vec<_> = check
             .iter()
             .copied()
             .chain(check.iter().map(|p| 1.0 - p))
-            .chain(check.iter().map(|_| 0.0))
             .collect();
         game.lock_current_strategy(&strategy);
         policy.push(json!({"path": vec![0; depth], "hands": entries}));

@@ -1,1007 +1,956 @@
 {
-    "raise-flop": {
-        "policy": [],
-        "queries": [
-            {
-                "actor": 1,
-                "board": "Ks 9s 2d Qc",
-                "hands": [
-                    {
-                        "cards": "Qd Ad",
-                        "inputRangeWeight": 0.3571285605430603,
-                        "marginalReachMass": 0.0006172839784994721,
-                        "nodeStrategyEv": -0.538595974445343,
-                        "ownReachWeight": 0.11904285848140717,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "Qh Ah",
-                        "inputRangeWeight": 0.3571285605430603,
-                        "marginalReachMass": 0.0006172839784994721,
-                        "nodeStrategyEv": -0.538595974445343,
-                        "ownReachWeight": 0.11904285848140717,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "Qs As",
-                        "inputRangeWeight": 0.3571285605430603,
-                        "marginalReachMass": 0.0006172839784994721,
-                        "nodeStrategyEv": 0.9709439873695374,
-                        "ownReachWeight": 0.11904285848140717,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    }
-                ],
-                "path": [
-                    1,
-                    1,
-                    "Qc"
-                ],
-                "pot": 4.0,
-                "stacks": [
-                    7.0,
-                    7.0
-                ]
-            },
-            {
-                "actor": 0,
-                "board": "Ks 9s 2d Qc",
-                "hands": [
-                    {
-                        "cards": "Jc Kc",
-                        "inputRangeWeight": 0.1735173463821411,
-                        "marginalReachMass": 0.00020576134556904435,
-                        "nodeStrategyEv": 3.717733144760132,
-                        "ownReachWeight": 0.05783911794424057,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "Jd Kd",
-                        "inputRangeWeight": 0.1735173463821411,
-                        "marginalReachMass": 0.00020576134556904435,
-                        "nodeStrategyEv": 3.717733144760132,
-                        "ownReachWeight": 0.05783911794424057,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "Jh Kh",
-                        "inputRangeWeight": 0.1735173463821411,
-                        "marginalReachMass": 0.00020576134556904435,
-                        "nodeStrategyEv": 3.717733144760132,
-                        "ownReachWeight": 0.05783911794424057,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    }
-                ],
-                "path": [
-                    1,
-                    1,
-                    "Qc",
-                    1
-                ],
-                "pot": 6.0,
-                "stacks": [
-                    7.0,
-                    5.0
-                ]
-            }
+  "raise-flop": {
+    "policy": [],
+    "queries": [
+      {
+        "actor": 1,
+        "board": "Ks 9s 2d Qc",
+        "hands": [
+          {
+            "cards": "Qd Ad",
+            "inputRangeWeight": 0.3571285605430603,
+            "marginalReachMass": 0.0009259259095415473,
+            "nodeStrategyEv": 0.36789757013320923,
+            "ownReachWeight": 0.17856428027153015,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "cards": "Qh Ah",
+            "inputRangeWeight": 0.3571285605430603,
+            "marginalReachMass": 0.0009259259095415473,
+            "nodeStrategyEv": 0.36789757013320923,
+            "ownReachWeight": 0.17856428027153015,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "cards": "Qs As",
+            "inputRangeWeight": 0.3571285605430603,
+            "marginalReachMass": 0.0009259259095415473,
+            "nodeStrategyEv": 1.3863635063171387,
+            "ownReachWeight": 0.17856428027153015,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          }
         ],
-        "scenario": {
-            "board": "Ks 9s 2d",
-            "heroActsFirst": false,
-            "heroPosition": "UTG",
-            "heroStack": 8.0,
-            "initialPot": 2.0,
-            "iterations": 200,
-            "rangeSource": {
-                "catalog": "resources/gtowizard-preflop",
-                "history": [
-                    {
-                        "action": "Raise 2.5",
-                        "actor": "UTG"
-                    },
-                    {
-                        "action": "Fold",
-                        "actor": "HJ"
-                    },
-                    {
-                        "action": "Fold",
-                        "actor": "CO"
-                    },
-                    {
-                        "action": "Fold",
-                        "actor": "BTN"
-                    },
-                    {
-                        "action": "Fold",
-                        "actor": "SB"
-                    },
-                    {
-                        "action": "Raise 12.5",
-                        "actor": "BB"
-                    },
-                    {
-                        "action": "Raise 26.5",
-                        "actor": "UTG"
-                    },
-                    {
-                        "action": "Call",
-                        "actor": "BB"
-                    }
-                ],
-                "reduction": "Postflop pot/stacks are reduced for runtime; retained hand classes, when listed, are a test subset. Source weights are not rounded or rescaled.",
-                "retainedClasses": {
-                    "BB": [
-                        "AQs"
-                    ],
-                    "UTG": [
-                        "KJs"
-                    ]
-                },
-                "sha256": "8ffd54ced0567b6c6264e0faee7c18185b71b94e7c7efe1c42d1d3913f150b51",
-                "solution": "6max"
-            },
-            "ranges": {
-                "BB": {
-                    "AQs": 0.35712856000000004
-                },
-                "UTG": {
-                    "KJs": 0.17351735173517352
-                }
-            },
-            "villainPosition": "BB",
-            "villainStack": 8.0
+        "path": [
+          1,
+          1,
+          "Qc"
+        ],
+        "pot": 4.0,
+        "stacks": [
+          7.0,
+          7.0
+        ]
+      },
+      {
+        "actor": 0,
+        "board": "Ks 9s 2d Qc",
+        "hands": [
+          {
+            "cards": "Jc Kc",
+            "inputRangeWeight": 0.1735173463821411,
+            "marginalReachMass": 0.00046296295477077365,
+            "nodeStrategyEv": 2.795454978942871,
+            "ownReachWeight": 0.05783911794424057,
+            "strategy": [
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
+            ]
+          },
+          {
+            "cards": "Jd Kd",
+            "inputRangeWeight": 0.1735173463821411,
+            "marginalReachMass": 0.00046296295477077365,
+            "nodeStrategyEv": 2.795454978942871,
+            "ownReachWeight": 0.05783911794424057,
+            "strategy": [
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
+            ]
+          },
+          {
+            "cards": "Jh Kh",
+            "inputRangeWeight": 0.1735173463821411,
+            "marginalReachMass": 0.00046296295477077365,
+            "nodeStrategyEv": 2.795454978942871,
+            "ownReachWeight": 0.05783911794424057,
+            "strategy": [
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
+            ]
+          }
+        ],
+        "path": [
+          1,
+          1,
+          "Qc",
+          1
+        ],
+        "pot": 6.0,
+        "stacks": [
+          7.0,
+          5.0
+        ]
+      }
+    ],
+    "scenario": {
+      "board": "Ks 9s 2d",
+      "heroActsFirst": false,
+      "heroPosition": "UTG",
+      "heroStack": 8.0,
+      "initialPot": 2.0,
+      "iterations": 200,
+      "rangeSource": {
+        "catalog": "resources/gtowizard-preflop",
+        "history": [
+          {
+            "action": "Raise 2.5",
+            "actor": "UTG"
+          },
+          {
+            "action": "Fold",
+            "actor": "HJ"
+          },
+          {
+            "action": "Fold",
+            "actor": "CO"
+          },
+          {
+            "action": "Fold",
+            "actor": "BTN"
+          },
+          {
+            "action": "Fold",
+            "actor": "SB"
+          },
+          {
+            "action": "Raise 12.5",
+            "actor": "BB"
+          },
+          {
+            "action": "Raise 26.5",
+            "actor": "UTG"
+          },
+          {
+            "action": "Call",
+            "actor": "BB"
+          }
+        ],
+        "reduction": "Postflop pot/stacks are reduced for runtime; retained hand classes, when listed, are a test subset. Source weights are not rounded or rescaled.",
+        "retainedClasses": {
+          "BB": [
+            "AQs"
+          ],
+          "UTG": [
+            "KJs"
+          ]
         },
-        "solved": {
-            "exploitability": 8.789062121650204e-06,
-            "heroBestResponseEv": 0.9636363983154297,
-            "villainBestResponseEv": -0.963618814945221
+        "sha256": "8ffd54ced0567b6c6264e0faee7c18185b71b94e7c7efe1c42d1d3913f150b51",
+        "solution": "6max"
+      },
+      "ranges": {
+        "BB": {
+          "AQs": 0.35712856000000004
+        },
+        "UTG": {
+          "KJs": 0.17351735173517352
         }
+      },
+      "villainPosition": "BB",
+      "villainStack": 8.0
     },
-    "source": {
-        "chipScale": 500.0,
-        "repository": "https://github.com/b-inary/postflop-solver",
-        "revision": "9d1509fe5077d019825f833eed04b16d342dfda1"
-    },
-    "weighted-flop": {
-        "policy": [
-            {
-                "hands": [
-                    {
-                        "cards": "5c Ac",
-                        "strategy": [
-                            0.25,
-                            0.75,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "5d Ad",
-                        "strategy": [
-                            0.25,
-                            0.75,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "5h Ah",
-                        "strategy": [
-                            0.25,
-                            0.75,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "5s As",
-                        "strategy": [
-                            0.25,
-                            0.75,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Kc Kd",
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Kc Kh",
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Kd Kh",
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    }
-                ],
-                "path": []
-            },
-            {
-                "hands": [
-                    {
-                        "cards": "Qc Qd",
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Qc Qh",
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Qc Qs",
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Qd Qh",
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Qd Qs",
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Qh Qs",
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Kc Ac",
-                        "strategy": [
-                            0.0,
-                            1.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Kd Ad",
-                        "strategy": [
-                            0.0,
-                            1.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Kh Ah",
-                        "strategy": [
-                            0.0,
-                            1.0,
-                            0.0
-                        ]
-                    }
-                ],
-                "path": [
-                    0
-                ]
-            }
-        ],
-        "queries": [
-            {
-                "actor": 1,
-                "board": "Ks 9s 2d",
-                "hands": [
-                    {
-                        "cards": "5c Ac",
-                        "inputRangeWeight": 0.19009599089622498,
-                        "marginalReachMass": 0.1163313016295433,
-                        "nodeStrategyEv": -0.30600494146347046,
-                        "ownReachWeight": 0.19009599089622498,
-                        "strategy": [
-                            0.25,
-                            0.75,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "5d Ad",
-                        "inputRangeWeight": 0.19009599089622498,
-                        "marginalReachMass": 0.1163313016295433,
-                        "nodeStrategyEv": -0.17121383547782898,
-                        "ownReachWeight": 0.19009599089622498,
-                        "strategy": [
-                            0.25,
-                            0.75,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "5h Ah",
-                        "inputRangeWeight": 0.19009599089622498,
-                        "marginalReachMass": 0.1163313016295433,
-                        "nodeStrategyEv": -0.30600494146347046,
-                        "ownReachWeight": 0.19009599089622498,
-                        "strategy": [
-                            0.25,
-                            0.75,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "5s As",
-                        "inputRangeWeight": 0.19009599089622498,
-                        "marginalReachMass": 0.15828263759613037,
-                        "nodeStrategyEv": 0.7563121318817139,
-                        "ownReachWeight": 0.19009599089622498,
-                        "strategy": [
-                            0.25,
-                            0.75,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Kc Kd",
-                        "inputRangeWeight": 0.41975802183151245,
-                        "marginalReachMass": 0.16424117982387543,
-                        "nodeStrategyEv": 2.8237900733947754,
-                        "ownReachWeight": 0.41975802183151245,
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Kc Kh",
-                        "inputRangeWeight": 0.41975802183151245,
-                        "marginalReachMass": 0.16424117982387543,
-                        "nodeStrategyEv": 2.7600386142730713,
-                        "ownReachWeight": 0.41975802183151245,
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Kd Kh",
-                        "inputRangeWeight": 0.41975802183151245,
-                        "marginalReachMass": 0.16424117982387543,
-                        "nodeStrategyEv": 2.8237900733947754,
-                        "ownReachWeight": 0.41975802183151245,
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    }
-                ],
-                "path": [],
-                "pot": 2.0,
-                "stacks": [
-                    4.0,
-                    4.0
-                ]
-            },
-            {
-                "actor": 0,
-                "board": "Ks 9s 2d",
-                "hands": [
-                    {
-                        "cards": "Qc Qd",
-                        "inputRangeWeight": 0.041999999433755875,
-                        "marginalReachMass": 0.041208211332559586,
-                        "nodeStrategyEv": -0.7180746793746948,
-                        "ownReachWeight": 0.041999999433755875,
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Qc Qh",
-                        "inputRangeWeight": 0.041999999433755875,
-                        "marginalReachMass": 0.041208211332559586,
-                        "nodeStrategyEv": -0.7190168499946594,
-                        "ownReachWeight": 0.041999999433755875,
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Qc Qs",
-                        "inputRangeWeight": 0.041999999433755875,
-                        "marginalReachMass": 0.041208211332559586,
-                        "nodeStrategyEv": -0.5864067673683167,
-                        "ownReachWeight": 0.041999999433755875,
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Qd Qh",
-                        "inputRangeWeight": 0.041999999433755875,
-                        "marginalReachMass": 0.041208211332559586,
-                        "nodeStrategyEv": -0.7180746793746948,
-                        "ownReachWeight": 0.041999999433755875,
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Qd Qs",
-                        "inputRangeWeight": 0.041999999433755875,
-                        "marginalReachMass": 0.041208211332559586,
-                        "nodeStrategyEv": -0.585464596748352,
-                        "ownReachWeight": 0.041999999433755875,
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Qh Qs",
-                        "inputRangeWeight": 0.041999999433755875,
-                        "marginalReachMass": 0.041208211332559586,
-                        "nodeStrategyEv": -0.5864067673683167,
-                        "ownReachWeight": 0.041999999433755875,
-                        "strategy": [
-                            1.0,
-                            0.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Kc Ac",
-                        "inputRangeWeight": 0.32600000500679016,
-                        "marginalReachMass": 0.1240977942943573,
-                        "nodeStrategyEv": 0.014798400923609734,
-                        "ownReachWeight": 0.32600000500679016,
-                        "strategy": [
-                            0.0,
-                            1.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Kd Ad",
-                        "inputRangeWeight": 0.32600000500679016,
-                        "marginalReachMass": 0.1240977942943573,
-                        "nodeStrategyEv": 0.11137835681438446,
-                        "ownReachWeight": 0.32600000500679016,
-                        "strategy": [
-                            0.0,
-                            1.0,
-                            0.0
-                        ]
-                    },
-                    {
-                        "cards": "Kh Ah",
-                        "inputRangeWeight": 0.32600000500679016,
-                        "marginalReachMass": 0.1240977942943573,
-                        "nodeStrategyEv": 0.014798400923609734,
-                        "ownReachWeight": 0.32600000500679016,
-                        "strategy": [
-                            0.0,
-                            1.0,
-                            0.0
-                        ]
-                    }
-                ],
-                "path": [
-                    0
-                ],
-                "pot": 2.0,
-                "stacks": [
-                    4.0,
-                    4.0
-                ]
-            },
-            {
-                "actor": 1,
-                "board": "Ks 9s 2d",
-                "hands": [
-                    {
-                        "cards": "5c Ac",
-                        "inputRangeWeight": 0.19009599089622498,
-                        "marginalReachMass": 0.020975666120648384,
-                        "nodeStrategyEv": -0.3891025483608246,
-                        "ownReachWeight": 0.047523997724056244,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "5d Ad",
-                        "inputRangeWeight": 0.19009599089622498,
-                        "marginalReachMass": 0.020975666120648384,
-                        "nodeStrategyEv": -0.252522736787796,
-                        "ownReachWeight": 0.047523997724056244,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "5h Ah",
-                        "inputRangeWeight": 0.19009599089622498,
-                        "marginalReachMass": 0.020975666120648384,
-                        "nodeStrategyEv": -0.3891025483608246,
-                        "ownReachWeight": 0.047523997724056244,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "5s As",
-                        "inputRangeWeight": 0.19009599089622498,
-                        "marginalReachMass": 0.03146350011229515,
-                        "nodeStrategyEv": 0.7071990370750427,
-                        "ownReachWeight": 0.047523997724056244,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "Kc Kd",
-                        "inputRangeWeight": 0.41975802183151245,
-                        "marginalReachMass": 0.09263429790735245,
-                        "nodeStrategyEv": 2.6517608165740967,
-                        "ownReachWeight": 0.41975802183151245,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "Kc Kh",
-                        "inputRangeWeight": 0.41975802183151245,
-                        "marginalReachMass": 0.09263429790735245,
-                        "nodeStrategyEv": 2.538729190826416,
-                        "ownReachWeight": 0.41975802183151245,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "Kd Kh",
-                        "inputRangeWeight": 0.41975802183151245,
-                        "marginalReachMass": 0.09263429790735245,
-                        "nodeStrategyEv": 2.6517608165740967,
-                        "ownReachWeight": 0.41975802183151245,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    }
-                ],
-                "path": [
-                    0,
-                    1
-                ],
-                "pot": 3.0,
-                "stacks": [
-                    3.0,
-                    4.0
-                ]
-            },
-            {
-                "actor": 1,
-                "board": "Ks 9s 2d As",
-                "hands": [
-                    {
-                        "cards": "5c Ac",
-                        "inputRangeWeight": 0.19009599089622498,
-                        "marginalReachMass": 0.00018015908426605165,
-                        "nodeStrategyEv": 2.587698221206665,
-                        "ownReachWeight": 0.047523997724056244,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "5d Ad",
-                        "inputRangeWeight": 0.19009599089622498,
-                        "marginalReachMass": 0.00018015908426605165,
-                        "nodeStrategyEv": 2.587698221206665,
-                        "ownReachWeight": 0.047523997724056244,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "5h Ah",
-                        "inputRangeWeight": 0.19009599089622498,
-                        "marginalReachMass": 0.00018015908426605165,
-                        "nodeStrategyEv": 2.587698221206665,
-                        "ownReachWeight": 0.047523997724056244,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "Kc Kd",
-                        "inputRangeWeight": 0.41975802183151245,
-                        "marginalReachMass": 0.0015912639210000634,
-                        "nodeStrategyEv": 2.818556070327759,
-                        "ownReachWeight": 0.41975802183151245,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "Kc Kh",
-                        "inputRangeWeight": 0.41975802183151245,
-                        "marginalReachMass": 0.0015912639210000634,
-                        "nodeStrategyEv": 2.818556070327759,
-                        "ownReachWeight": 0.41975802183151245,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "Kd Kh",
-                        "inputRangeWeight": 0.41975802183151245,
-                        "marginalReachMass": 0.0015912639210000634,
-                        "nodeStrategyEv": 2.818556070327759,
-                        "ownReachWeight": 0.41975802183151245,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    }
-                ],
-                "path": [
-                    0,
-                    0,
-                    "As"
-                ],
-                "pot": 2.0,
-                "stacks": [
-                    4.0,
-                    4.0
-                ]
-            },
-            {
-                "actor": 0,
-                "board": "Ks 9s 2d Qc",
-                "hands": [
-                    {
-                        "cards": "Qd Qh",
-                        "inputRangeWeight": 0.041999999433755875,
-                        "marginalReachMass": 0.0003052460087928921,
-                        "nodeStrategyEv": -0.3093954026699066,
-                        "ownReachWeight": 0.041999999433755875,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "Qd Qs",
-                        "inputRangeWeight": 0.041999999433755875,
-                        "marginalReachMass": 0.0003052460087928921,
-                        "nodeStrategyEv": -0.3093954026699066,
-                        "ownReachWeight": 0.041999999433755875,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "Qh Qs",
-                        "inputRangeWeight": 0.041999999433755875,
-                        "marginalReachMass": 0.0003052460087928921,
-                        "nodeStrategyEv": -0.3093954026699066,
-                        "ownReachWeight": 0.041999999433755875,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "Kc Ac",
-                        "inputRangeWeight": 0.32600000500679016,
-                        "marginalReachMass": 0.0,
-                        "nodeStrategyEv": null,
-                        "ownReachWeight": 0.0,
-                        "strategy": []
-                    },
-                    {
-                        "cards": "Kd Ad",
-                        "inputRangeWeight": 0.32600000500679016,
-                        "marginalReachMass": 0.0,
-                        "nodeStrategyEv": null,
-                        "ownReachWeight": 0.0,
-                        "strategy": []
-                    },
-                    {
-                        "cards": "Kh Ah",
-                        "inputRangeWeight": 0.32600000500679016,
-                        "marginalReachMass": 0.0,
-                        "nodeStrategyEv": null,
-                        "ownReachWeight": 0.0,
-                        "strategy": []
-                    }
-                ],
-                "path": [
-                    0,
-                    0,
-                    "Qc",
-                    0
-                ],
-                "pot": 2.0,
-                "stacks": [
-                    4.0,
-                    4.0
-                ]
-            },
-            {
-                "actor": 1,
-                "board": "Ks 9s 2d Qc Th",
-                "hands": [
-                    {
-                        "cards": "5c Ac",
-                        "inputRangeWeight": 0.19009599089622498,
-                        "marginalReachMass": 2.2747362038444408e-07,
-                        "nodeStrategyEv": -0.7777779698371887,
-                        "ownReachWeight": 0.01584133319556713,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "5d Ad",
-                        "inputRangeWeight": 0.19009599089622498,
-                        "marginalReachMass": 2.2747362038444408e-07,
-                        "nodeStrategyEv": -0.7777779698371887,
-                        "ownReachWeight": 0.01584133319556713,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "5h Ah",
-                        "inputRangeWeight": 0.19009599089622498,
-                        "marginalReachMass": 2.2747362038444408e-07,
-                        "nodeStrategyEv": -0.7777779698371887,
-                        "ownReachWeight": 0.01584133319556713,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "5s As",
-                        "inputRangeWeight": 0.19009599089622498,
-                        "marginalReachMass": 2.2747362038444408e-07,
-                        "nodeStrategyEv": -0.7777779698371887,
-                        "ownReachWeight": 0.01584133319556713,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "Kc Kd",
-                        "inputRangeWeight": 0.41975802183151245,
-                        "marginalReachMass": 2.0091717942705145e-06,
-                        "nodeStrategyEv": 3.0,
-                        "ownReachWeight": 0.13991934061050415,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "Kc Kh",
-                        "inputRangeWeight": 0.41975802183151245,
-                        "marginalReachMass": 2.0091717942705145e-06,
-                        "nodeStrategyEv": 3.0,
-                        "ownReachWeight": 0.13991934061050415,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    },
-                    {
-                        "cards": "Kd Kh",
-                        "inputRangeWeight": 0.41975802183151245,
-                        "marginalReachMass": 2.0091717942705145e-06,
-                        "nodeStrategyEv": 3.0,
-                        "ownReachWeight": 0.13991934061050415,
-                        "strategy": [
-                            0.3333333432674408,
-                            0.3333333432674408,
-                            0.3333333432674408
-                        ]
-                    }
-                ],
-                "path": [
-                    0,
-                    0,
-                    "Qc",
-                    0,
-                    0,
-                    "Th"
-                ],
-                "pot": 2.0,
-                "stacks": [
-                    4.0,
-                    4.0
-                ]
-            }
-        ],
-        "scenario": {
-            "board": "Ks 9s 2d",
-            "heroActsFirst": false,
-            "heroPosition": "UTG",
-            "heroStack": 4.0,
-            "initialPot": 2.0,
-            "iterations": 200,
-            "rangeSource": {
-                "catalog": "resources/gtowizard-preflop",
-                "history": [
-                    {
-                        "action": "Raise 2.5",
-                        "actor": "UTG"
-                    },
-                    {
-                        "action": "Fold",
-                        "actor": "UTG1"
-                    },
-                    {
-                        "action": "Fold",
-                        "actor": "LJ"
-                    },
-                    {
-                        "action": "Fold",
-                        "actor": "HJ"
-                    },
-                    {
-                        "action": "Fold",
-                        "actor": "CO"
-                    },
-                    {
-                        "action": "Fold",
-                        "actor": "BTN"
-                    },
-                    {
-                        "action": "Fold",
-                        "actor": "SB"
-                    },
-                    {
-                        "action": "Raise 13",
-                        "actor": "BB"
-                    },
-                    {
-                        "action": "Raise 23.5",
-                        "actor": "UTG"
-                    },
-                    {
-                        "action": "Call",
-                        "actor": "BB"
-                    }
-                ],
-                "reduction": "Postflop pot/stacks are reduced for runtime; retained hand classes, when listed, are a test subset. Source weights are not rounded or rescaled.",
-                "retainedClasses": {
-                    "BB": [
-                        "KK",
-                        "A5s"
-                    ],
-                    "UTG": [
-                        "AKs",
-                        "QQ"
-                    ]
-                },
-                "sha256": "8ffd54ced0567b6c6264e0faee7c18185b71b94e7c7efe1c42d1d3913f150b51",
-                "solution": "8max"
-            },
-            "ranges": {
-                "BB": {
-                    "A5s": 0.19009599040095992,
-                    "KK": 0.41975802
-                },
-                "UTG": {
-                    "AKs": 0.326,
-                    "QQ": 0.042
-                }
-            },
-            "villainPosition": "BB",
-            "villainStack": 4.0
-        },
-        "solved": {
-            "exploitability": 9.91821252682712e-06,
-            "heroBestResponseEv": -0.922814130783081,
-            "villainBestResponseEv": 0.9228339791297913
-        },
-        "uniform": {
-            "exploitability": 1.0900940895080566,
-            "heroBestResponseEv": 0.21765437722206116,
-            "villainBestResponseEv": 1.962533950805664
-        }
+    "solved": {
+      "exploitability": 9.796142876439262e-6,
+      "heroBestResponseEv": 0.8861314654350281,
+      "villainBestResponseEv": -0.886111855506897
     }
+  },
+  "source": {
+    "chipScale": 500.0,
+    "repository": "https://github.com/b-inary/postflop-solver",
+    "revision": "9d1509fe5077d019825f833eed04b16d342dfda1"
+  },
+  "weighted-flop": {
+    "policy": [
+      {
+        "hands": [
+          {
+            "cards": "5c Ac",
+            "strategy": [
+              0.25,
+              0.75
+            ]
+          },
+          {
+            "cards": "5d Ad",
+            "strategy": [
+              0.25,
+              0.75
+            ]
+          },
+          {
+            "cards": "5h Ah",
+            "strategy": [
+              0.25,
+              0.75
+            ]
+          },
+          {
+            "cards": "5s As",
+            "strategy": [
+              0.25,
+              0.75
+            ]
+          },
+          {
+            "cards": "Kc Kd",
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "cards": "Kc Kh",
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "cards": "Kd Kh",
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          }
+        ],
+        "path": []
+      },
+      {
+        "hands": [
+          {
+            "cards": "Qc Qd",
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "cards": "Qc Qh",
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "cards": "Qc Qs",
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "cards": "Qd Qh",
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "cards": "Qd Qs",
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "cards": "Qh Qs",
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "cards": "Kc Ac",
+            "strategy": [
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "cards": "Kd Ad",
+            "strategy": [
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "cards": "Kh Ah",
+            "strategy": [
+              0.0,
+              1.0
+            ]
+          }
+        ],
+        "path": [
+          0
+        ]
+      }
+    ],
+    "queries": [
+      {
+        "actor": 1,
+        "board": "Ks 9s 2d",
+        "hands": [
+          {
+            "cards": "5c Ac",
+            "inputRangeWeight": 0.19009599089622498,
+            "marginalReachMass": 0.1163313016295433,
+            "nodeStrategyEv": 0.23084402084350586,
+            "ownReachWeight": 0.19009599089622498,
+            "strategy": [
+              0.25,
+              0.75
+            ]
+          },
+          {
+            "cards": "5d Ad",
+            "inputRangeWeight": 0.19009599089622498,
+            "marginalReachMass": 0.1163313016295433,
+            "nodeStrategyEv": 0.3327540159225464,
+            "ownReachWeight": 0.19009599089622498,
+            "strategy": [
+              0.25,
+              0.75
+            ]
+          },
+          {
+            "cards": "5h Ah",
+            "inputRangeWeight": 0.19009599089622498,
+            "marginalReachMass": 0.1163313016295433,
+            "nodeStrategyEv": 0.23084402084350586,
+            "ownReachWeight": 0.19009599089622498,
+            "strategy": [
+              0.25,
+              0.75
+            ]
+          },
+          {
+            "cards": "5s As",
+            "inputRangeWeight": 0.19009599089622498,
+            "marginalReachMass": 0.15828263759613037,
+            "nodeStrategyEv": 1.0273059606552124,
+            "ownReachWeight": 0.19009599089622498,
+            "strategy": [
+              0.25,
+              0.75
+            ]
+          },
+          {
+            "cards": "Kc Kd",
+            "inputRangeWeight": 0.41975802183151245,
+            "marginalReachMass": 0.16424117982387543,
+            "nodeStrategyEv": 2.1340229511260986,
+            "ownReachWeight": 0.41975802183151245,
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "cards": "Kc Kh",
+            "inputRangeWeight": 0.41975802183151245,
+            "marginalReachMass": 0.16424117982387543,
+            "nodeStrategyEv": 2.085170030593872,
+            "ownReachWeight": 0.41975802183151245,
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "cards": "Kd Kh",
+            "inputRangeWeight": 0.41975802183151245,
+            "marginalReachMass": 0.16424117982387543,
+            "nodeStrategyEv": 2.1340229511260986,
+            "ownReachWeight": 0.41975802183151245,
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          }
+        ],
+        "path": [],
+        "pot": 2.0,
+        "stacks": [
+          4.0,
+          4.0
+        ]
+      },
+      {
+        "actor": 0,
+        "board": "Ks 9s 2d",
+        "hands": [
+          {
+            "cards": "Qc Qd",
+            "inputRangeWeight": 0.041999999433755875,
+            "marginalReachMass": 0.041208211332559586,
+            "nodeStrategyEv": -0.14677271246910095,
+            "ownReachWeight": 0.041999999433755875,
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "cards": "Qc Qh",
+            "inputRangeWeight": 0.041999999433755875,
+            "marginalReachMass": 0.041208211332559586,
+            "nodeStrategyEv": -0.14737646281719208,
+            "ownReachWeight": 0.041999999433755875,
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "cards": "Qc Qs",
+            "inputRangeWeight": 0.041999999433755875,
+            "marginalReachMass": 0.041208211332559586,
+            "nodeStrategyEv": -0.062382690608501434,
+            "ownReachWeight": 0.041999999433755875,
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "cards": "Qd Qh",
+            "inputRangeWeight": 0.041999999433755875,
+            "marginalReachMass": 0.041208211332559586,
+            "nodeStrategyEv": -0.14677271246910095,
+            "ownReachWeight": 0.041999999433755875,
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "cards": "Qd Qs",
+            "inputRangeWeight": 0.041999999433755875,
+            "marginalReachMass": 0.041208211332559586,
+            "nodeStrategyEv": -0.06177892908453941,
+            "ownReachWeight": 0.041999999433755875,
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "cards": "Qh Qs",
+            "inputRangeWeight": 0.041999999433755875,
+            "marginalReachMass": 0.041208211332559586,
+            "nodeStrategyEv": -0.062382690608501434,
+            "ownReachWeight": 0.041999999433755875,
+            "strategy": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "cards": "Kc Ac",
+            "inputRangeWeight": 0.32600000500679016,
+            "marginalReachMass": 0.1240977942943573,
+            "nodeStrategyEv": 0.5492525696754456,
+            "ownReachWeight": 0.32600000500679016,
+            "strategy": [
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "cards": "Kd Ad",
+            "inputRangeWeight": 0.32600000500679016,
+            "marginalReachMass": 0.1240977942943573,
+            "nodeStrategyEv": 0.6232618093490601,
+            "ownReachWeight": 0.32600000500679016,
+            "strategy": [
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "cards": "Kh Ah",
+            "inputRangeWeight": 0.32600000500679016,
+            "marginalReachMass": 0.1240977942943573,
+            "nodeStrategyEv": 0.5492525696754456,
+            "ownReachWeight": 0.32600000500679016,
+            "strategy": [
+              0.0,
+              1.0
+            ]
+          }
+        ],
+        "path": [
+          0
+        ],
+        "pot": 2.0,
+        "stacks": [
+          4.0,
+          4.0
+        ]
+      },
+      {
+        "actor": 1,
+        "board": "Ks 9s 2d",
+        "hands": [
+          {
+            "cards": "5c Ac",
+            "inputRangeWeight": 0.19009599089622498,
+            "marginalReachMass": 0.020975666120648384,
+            "nodeStrategyEv": -0.3686836063861847,
+            "ownReachWeight": 0.047523997724056244,
+            "strategy": [
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
+            ]
+          },
+          {
+            "cards": "5d Ad",
+            "inputRangeWeight": 0.19009599089622498,
+            "marginalReachMass": 0.020975666120648384,
+            "nodeStrategyEv": -0.26402246952056885,
+            "ownReachWeight": 0.047523997724056244,
+            "strategy": [
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
+            ]
+          },
+          {
+            "cards": "5h Ah",
+            "inputRangeWeight": 0.19009599089622498,
+            "marginalReachMass": 0.020975666120648384,
+            "nodeStrategyEv": -0.3686836063861847,
+            "ownReachWeight": 0.047523997724056244,
+            "strategy": [
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
+            ]
+          },
+          {
+            "cards": "5s As",
+            "inputRangeWeight": 0.19009599089622498,
+            "marginalReachMass": 0.03146350011229515,
+            "nodeStrategyEv": 0.47141319513320923,
+            "ownReachWeight": 0.047523997724056244,
+            "strategy": [
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
+            ]
+          },
+          {
+            "cards": "Kc Kd",
+            "inputRangeWeight": 0.41975802183151245,
+            "marginalReachMass": 0.09263429790735245,
+            "nodeStrategyEv": 1.9615322351455688,
+            "ownReachWeight": 0.41975802183151245,
+            "strategy": [
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
+            ]
+          },
+          {
+            "cards": "Kc Kh",
+            "inputRangeWeight": 0.41975802183151245,
+            "marginalReachMass": 0.09263429790735245,
+            "nodeStrategyEv": 1.8749159574508667,
+            "ownReachWeight": 0.41975802183151245,
+            "strategy": [
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
+            ]
+          },
+          {
+            "cards": "Kd Kh",
+            "inputRangeWeight": 0.41975802183151245,
+            "marginalReachMass": 0.09263429790735245,
+            "nodeStrategyEv": 1.9615322351455688,
+            "ownReachWeight": 0.41975802183151245,
+            "strategy": [
+              0.3333333432674408,
+              0.3333333432674408,
+              0.3333333432674408
+            ]
+          }
+        ],
+        "path": [
+          0,
+          1
+        ],
+        "pot": 3.0,
+        "stacks": [
+          3.0,
+          4.0
+        ]
+      },
+      {
+        "actor": 1,
+        "board": "Ks 9s 2d As",
+        "hands": [
+          {
+            "cards": "5c Ac",
+            "inputRangeWeight": 0.19009599089622498,
+            "marginalReachMass": 0.00018015908426605165,
+            "nodeStrategyEv": 2.0632104873657227,
+            "ownReachWeight": 0.047523997724056244,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "cards": "5d Ad",
+            "inputRangeWeight": 0.19009599089622498,
+            "marginalReachMass": 0.00018015908426605165,
+            "nodeStrategyEv": 2.0632104873657227,
+            "ownReachWeight": 0.047523997724056244,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "cards": "5h Ah",
+            "inputRangeWeight": 0.19009599089622498,
+            "marginalReachMass": 0.00018015908426605165,
+            "nodeStrategyEv": 2.0632104873657227,
+            "ownReachWeight": 0.047523997724056244,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "cards": "Kc Kd",
+            "inputRangeWeight": 0.41975802183151245,
+            "marginalReachMass": 0.0015912639210000634,
+            "nodeStrategyEv": 2.211174249649048,
+            "ownReachWeight": 0.41975802183151245,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "cards": "Kc Kh",
+            "inputRangeWeight": 0.41975802183151245,
+            "marginalReachMass": 0.0015912639210000634,
+            "nodeStrategyEv": 2.211174249649048,
+            "ownReachWeight": 0.41975802183151245,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "cards": "Kd Kh",
+            "inputRangeWeight": 0.41975802183151245,
+            "marginalReachMass": 0.0015912639210000634,
+            "nodeStrategyEv": 2.211174249649048,
+            "ownReachWeight": 0.41975802183151245,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          }
+        ],
+        "path": [
+          0,
+          0,
+          "As"
+        ],
+        "pot": 2.0,
+        "stacks": [
+          4.0,
+          4.0
+        ]
+      },
+      {
+        "actor": 0,
+        "board": "Ks 9s 2d Qc",
+        "hands": [
+          {
+            "cards": "Qd Qh",
+            "inputRangeWeight": 0.041999999433755875,
+            "marginalReachMass": 0.0004578689986374229,
+            "nodeStrategyEv": 0.17699402570724487,
+            "ownReachWeight": 0.041999999433755875,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "cards": "Qd Qs",
+            "inputRangeWeight": 0.041999999433755875,
+            "marginalReachMass": 0.0004578689986374229,
+            "nodeStrategyEv": 0.17699402570724487,
+            "ownReachWeight": 0.041999999433755875,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "cards": "Qh Qs",
+            "inputRangeWeight": 0.041999999433755875,
+            "marginalReachMass": 0.0004578689986374229,
+            "nodeStrategyEv": 0.17699402570724487,
+            "ownReachWeight": 0.041999999433755875,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "cards": "Kc Ac",
+            "inputRangeWeight": 0.32600000500679016,
+            "marginalReachMass": 0.0,
+            "nodeStrategyEv": null,
+            "ownReachWeight": 0.0,
+            "strategy": []
+          },
+          {
+            "cards": "Kd Ad",
+            "inputRangeWeight": 0.32600000500679016,
+            "marginalReachMass": 0.0,
+            "nodeStrategyEv": null,
+            "ownReachWeight": 0.0,
+            "strategy": []
+          },
+          {
+            "cards": "Kh Ah",
+            "inputRangeWeight": 0.32600000500679016,
+            "marginalReachMass": 0.0,
+            "nodeStrategyEv": null,
+            "ownReachWeight": 0.0,
+            "strategy": []
+          }
+        ],
+        "path": [
+          0,
+          0,
+          "Qc",
+          0
+        ],
+        "pot": 2.0,
+        "stacks": [
+          4.0,
+          4.0
+        ]
+      },
+      {
+        "actor": 1,
+        "board": "Ks 9s 2d Qc Th",
+        "hands": [
+          {
+            "cards": "5c Ac",
+            "inputRangeWeight": 0.19009599089622498,
+            "marginalReachMass": 5.118155854688666e-7,
+            "nodeStrategyEv": -0.20833349227905273,
+            "ownReachWeight": 0.023761998862028122,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "cards": "5d Ad",
+            "inputRangeWeight": 0.19009599089622498,
+            "marginalReachMass": 5.118155854688666e-7,
+            "nodeStrategyEv": -0.20833349227905273,
+            "ownReachWeight": 0.023761998862028122,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "cards": "5h Ah",
+            "inputRangeWeight": 0.19009599089622498,
+            "marginalReachMass": 5.118155854688666e-7,
+            "nodeStrategyEv": -0.20833349227905273,
+            "ownReachWeight": 0.023761998862028122,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "cards": "5s As",
+            "inputRangeWeight": 0.19009599089622498,
+            "marginalReachMass": 5.118155854688666e-7,
+            "nodeStrategyEv": -0.20833349227905273,
+            "ownReachWeight": 0.023761998862028122,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "cards": "Kc Kd",
+            "inputRangeWeight": 0.41975802183151245,
+            "marginalReachMass": 4.520636139204726e-6,
+            "nodeStrategyEv": 2.375000238418579,
+            "ownReachWeight": 0.20987901091575623,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "cards": "Kc Kh",
+            "inputRangeWeight": 0.41975802183151245,
+            "marginalReachMass": 4.520636139204726e-6,
+            "nodeStrategyEv": 2.375000238418579,
+            "ownReachWeight": 0.20987901091575623,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "cards": "Kd Kh",
+            "inputRangeWeight": 0.41975802183151245,
+            "marginalReachMass": 4.520636139204726e-6,
+            "nodeStrategyEv": 2.375000238418579,
+            "ownReachWeight": 0.20987901091575623,
+            "strategy": [
+              0.5,
+              0.5
+            ]
+          }
+        ],
+        "path": [
+          0,
+          0,
+          "Qc",
+          0,
+          0,
+          "Th"
+        ],
+        "pot": 2.0,
+        "stacks": [
+          4.0,
+          4.0
+        ]
+      }
+    ],
+    "scenario": {
+      "board": "Ks 9s 2d",
+      "heroActsFirst": false,
+      "heroPosition": "UTG",
+      "heroStack": 4.0,
+      "initialPot": 2.0,
+      "iterations": 200,
+      "rangeSource": {
+        "catalog": "resources/gtowizard-preflop",
+        "history": [
+          {
+            "action": "Raise 2.5",
+            "actor": "UTG"
+          },
+          {
+            "action": "Fold",
+            "actor": "UTG1"
+          },
+          {
+            "action": "Fold",
+            "actor": "LJ"
+          },
+          {
+            "action": "Fold",
+            "actor": "HJ"
+          },
+          {
+            "action": "Fold",
+            "actor": "CO"
+          },
+          {
+            "action": "Fold",
+            "actor": "BTN"
+          },
+          {
+            "action": "Fold",
+            "actor": "SB"
+          },
+          {
+            "action": "Raise 13",
+            "actor": "BB"
+          },
+          {
+            "action": "Raise 23.5",
+            "actor": "UTG"
+          },
+          {
+            "action": "Call",
+            "actor": "BB"
+          }
+        ],
+        "reduction": "Postflop pot/stacks are reduced for runtime; retained hand classes, when listed, are a test subset. Source weights are not rounded or rescaled.",
+        "retainedClasses": {
+          "BB": [
+            "KK",
+            "A5s"
+          ],
+          "UTG": [
+            "AKs",
+            "QQ"
+          ]
+        },
+        "sha256": "8ffd54ced0567b6c6264e0faee7c18185b71b94e7c7efe1c42d1d3913f150b51",
+        "solution": "8max"
+      },
+      "ranges": {
+        "BB": {
+          "A5s": 0.19009599040095992,
+          "KK": 0.41975802
+        },
+        "UTG": {
+          "AKs": 0.326,
+          "QQ": 0.042
+        }
+      },
+      "villainPosition": "BB",
+      "villainStack": 4.0
+    },
+    "solved": {
+      "exploitability": 9.979247806768399e-6,
+      "heroBestResponseEv": -0.910060703754425,
+      "villainBestResponseEv": 0.9100806713104248
+    },
+    "uniform": {
+      "exploitability": 1.6410002708435059,
+      "heroBestResponseEv": 1.3318697214126587,
+      "villainBestResponseEv": 1.950130581855774
+    }
+  }
 }

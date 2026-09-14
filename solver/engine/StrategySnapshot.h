@@ -29,8 +29,11 @@ private:
 
     struct NodeBlock
     {
+        game::NodeId node;
         std::size_t handOffset;
         std::size_t probabilityOffset;
+        std::size_t handCount;
+        std::size_t actionCount;
     };
 
     StrategySnapshot(

@@ -69,7 +69,7 @@ export default function SolvePanel({
                         </strong>
                         <small>
                             {status.state === "solving"
-                                ? `${Math.round((status.completedIterations / status.totalIterations) * 100)}% complete`
+                                ? `${Math.round((status.completedIterations / status.totalIterations) * 100)}% complete${status.estimate ? ` · Estimated memory ${(status.estimate.peakBytes / 1024 ** 3).toFixed(2)} GiB` : ""}`
                                 : "Please wait…"}
                         </small>
                     </div>

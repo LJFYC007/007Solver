@@ -56,14 +56,14 @@ void StrategySnapshot::BuildIndex(const std::vector<game::InfoSetKey>& infoSets)
     if (!game_)
         throw std::invalid_argument("Strategy snapshot requires a compiled game");
 
-    nodes_.resize(game_->NodeCount() + 1);
     hands_.reserve(infoSets.size());
-    std::size_t nextNode = 0;
     std::size_t probabilityOffset = 0;
     const game::InfoSetKey* previous = nullptr;
+    auto node = game_->GetNode(game_->Root());
     for (const game::InfoSetKey& infoSet : infoSets)
     {
-        const game::GameNode& node = game_->GetNode(infoSet.node);
+        if (node.Id() != infoSet.node)
+            node = game_->GetNode(infoSet.node);
         if (node.Kind() != game::NodeKind::Decision || node.BettingEdgeCount() == 0)
             throw std::invalid_argument("Strategy entry must refer to a decision node with actions");
         if (core::Overlaps(infoSet.hand, node.State().board))
@@ -89,32 +89,35 @@ void StrategySnapshot::BuildIndex(const std::vector<game::InfoSetKey>& infoSets)
         if (std::abs(totalProbability - 1.0) > normalizationTolerance)
             throw std::invalid_argument("Strategy probabilities must sum to one");
 
-        while (nextNode <= static_cast<std::size_t>(infoSet.node.Value()))
-            nodes_[nextNode++] = {hands_.size(), probabilityOffset};
+        if (nodes_.empty() || nodes_.back().node != infoSet.node)
+            nodes_.push_back({infoSet.node, hands_.size(), probabilityOffset, 0, actionCount});
+        ++nodes_.back().handCount;
         hands_.push_back(infoSet.hand);
         probabilityOffset += actionCount;
         previous = &infoSet;
     }
     if (probabilityOffset != probabilities_.size())
         throw std::invalid_argument("Strategy probability count does not match the node action count");
-    while (nextNode < nodes_.size())
-        nodes_[nextNode++] = {hands_.size(), probabilityOffset};
 }
 
 const float* StrategySnapshot::FindStrategy(const game::InfoSetKey& infoSet) const
 {
-    const game::GameNode& node = game_->GetNode(infoSet.node);
-    if (node.Kind() != game::NodeKind::Decision || node.BettingEdgeCount() == 0)
-        throw std::invalid_argument("Strategy lookup requires a decision node with actions");
-
-    const std::size_t nodeIndex = static_cast<std::size_t>(infoSet.node.Value());
-    const NodeBlock& block = nodes_[nodeIndex];
+    const auto found = std::lower_bound(
+        nodes_.begin(), nodes_.end(), infoSet.node, [](const NodeBlock& block, game::NodeId id) { return block.node < id; }
+    );
+    if (found == nodes_.end() || found->node != infoSet.node)
+    {
+        if (game_->GetNode(infoSet.node).Kind() != game::NodeKind::Decision)
+            throw std::invalid_argument("Strategy lookup requires a decision node with actions");
+        return nullptr;
+    }
+    const NodeBlock& block = *found;
     const auto begin = hands_.begin() + block.handOffset;
-    const auto end = hands_.begin() + nodes_[nodeIndex + 1].handOffset;
+    const auto end = begin + block.handCount;
     const auto hand = std::lower_bound(begin, end, infoSet.hand);
     if (hand == end || *hand != infoSet.hand)
         return nullptr;
-    return probabilities_.data() + block.probabilityOffset + static_cast<std::size_t>(hand - begin) * node.BettingEdgeCount();
+    return probabilities_.data() + block.probabilityOffset + static_cast<std::size_t>(hand - begin) * block.actionCount;
 }
 
 std::vector<float> StrategySnapshot::StrategyOrUniform(const game::InfoSetKey& infoSet) const

@@ -124,6 +124,8 @@ ActionApplication ApplyAction(const PublicState& state, const BettingAction& act
         }
         else
         {
+            if (action.Kind() == BettingActionKind::Raise)
+                ++result.state.raiseCount;
             const core::Chips raiseSize = action.AmountTo() - state.Contribution(opponent);
             if (action.Kind() == BettingActionKind::Bet || raiseSize >= state.lastFullRaiseSize)
                 result.state.lastFullRaiseSize = raiseSize;

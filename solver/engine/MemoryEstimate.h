@@ -1,0 +1,23 @@
+#pragma once
+
+#include "engine/SolveProblem.h"
+#include <cstdint>
+
+namespace solver::engine
+{
+struct MemoryEstimate
+{
+    std::uint64_t logicalNodes;
+    std::uint64_t topologyNodes;
+    std::uint64_t traversalNodes;
+    std::uint64_t strategyEntries;
+    std::uint64_t peakBytes;
+    int workers;
+};
+
+int CpuWorkerCount(int requested = 0);
+// Conservative solve/export/evaluation peak, before allocating the active layout or
+// strategy tables. Uses root-hand strides; includes headroom for allocator/runtime costs.
+// User-driven navigation caches after solving are not included.
+MemoryEstimate EstimateCpuMemory(const SolveProblem& problem, int workers = 0);
+} // namespace solver::engine

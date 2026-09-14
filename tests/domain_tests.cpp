@@ -51,7 +51,8 @@ TEST(BettingRulesTest, FullRaiseAndShortAllInRaiseHaveDistinctRaiseSizeEffects)
 
 TEST(BettingRulesTest, UnequalStacksCapMaximumWithoutMakingItAllIn)
 {
-    const game::PublicState state = MakeState(10.0, 100.0, 40.0);
+    // Half-pot exceeds the shorter stack and must clamp to the effective maximum.
+    const game::PublicState state = MakeState(100.0, 100.0, 40.0);
     const game::LegalActionSet legalActions = game::GetLegalActions(state);
     ASSERT_TRUE(legalActions.aggression.has_value());
     EXPECT_EQ(legalActions.aggression->maximumAmountTo, Chips(40.0));

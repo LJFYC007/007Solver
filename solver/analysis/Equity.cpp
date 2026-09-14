@@ -32,7 +32,7 @@ struct Mass
 
 EquityReport AnalysisSession::QueryEquity(game::NodeId nodeId)
 {
-    const auto& board = result_.Problem().game->GetNode(nodeId).State().board;
+    const auto board = result_.Problem().game->GetNode(nodeId).State().board;
     const auto& reach = reachCalculator_.ReachFor(nodeId);
     EquityReport report{nodeId};
     const std::array<const ReachCalculator::HandWeights*, 2> weights{&reach.ownReachWeights.player0, &reach.ownReachWeights.player1};

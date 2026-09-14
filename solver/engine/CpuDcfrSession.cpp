@@ -1,4 +1,5 @@
 #include "engine/CpuDcfrSession.h"
+#include "engine/MemoryEstimate.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -13,7 +14,7 @@ namespace solver::engine
 CpuDcfrSession::CpuDcfrSession(std::shared_ptr<const SolveProblem> problem, int workers)
     : problem_(std::move(problem))
     , traversal_(problem_ ? *problem_ : throw std::invalid_argument("CPU DCFR session requires a solve problem"), game::NodeId(0))
-    , workerCount_(workers == 0 ? omp_get_max_threads() : workers)
+    , workerCount_(CpuWorkerCount(workers))
 {
     if (workerCount_ <= 0)
         throw std::invalid_argument("CPU DCFR worker count must be positive");
@@ -35,9 +36,11 @@ CpuDcfrSession::CpuDcfrSession(std::shared_ptr<const SolveProblem> problem, int 
     for (std::size_t player = 0; player < 2; ++player)
         for (const auto& hand : traversal_.hands[player])
             divisors_[player].push_back(hand.opponentMass);
-    for (std::size_t player = 0; player < 2; ++player)
-        reach_[player].resize(traversal_.nodes.size() * traversal_.hands[player].size());
-    values_.resize(traversal_.nodes.size() * std::max(traversal_.hands[0].size(), traversal_.hands[1].size()));
+    workspace_ = traversal_.MakeWorkspace(workerCount_ > 1);
+    if (workerCount_ > 1)
+        for (int worker = 0; worker < workerCount_; ++worker)
+            workers_.push_back(traversal_.MakeWorkspace());
+    rootValues_.resize(std::max(traversal_.hands[0].size(), traversal_.hands[1].size()));
 }
 
 void CpuDcfrSession::Run(int iterations, const std::function<void(int)>& progressCallback)
@@ -56,32 +59,23 @@ void CpuDcfrSession::Run(int iterations, const std::function<void(int)>& progres
         for (std::size_t player = 0; player < 2; ++player)
         {
             for (std::size_t hand = 0; hand < traversal_.hands[player].size(); ++hand)
-                reach_[player][hand] = player == updatingPlayer ? 1.0f : traversal_.hands[player][hand].weight;
+                workspace_.reach[player][hand] = player == updatingPlayer ? 1.0f : traversal_.hands[player][hand].weight;
         }
 
-#pragma omp parallel num_threads(workerCount_)
-        {
-#pragma omp master
-            workerCount_ = omp_get_num_threads();
-            for (std::size_t depth = 0; depth < traversal_.levels.size(); ++depth)
-            {
-                const auto& level = traversal_.levels[depth];
-#pragma omp for schedule(static)
-                for (int index = 0; index < static_cast<int>(level.size()); ++index)
-                    PropagateReach(level[index], updatingPlayer);
-            }
-            // Fold and showdown costs differ; workers take bounded terminal batches.
-#pragma omp for schedule(dynamic, 64)
-            for (int index = 0; index < static_cast<int>(traversal_.terminals.size()); ++index)
-                EvaluateTerminal(traversal_.terminals[index], updatingPlayer);
-            for (std::size_t depth = traversal_.levels.size(); depth > 0; --depth)
-            {
-                const auto& level = traversal_.levels[depth - 1];
-#pragma omp for schedule(static)
-                for (int index = 0; index < static_cast<int>(level.size()); ++index)
-                    BackUp(level[index], updatingPlayer, positiveDiscount, averageDiscount);
-            }
-        }
+        const HandTraversal::Update update = [&](std::uint32_t node, const double* ownReach, const float* children, const float* values)
+        { UpdateRegrets(node, updatingPlayer, ownReach, children, values, positiveDiscount, averageDiscount); };
+        traversal_.Walk(
+            0,
+            updatingPlayer,
+            strategies_.data(),
+            divisors_[updatingPlayer].data(),
+            false,
+            workspace_,
+            0,
+            rootValues_.data(),
+            update,
+            workerCount_ > 1 ? &workers_ : nullptr
+        );
         ++completedIterations_;
         if (progressCallback)
         {
@@ -96,49 +90,25 @@ void CpuDcfrSession::Run(int iterations, const std::function<void(int)>& progres
     trainingTimeSeconds_ += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 }
 
-void CpuDcfrSession::PropagateReach(std::uint32_t node, std::size_t updatingPlayer)
-{
-    for (std::size_t player = 0; player < 2; ++player)
-        traversal_.PropagateReach(
-            node,
-            player,
-            player != updatingPlayer,
-            strategies_.data(),
-            reach_[player].data() + node * traversal_.hands[player].size(),
-            reach_[player].data(),
-            player != updatingPlayer
-        );
-}
-
-void CpuDcfrSession::EvaluateTerminal(std::uint32_t node, std::size_t updatingPlayer)
-{
-    traversal_.EvaluateTerminal(
-        node,
-        updatingPlayer,
-        reach_[1 - updatingPlayer].data() + node * traversal_.hands[1 - updatingPlayer].size(),
-        divisors_[updatingPlayer].data(),
-        values_.data() + node * traversal_.hands[updatingPlayer].size()
-    );
-}
-
-void CpuDcfrSession::BackUp(std::uint32_t nodeIndex, std::size_t updatingPlayer, float positiveDiscount, float averageDiscount)
+void CpuDcfrSession::UpdateRegrets(
+    std::uint32_t nodeIndex,
+    std::size_t updatingPlayer,
+    const double* ownReach,
+    const float* children,
+    const float* values,
+    float positiveDiscount,
+    float averageDiscount
+)
 {
     const HandTraversal::Node& node = traversal_.nodes[nodeIndex];
     const std::size_t count = traversal_.hands[updatingPlayer].size();
-    float* values = values_.data() + nodeIndex * count;
-    const bool updating = node.kind == game::NodeKind::Decision && node.actor == updatingPlayer;
-    traversal_.BackUp(nodeIndex, updatingPlayer, strategies_.data(), false, values_.data());
-    if (!updating)
-        return;
-
-    const double* ownReach = reach_[updatingPlayer].data() + nodeIndex * count;
     // Traverse contiguous hand rows while retaining each hand's action accumulation order.
     std::array<float, HandTraversal::kMaxHands> positiveRegrets;
     std::fill_n(positiveRegrets.data(), count, 0.0f);
     for (std::size_t action = 0; action < node.childCount; ++action)
     {
         const std::size_t offset = node.strategyOffset + action * count;
-        const float* childValues = values_.data() + traversal_.children[node.childOffset + action] * count;
+        const float* childValues = children + action * count;
         for (std::size_t hand = 0; hand < count; ++hand)
         {
             const float regret = regrets_[offset + hand] + (childValues[hand] - values[hand]);
@@ -163,12 +133,9 @@ StrategySnapshot CpuDcfrSession::ExportStrategy() const
     std::vector<float> probabilities;
     infoSets.reserve(infoSetCount_);
     probabilities.reserve(strategySums_.size());
-    std::vector<std::size_t> order(traversal_.nodes.size());
-    std::iota(order.begin(), order.end(), 0);
-    std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) { return traversal_.nodes[a].id < traversal_.nodes[b].id; });
-    for (const std::size_t index : order)
+    // The active traversal is preorder, hence already sorted by logical NodeId.
+    for (const HandTraversal::Node& node : traversal_.nodes)
     {
-        const HandTraversal::Node& node = traversal_.nodes[index];
         if (node.kind != game::NodeKind::Decision)
             continue;
         const auto& hands = traversal_.hands[node.actor];

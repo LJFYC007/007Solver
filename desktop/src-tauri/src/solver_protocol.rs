@@ -1,6 +1,17 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MemoryEstimate {
+    logical_nodes: u64,
+    topology_nodes: u64,
+    traversal_nodes: u64,
+    strategy_entries: u64,
+    peak_bytes: u64,
+    workers: i32,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase", tag = "state")]
 pub(crate) enum SolverStatus {
@@ -15,6 +26,7 @@ pub(crate) enum SolverStatus {
         completed_iterations: i32,
         #[serde(rename = "totalIterations")]
         total_iterations: i32,
+        estimate: Option<MemoryEstimate>,
     },
     Ready {
         iterations: i32,
@@ -22,6 +34,7 @@ pub(crate) enum SolverStatus {
         node_count: i32,
         #[serde(rename = "rootNodeId")]
         root_node_id: i32,
+        estimate: Option<MemoryEstimate>,
     },
     Failed {
         message: String,
@@ -40,6 +53,7 @@ pub(crate) enum ServiceEvent {
         completed_iterations: i32,
         #[serde(rename = "totalIterations")]
         total_iterations: i32,
+        estimate: Option<MemoryEstimate>,
     },
     Ready {
         iterations: i32,
@@ -47,6 +61,7 @@ pub(crate) enum ServiceEvent {
         node_count: i32,
         #[serde(rename = "rootNodeId")]
         root_node_id: i32,
+        estimate: Option<MemoryEstimate>,
     },
     Failed {
         message: String,

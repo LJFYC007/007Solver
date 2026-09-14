@@ -63,6 +63,15 @@ export interface TerminalNode {
 
 export type SolverNode = ChanceNode | DecisionNode | TerminalNode;
 
+export interface MemoryEstimate {
+    logicalNodes: number;
+    topologyNodes: number;
+    traversalNodes: number;
+    strategyEntries: number;
+    peakBytes: number;
+    workers: number;
+}
+
 export type SolverStatus =
     | { state: "idle" }
     | {
@@ -76,12 +85,14 @@ export type SolverStatus =
           completedIterations: number;
           state: "solving";
           totalIterations: number;
+          estimate?: MemoryEstimate | null;
       }
     | {
           iterations: number;
           nodeCount: number;
           rootNodeId: number;
           state: "ready";
+          estimate?: MemoryEstimate | null;
       }
     | {
           message: string;

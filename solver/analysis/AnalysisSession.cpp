@@ -60,7 +60,7 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
 
     for (std::size_t edgeIndex = 0; edgeIndex < node.BettingEdgeCount(); ++edgeIndex)
     {
-        const game::BettingAction& action = node.GetBettingEdge(edgeIndex).Action();
+        const game::BettingAction action = node.GetBettingEdge(edgeIndex).Action();
         report.actions.push_back({
             action.Kind(),
             game::IsAllIn(node.State(), action),
@@ -84,7 +84,7 @@ std::vector<HandReport> AnalysisSession::BuildHandReports(
     if (std::any_of(marginalReachMasses.begin(), marginalReachMasses.end(), [](const auto& entry) { return entry.second > 0.0f; }))
         evs = engine::EvaluateNodeStrategyEvs(result_.Problem(), result_.Strategy(), nodeId, player);
     std::vector<HandReport> hands;
-    const core::Board& board = result_.Problem().game->GetNode(nodeId).State().board;
+    const core::Board board = result_.Problem().game->GetNode(nodeId).State().board;
     for (const auto& [hand, inputRangeWeight] : range.Entries())
     {
         if (inputRangeWeight <= 0.0f || core::Overlaps(hand, board))

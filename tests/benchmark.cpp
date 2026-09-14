@@ -1,6 +1,7 @@
 #include "analysis/AnalysisSession.h"
 #include "engine/CpuDcfrSession.h"
 #include "engine/StrategyEvaluator.h"
+#include "engine/MemoryEstimate.h"
 #include "game/GameCompiler.h"
 #include "io/ScenarioLoader.h"
 #include "service/JsonAdapter.h"
@@ -156,6 +157,11 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
     ASSERT_EQ(input.at("villainStack"), 15.0);
     // Benchmark-only sizing; the external oracle reads the same fixture list.
     scenario.game.bettingAbstraction.betSizes.clear();
+    // Keep this larger, historical workload fixed to measure storage/traversal changes
+    // against the same independent reference, regardless of the desktop preset.
+    scenario.game.bettingAbstraction.raiseSizes.clear();
+    scenario.game.bettingAbstraction.includeMaximumBet = true;
+    scenario.game.bettingAbstraction.includeMaximumRaise = true;
     for (const auto& percent : betPercentages)
         scenario.game.bettingAbstraction.betSizes.push_back({game::BetSizeKind::PotFractionOfCurrentPot, percent.get<int>(), 100, {}});
     const auto problem =
@@ -163,6 +169,15 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
     const int iterations = iterationBudget == 0 ? scenario.iterations : iterationBudget;
     report["iterations"] = iterations;
     report["node_count"] = problem->game->NodeCount();
+    const auto estimate = engine::EstimateCpuMemory(*problem, workers);
+    report["tree_estimate"] = {
+        {"logical_nodes", estimate.logicalNodes},
+        {"topology_nodes", estimate.topologyNodes},
+        {"traversal_nodes", estimate.traversalNodes},
+        {"strategy_entries", estimate.strategyEntries},
+        {"peak_bytes", estimate.peakBytes},
+        {"workers", estimate.workers}
+    };
     std::array<std::size_t, 2> hands{};
     std::size_t pairs = 0;
     const auto& board = problem->game->Spec().initialBoard;

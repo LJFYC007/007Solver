@@ -6,6 +6,7 @@
 #include "io/ScenarioLoader.h"
 #include "service/JsonAdapter.h"
 #include "service/ServiceMessage.h"
+#include "service/MemoryBudget.h"
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -49,21 +50,36 @@ int SolverService::Run(const std::string& scenarioPath)
         diagnostics_ << "Decision tree has " << game->NodeCount() << " nodes\n";
 
         auto problem = std::make_shared<const engine::SolveProblem>(engine::SolveProblem{game, std::move(scenario.ranges)});
+        const auto estimate = engine::EstimateCpuMemory(*problem);
+        const auto budget = scenario.memoryBudgetBytes ? scenario.memoryBudgetBytes : AvailableSolveMemory();
+        diagnostics_ << "Tree estimate: " << estimate.logicalNodes << " logical nodes, " << estimate.topologyNodes << " topology nodes, "
+                     << estimate.traversalNodes << " active nodes, " << estimate.strategyEntries
+                     << " strategy entries; solve peak estimate " << estimate.peakBytes << " bytes; budget " << budget << " bytes\n";
+        if (estimate.peakBytes > budget)
+        {
+            std::ostringstream message;
+            message << "Estimated solve memory " << (estimate.peakBytes + 1048575) / 1048576 << " MiB exceeds the " << budget / 1048576
+                    << " MiB memory budget. Free memory or choose a smaller game. "
+                    << "CLI scenarios can set memoryBudgetMiB explicitly.";
+            throw std::runtime_error(message.str());
+        }
 
         diagnostics_ << "Start solving game...\n";
-        WriteMessage(output_, {ServiceMessageKind::Solving, 0, 0, scenario.iterations});
+        const auto progress = [&](int completed)
+        {
+            ServiceMessage message{ServiceMessageKind::Solving, 0, completed, scenario.iterations};
+            message.estimate = estimate;
+            WriteMessage(output_, message);
+        };
+        progress(0);
         engine::SolveReport report{"dcfr", "cpu"};
         engine::StrategySnapshot strategy = [&]
         {
             engine::CpuDcfrSession session(problem);
-            session.Run(
-                scenario.iterations,
-                [&](int completedIterations)
-                { WriteMessage(output_, {ServiceMessageKind::Solving, 0, completedIterations, scenario.iterations}); }
-            );
+            session.Run(scenario.iterations, progress);
             report.completedIterations = session.CompletedIterations();
             report.trainingTimeSeconds = session.TrainingTimeSeconds();
-            diagnostics_ << "Algorithm: dcfr, CPU workers: " << session.WorkerCount() << '\n';
+            diagnostics_ << "Algorithm: dcfr, configured CPU worker limit: " << session.WorkerCount() << '\n';
             return session.ExportStrategy();
         }();
         diagnostics_ << "Training time: " << report.trainingTimeSeconds << " s\n";
@@ -80,6 +96,7 @@ int SolverService::Run(const std::string& scenarioPath)
         ready.completedIterations = scenario.iterations;
         ready.nodeCount = static_cast<int>(game->NodeCount());
         ready.rootNodeId = analysis.RootNode();
+        ready.estimate = estimate;
         WriteMessage(output_, ready);
 
         std::string requestLine;

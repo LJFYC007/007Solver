@@ -21,6 +21,7 @@ public:
     StrategySnapshot ExportStrategy() const;
     int CompletedIterations() const { return completedIterations_; }
     double TrainingTimeSeconds() const { return trainingTimeSeconds_; }
+    // Configured workspace/team limit; the OpenMP runtime may use fewer threads.
     int WorkerCount() const { return workerCount_; }
 
 private:
@@ -31,15 +32,22 @@ private:
     std::vector<float> regrets_;
     std::vector<float> strategySums_;
     std::vector<float> strategies_;
-    std::array<std::vector<double>, 2> reach_;
-    std::vector<float> values_;
+    HandTraversal::Workspace workspace_;
+    std::vector<HandTraversal::Workspace> workers_;
+    std::vector<float> rootValues_;
     std::size_t infoSetCount_ = 0;
     int workerCount_;
     int completedIterations_ = 0;
     double trainingTimeSeconds_ = 0.0;
 
-    void PropagateReach(std::uint32_t node, std::size_t updatingPlayer);
-    void EvaluateTerminal(std::uint32_t node, std::size_t updatingPlayer);
-    void BackUp(std::uint32_t node, std::size_t updatingPlayer, float positiveDiscount, float averageDiscount);
+    void UpdateRegrets(
+        std::uint32_t node,
+        std::size_t updatingPlayer,
+        const double* ownReach,
+        const float* children,
+        const float* values,
+        float positiveDiscount,
+        float averageDiscount
+    );
 };
 } // namespace solver::engine

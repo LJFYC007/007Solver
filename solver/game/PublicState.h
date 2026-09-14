@@ -17,6 +17,7 @@ struct PublicState
     core::Board board;
     bool lastActionWasCheck = false;
     core::Chips lastFullRaiseSize;
+    std::uint32_t raiseCount = 0;
 
     core::Chips Stack(core::PlayerId player) const { return stacks[player.Index()]; }
     core::Chips Contribution(core::PlayerId player) const { return streetContributions[player.Index()]; }

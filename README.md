@@ -48,7 +48,11 @@ The inspector switches between **Overview**, **Table** and **Equity chart** whil
 
 [`resources/default.json`](resources/default.json) remains a small GTO Wizard-derived CLI example, with reduced pot/stacks and hand classes for quick runs. It is not loaded by the desktop. Run `./build/solver/solver_service resources/default.json`, or pass `--stdin` and send one scenario JSON line followed by node-query lines.
 
-DCFR is the sole solver. The optional `algorithm` field accepts only `dcfr`, which is also the default. Each iteration updates one player across the full tree.
+The default postflop tree uses one 50% pot bet and one 50% pot-after-call raise size. Each street allows one ordinary raise; further aggression uses the effective-stack maximum. Sizes clamp to legal minimums and effective stacks, with duplicates removed. A called all-in is evaluated over every legal remaining runout without storing all its traversal nodes. Betting topology is shared across cards while every concrete history retains its own logical node ID and strategy.
+
+Before allocating training state, the service estimates solve/export/evaluation peak memory and checks an available-memory budget. The solve panel shows the estimate during training. CLI scenarios may set a positive integer `memoryBudgetMiB`; otherwise the service uses 75% of available physical memory (also limited by available commit on Windows). Estimates include headroom but exclude later navigation caches. Oversized games fail before the large allocations; ranges are never reduced automatically.
+
+DCFR is the sole solver. The optional `algorithm` field accepts only `dcfr`, which is also the default. Each iteration updates one player across the full tree, using bounded depth-first workspaces. Ordinary chance subtrees run in a bounded OpenMP pool; regrets and average strategies persist across iterations.
 
 Training stops at the configured iteration count. The selected iteration budget does not guarantee convergence. Exploitability is reported in the service diagnostics, and "Solution ready" means the solve has finished without enforcing an accuracy threshold.
 

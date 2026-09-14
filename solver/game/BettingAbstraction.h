@@ -43,8 +43,10 @@ struct BettingAbstraction
     std::vector<BetSize> betSizes;
     std::vector<RaiseSize> raiseSizes;
     // Append the effective-stack maximum in addition to explicitly configured sizes.
-    bool includeMaximumBet = true;
-    bool includeMaximumRaise = true;
+    bool includeMaximumBet = false;
+    bool includeMaximumRaise = false;
+    // After this many raises on a street, further aggression uses the effective-stack cap.
+    std::uint32_t maxNonAllInRaises = 1;
 
     static BettingAbstraction Default();
 

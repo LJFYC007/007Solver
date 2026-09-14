@@ -231,6 +231,18 @@ std::string ServiceMessageToJson(const ServiceMessage& message)
         json = {{"requestId", message.requestId}, {"ok", false}, {"error", message.text}};
         break;
     }
+    if (message.estimate)
+    {
+        const auto& estimate = *message.estimate;
+        json["estimate"] = {
+            {"logicalNodes", estimate.logicalNodes},
+            {"topologyNodes", estimate.topologyNodes},
+            {"traversalNodes", estimate.traversalNodes},
+            {"strategyEntries", estimate.strategyEntries},
+            {"peakBytes", estimate.peakBytes},
+            {"workers", estimate.workers}
+        };
+    }
     return json.dump();
 }
 } // namespace solver::service

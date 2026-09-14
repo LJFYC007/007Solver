@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
+#include <omp.h>
 
 namespace solver::engine
 {
@@ -11,7 +12,8 @@ HandTraversal::HandTraversal(const SolveProblem& problem, game::NodeId root)
     if (!problem.game)
         throw std::invalid_argument("Hand traversal requires a compiled game");
     const game::CompiledGame& game = *problem.game;
-    const auto& rootState = game.GetNode(root).State();
+    const auto rootNode = game.GetNode(root);
+    const auto& rootState = rootNode.State();
     for (std::uint8_t player = 0; player < 2; ++player)
     {
         double totalWeight = 0.0;
@@ -51,54 +53,75 @@ HandTraversal::HandTraversal(const SolveProblem& problem, game::NodeId root)
     if (!hasLegalPair)
         throw std::runtime_error("No valid private hand pairs after applying range weights and blockers");
 
-    std::vector<game::NodeId> sourceIds{root};
-    std::vector<std::size_t> depths{0};
-    std::array<int, 1326> rowsByRunout;
     rowsByRunout.fill(-1);
     rootHalfPot = static_cast<float>(rootState.pot.Raw()) / (2.0f * core::Chips::kUnitsPerChip);
-    for (std::size_t index = 0; index < sourceIds.size(); ++index)
+    // Rank rows are shared by all betting histories and reversed turn/river runouts.
+    const auto addRanks = [&](const core::Board& board)
     {
-        const game::NodeId nodeId = sourceIds[index];
-        const auto& source = game.GetNode(nodeId);
+        const int first = board.CardAt(3).Index();
+        const int second = board.CardAt(4).Index();
+        const int high = std::max(first, second);
+        const int key = high * (high - 1) / 2 + std::min(first, second);
+        if (rowsByRunout[key] >= 0)
+            return;
+        rowsByRunout[key] = static_cast<int>(rankRows.size());
+        rankRows.emplace_back();
+        for (std::size_t player = 0; player < 2; ++player)
+        {
+            auto& ranks = rankRows.back()[player];
+            ranks.reserve(hands[player].size());
+            for (std::size_t hand = 0; hand < hands[player].size(); ++hand)
+                if (!core::Overlaps(hands[player][hand].cards, board))
+                    ranks.push_back(
+                        {static_cast<std::uint16_t>(game.ShowdownRank(board, hands[player][hand].cards)), static_cast<std::uint16_t>(hand)}
+                    );
+            std::sort(
+                ranks.begin(),
+                ranks.end(),
+                [](const RankedHand& a, const RankedHand& b) { return a.rank != b.rank ? a.rank < b.rank : a.hand < b.hand; }
+            );
+        }
+    };
+    if (rootState.board.CardCount() == 5)
+        addRanks(rootState.board);
+    else
+        for (int first = 0; first < 52; ++first)
+        {
+            if (core::Contains(rootState.board, core::Card(first)))
+                continue;
+            const auto board = rootState.board.Append(core::Card(first));
+            if (board.CardCount() == 5)
+                addRanks(board);
+            else
+                for (int second = 0; second < first; ++second)
+                    if (!core::Contains(board, core::Card(second)))
+                        addRanks(board.Append(core::Card(second)));
+        }
+    nodes.reserve(rootNode.TraversalNodeCount());
+    children.reserve(rootNode.TraversalNodeCount() - 1);
+    dealtCardMasks.reserve(rootNode.TraversalNodeCount() - 1);
+    const auto visit = [&](const auto& self, const game::GameNode& source, std::size_t depth) -> std::uint32_t
+    {
         const auto& state = source.State();
         std::uint64_t boardMask = 0;
         for (int card = 0; card < state.board.CardCount(); ++card)
             boardMask |= std::uint64_t{1} << state.board.CardAt(card).Index();
-        Node node{nodeId, source.Kind(), state.playerToAct.Index(), children.size(), 0, strategySize, boardMask};
-
-        if (source.Kind() == game::NodeKind::Decision)
+        Node node{source.Id(), source.Kind(), state.playerToAct.Index(), children.size(), 0, strategySize, boardMask, state.board};
+        node.forcedRunout = source.IsForcedRunout();
+        if (node.kind == game::NodeKind::Decision)
         {
             node.childCount = source.BettingEdgeCount();
             strategySize += node.childCount * hands[node.actor].size();
-            for (std::size_t edge = 0; edge < node.childCount; ++edge)
-            {
-                children.push_back(static_cast<std::uint32_t>(sourceIds.size()));
-                sourceIds.push_back(source.GetBettingEdge(edge).NextNode());
-                depths.push_back(depths[index] + 1);
-                dealtCardMasks.push_back(0);
-            }
+            maxActions = std::max(maxActions, node.childCount);
         }
-        else if (source.Kind() == game::NodeKind::Chance)
-        {
+        else if (node.kind == game::NodeKind::Chance && !node.forcedRunout)
             node.childCount = source.ChanceOutcomeCount();
-            for (std::size_t edge = 0; edge < node.childCount; ++edge)
-            {
-                const auto& outcome = source.GetChanceOutcome(edge);
-                children.push_back(static_cast<std::uint32_t>(sourceIds.size()));
-                sourceIds.push_back(outcome.NextNode());
-                depths.push_back(depths[index] + 1);
-                dealtCardMasks.push_back(std::uint64_t{1} << outcome.DealtCard().Index());
-            }
-        }
         else
         {
-            terminals.push_back(static_cast<std::uint32_t>(index));
             game::TerminalSettlement settlement{
-                state.pot,
-                {rootState.stacks[0] - state.stacks[0], rootState.stacks[1] - state.stacks[1]},
-                std::nullopt,
+                state.pot, {rootState.stacks[0] - state.stacks[0], rootState.stacks[1] - state.stacks[1]}, std::nullopt
             };
-            if (source.Terminal().kind == game::TerminalKind::Fold)
+            if (!node.forcedRunout && source.Terminal().kind == game::TerminalKind::Fold)
             {
                 settlement.winner = source.Terminal().foldedPlayer->Other();
                 node.utilities[0] = settlement.NetPayoffFromStart(core::PlayerId::Player0()) - rootHalfPot;
@@ -110,45 +133,29 @@ HandTraversal::HandTraversal(const SolveProblem& problem, game::NodeId root)
                     settlement.winner = outcome == 1 ? std::nullopt : std::optional<core::PlayerId>(core::PlayerId(outcome == 0 ? 0 : 1));
                     node.utilities[outcome] = settlement.NetPayoffFromStart(core::PlayerId::Player0()) - rootHalfPot;
                 }
-                const int first = state.board.CardAt(3).Index();
-                const int second = state.board.CardAt(4).Index();
-                const int high = std::max(first, second);
-                const int runout = high * (high - 1) / 2 + std::min(first, second);
-                int& row = rowsByRunout[runout];
-                if (row < 0)
+                if (!node.forcedRunout)
                 {
-                    row = static_cast<int>(rankRows.size());
-                    rankRows.emplace_back();
-                    for (std::size_t player = 0; player < 2; ++player)
-                    {
-                        auto& ranks = rankRows.back()[player];
-                        for (std::size_t hand = 0; hand < hands[player].size(); ++hand)
-                        {
-                            if (!(hands[player][hand].mask & boardMask))
-                                ranks.push_back({
-                                    static_cast<std::uint16_t>(game.ShowdownRank(nodeId, hands[player][hand].cards)),
-                                    static_cast<std::uint16_t>(hand),
-                                });
-                        }
-                        std::sort(
-                            ranks.begin(),
-                            ranks.end(),
-                            [](const RankedHand& left, const RankedHand& right)
-                            { return left.rank != right.rank ? left.rank < right.rank : left.hand < right.hand; }
-                        );
-                    }
+                    const int a = state.board.CardAt(3).Index(), b = state.board.CardAt(4).Index();
+                    node.rankRow = rowsByRunout[std::max(a, b) * (std::max(a, b) - 1) / 2 + std::min(a, b)];
                 }
-                node.rankRow = row;
             }
         }
-        if (source.Kind() != game::NodeKind::Terminal)
-        {
-            if (levels.size() <= depths[index])
-                levels.resize(depths[index] + 1);
-            levels[depths[index]].push_back(static_cast<std::uint32_t>(index));
-        }
+        const auto index = static_cast<std::uint32_t>(nodes.size());
         nodes.push_back(node);
-    }
+        children.resize(children.size() + node.childCount);
+        dealtCardMasks.resize(dealtCardMasks.size() + node.childCount);
+        maxDepth = std::max(maxDepth, depth + 1);
+        for (std::size_t action = 0; action < node.childCount; ++action)
+        {
+            const auto child = source.Child(action);
+            const auto childIndex = self(self, child, depth + 1);
+            children[node.childOffset + action] = childIndex;
+            if (node.kind == game::NodeKind::Chance)
+                dealtCardMasks[node.childOffset + action] = std::uint64_t{1} << child.State().board.CardAt(state.board.CardCount()).Index();
+        }
+        return index;
+    };
+    visit(visit, rootNode, 0);
 }
 
 std::vector<float> HandTraversal::LoadStrategy(const StrategySnapshot& strategy) const
@@ -210,52 +217,43 @@ std::vector<double> HandTraversal::CompatibleMasses(std::size_t player, const do
     return masses;
 }
 
-void HandTraversal::PropagateReach(
+void HandTraversal::PropagateChild(
     std::uint32_t nodeIndex,
+    std::size_t action,
     std::size_t player,
     bool includeChance,
     const float* strategy,
     const double* parent,
-    double* reaches,
-    bool includeTerminals
+    double* child
 ) const
 {
     const Node& node = nodes[nodeIndex];
     const std::size_t count = hands[player].size();
-    for (std::size_t action = 0; action < node.childCount; ++action)
+    if (node.kind == game::NodeKind::Chance)
     {
-        const std::size_t edge = node.childOffset + action;
-        if (!includeTerminals && nodes[children[edge]].kind == game::NodeKind::Terminal)
-            continue;
-        double* child = reaches + children[edge] * count;
-        if (node.kind == game::NodeKind::Chance)
-        {
-            // Public edges exclude board cards; remove the four private cards as well.
-            const double chance = !includeChance ? 1.0 : 1.0 / static_cast<double>(node.childCount - 4);
-            const auto mask = dealtCardMasks[edge];
-            for (std::size_t hand = 0; hand < count; ++hand)
-                child[hand] = hands[player][hand].mask & mask ? 0.0f : parent[hand] * chance;
-        }
-        else if (node.actor == player)
-        {
-            const float* probabilities = strategy + node.strategyOffset + action * count;
-            for (std::size_t hand = 0; hand < count; ++hand)
-                child[hand] = parent[hand] * probabilities[hand];
-        }
-        else
-            std::copy_n(parent, count, child);
+        const double chance = includeChance ? 1.0 / static_cast<double>(node.childCount - 4) : 1.0;
+        const auto mask = dealtCardMasks[node.childOffset + action];
+        for (std::size_t hand = 0; hand < count; ++hand)
+            child[hand] = hands[player][hand].mask & mask ? 0.0 : parent[hand] * chance;
     }
+    else if (node.actor == player)
+    {
+        const float* probabilities = strategy + node.strategyOffset + action * count;
+        for (std::size_t hand = 0; hand < count; ++hand)
+            child[hand] = parent[hand] * probabilities[hand];
+    }
+    else
+        std::copy_n(parent, count, child);
 }
 
 void HandTraversal::EvaluateTerminal(
-    std::uint32_t nodeIndex,
+    const Node& node,
     std::size_t updatingPlayer,
     const double* opponentReach,
     const double* divisors,
     float* values
 ) const
 {
-    const Node& node = nodes[nodeIndex];
     const auto& mine = hands[updatingPlayer];
     const auto& opponent = hands[1 - updatingPlayer];
     const float tie = updatingPlayer == 0 ? node.utilities[1] : -node.utilities[1];
@@ -362,35 +360,120 @@ void HandTraversal::EvaluateTerminal(
     }
 }
 
-void HandTraversal::BackUp(std::uint32_t nodeIndex, std::size_t player, const float* strategy, bool bestResponse, float* values) const
+void HandTraversal::EvaluateRunout(Node node, std::size_t player, const double* opponentReach, const double* divisors, float* values) const
+{
+    if (node.board.CardCount() == 5)
+    {
+        const int a = node.board.CardAt(3).Index(), b = node.board.CardAt(4).Index();
+        node.rankRow = rowsByRunout[std::max(a, b) * (std::max(a, b) - 1) / 2 + std::min(a, b)];
+        EvaluateTerminal(node, player, opponentReach, divisors, values);
+        return;
+    }
+    std::array<double, kMaxHands> accumulated{};
+    std::array<double, kMaxHands> childReach;
+    std::array<float, kMaxHands> childValues;
+    const double chance = 1.0 / (52 - node.board.CardCount() - 4);
+    for (int card = 0; card < 52; ++card)
+    {
+        const auto mask = std::uint64_t{1} << card;
+        if (node.boardMask & mask)
+            continue;
+        Node child = node;
+        child.board = node.board.Append(core::Card(card));
+        child.boardMask |= mask;
+        for (std::size_t hand = 0; hand < hands[1 - player].size(); ++hand)
+            childReach[hand] = hands[1 - player][hand].mask & mask ? 0.0 : opponentReach[hand] * chance;
+        EvaluateRunout(child, player, childReach.data(), divisors, childValues.data());
+        for (std::size_t hand = 0; hand < hands[player].size(); ++hand)
+            accumulated[hand] += childValues[hand];
+    }
+    for (std::size_t hand = 0; hand < hands[player].size(); ++hand)
+        values[hand] = static_cast<float>(accumulated[hand]);
+}
+
+HandTraversal::Workspace HandTraversal::MakeWorkspace(bool parallel) const
+{
+    Workspace workspace;
+    const auto count = std::max(hands[0].size(), hands[1].size());
+    for (std::size_t player = 0; player < 2; ++player)
+        workspace.reach[player].resize((maxDepth + 1) * hands[player].size());
+    workspace.childValues.resize(maxDepth * maxActions * count);
+    workspace.accumulated.resize(maxDepth * count);
+    if (parallel)
+        workspace.parallelValues.resize(52 * count);
+    return workspace;
+}
+
+void HandTraversal::Walk(
+    std::uint32_t nodeIndex,
+    std::size_t player,
+    const float* strategy,
+    const double* divisors,
+    bool bestResponse,
+    Workspace& workspace,
+    std::size_t depth,
+    float* values,
+    const Update& update,
+    std::vector<Workspace>* workers
+) const
 {
     const Node& node = nodes[nodeIndex];
-    const std::size_t count = hands[player].size();
+    const auto count = hands[player].size();
+    const auto stride = std::max(hands[0].size(), hands[1].size());
+    const auto opponentCount = hands[1 - player].size();
+    const double* opponentReach = workspace.reach[1 - player].data() + depth * opponentCount;
+    if (node.forcedRunout)
+    {
+        EvaluateRunout(node, player, opponentReach, divisors, values);
+        return;
+    }
+    if (node.kind == game::NodeKind::Terminal)
+    {
+        EvaluateTerminal(node, player, opponentReach, divisors, values);
+        return;
+    }
     const bool acting = node.kind == game::NodeKind::Decision && node.actor == player;
-    // Local scratch keeps independent hands contiguous without changing reduction precision or order.
-    std::array<double, kMaxHands> accumulated;
-    std::fill_n(accumulated.data(), count, acting && bestResponse ? -std::numeric_limits<double>::infinity() : 0.0);
+    const bool parallel = node.kind == game::NodeKind::Chance && workers && !workers->empty();
+    float* childrenValues = parallel ? workspace.parallelValues.data() : workspace.childValues.data() + depth * maxActions * stride;
+    double* accumulated = workspace.accumulated.data() + depth * stride;
+    std::fill_n(accumulated, count, acting && bestResponse ? -std::numeric_limits<double>::infinity() : 0.0);
+    const auto descend = [&](std::size_t action, Workspace& scratch, float* output, std::vector<Workspace>* pool)
+    {
+        for (std::size_t p = 0; p < 2; ++p)
+            if (p != player || update)
+                PropagateChild(
+                    nodeIndex,
+                    action,
+                    p,
+                    p != player,
+                    strategy,
+                    workspace.reach[p].data() + depth * hands[p].size(),
+                    scratch.reach[p].data() + (depth + 1) * hands[p].size()
+                );
+        Walk(children[node.childOffset + action], player, strategy, divisors, bestResponse, scratch, depth + 1, output, update, pool);
+    };
+    if (parallel)
+    {
+#pragma omp parallel for num_threads(static_cast<int>(workers->size())) schedule(dynamic, 1)
+        for (int action = 0; action < static_cast<int>(node.childCount); ++action)
+            descend(static_cast<std::size_t>(action), (*workers)[omp_get_thread_num()], childrenValues + action * count, nullptr);
+    }
     for (std::size_t action = 0; action < node.childCount; ++action)
     {
-        const float* child = values + children[node.childOffset + action] * count;
-        if (acting && bestResponse)
-        {
-            for (std::size_t hand = 0; hand < count; ++hand)
+        // Serial chance branches reuse one row; decision rows survive until the regret update.
+        float* child = childrenValues + ((parallel || node.kind == game::NodeKind::Decision) ? action * count : 0);
+        if (!parallel)
+            descend(action, workspace, child, workers);
+        const float* probability = acting ? strategy + node.strategyOffset + action * count : nullptr;
+        for (std::size_t hand = 0; hand < count; ++hand)
+            if (acting && bestResponse)
                 accumulated[hand] = std::max(accumulated[hand], static_cast<double>(child[hand]));
-        }
-        else if (acting)
-        {
-            const float* probability = strategy + node.strategyOffset + action * count;
-            for (std::size_t hand = 0; hand < count; ++hand)
-                accumulated[hand] += static_cast<double>(probability[hand]) * child[hand];
-        }
-        else
-        {
-            for (std::size_t hand = 0; hand < count; ++hand)
-                accumulated[hand] += static_cast<double>(child[hand]);
-        }
+            else
+                accumulated[hand] += acting ? static_cast<double>(probability[hand]) * child[hand] : child[hand];
     }
     for (std::size_t hand = 0; hand < count; ++hand)
-        values[nodeIndex * count + hand] = static_cast<float>(accumulated[hand]);
+        values[hand] = static_cast<float>(accumulated[hand]);
+    if (acting && update)
+        update(nodeIndex, workspace.reach[player].data() + depth * count, childrenValues, values);
 }
 } // namespace solver::engine

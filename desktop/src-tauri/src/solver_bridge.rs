@@ -109,21 +109,25 @@ fn handle_protocol_message(state: &mut BridgeState, line: &[u8]) {
             ServiceEvent::Solving {
                 completed_iterations,
                 total_iterations,
+                estimate,
             } => {
                 state.status = SolverStatus::Solving {
                     completed_iterations,
                     total_iterations,
+                    estimate,
                 };
             }
             ServiceEvent::Ready {
                 iterations,
                 node_count,
                 root_node_id,
+                estimate,
             } => {
                 state.status = SolverStatus::Ready {
                     iterations,
                     node_count,
                     root_node_id,
+                    estimate,
                 };
             }
             ServiceEvent::Failed { message } => state.fail(message),

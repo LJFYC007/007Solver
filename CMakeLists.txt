@@ -1,4 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
+if(CMAKE_HOST_WIN32)
+    find_program(CMAKE_CXX_COMPILER cl.exe REQUIRED)
+endif()
 if(CMAKE_HOST_APPLE)
     # Keep the sidecar's minimum OS aligned with tauri.macos.conf.json.
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")

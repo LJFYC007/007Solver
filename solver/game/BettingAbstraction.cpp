@@ -61,6 +61,7 @@ BettingAbstraction BettingAbstraction::Default()
 {
     BettingAbstraction abstraction;
     abstraction.betSizes.push_back({BetSizeKind::PotFractionOfCurrentPot, 1, 2, core::Chips{}});
+    abstraction.raiseSizes.push_back({RaiseSizeKind::PotFractionOfPotAfterCallAsRaiseBy, 1, 2, core::Chips{}});
     return abstraction;
 }
 
@@ -73,9 +74,8 @@ std::vector<BettingAction> BettingAbstraction::SelectActions(const PublicState& 
     const AggressiveActionRange& range = *legalActions.aggression;
     const auto addAmountTo = [&](core::Chips amountTo)
     {
-        if (amountTo <= range.passiveAmountTo || amountTo > range.maximumAmountTo ||
-            (amountTo < range.minimumAmountTo && amountTo != range.maximumAmountTo))
-            return;
+        // A configured size always yields legal aggression, including a short all-in.
+        amountTo = std::min(range.maximumAmountTo, std::max(range.minimumAmountTo, amountTo));
 
         const bool duplicate =
             std::any_of(actions.begin(), actions.end(), [&](const BettingAction& action) { return action.AmountTo() == amountTo; });
@@ -87,6 +87,10 @@ std::vector<BettingAction> BettingAbstraction::SelectActions(const PublicState& 
     {
         for (const BetSize& size : betSizes)
             addAmountTo(ResolveBetAmountTo(size, state));
+    }
+    else if (state.raiseCount >= maxNonAllInRaises)
+    {
+        addAmountTo(range.maximumAmountTo);
     }
     else
     {

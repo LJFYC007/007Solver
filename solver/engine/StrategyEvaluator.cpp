@@ -25,19 +25,10 @@ std::vector<float> EvaluateHands(
 )
 {
     const std::size_t count = traversal.hands[player].size();
-    const std::size_t opponentCount = traversal.hands[1 - player].size();
-    std::vector<double> reach(traversal.nodes.size() * opponentCount);
-    std::copy(rootReach.begin(), rootReach.end(), reach.begin());
-    std::vector<float> values(traversal.nodes.size() * count);
-    for (const auto& level : traversal.levels)
-        for (const auto node : level)
-            traversal.PropagateReach(node, 1 - player, true, strategy.data(), reach.data() + node * opponentCount, reach.data());
-    for (const auto node : traversal.terminals)
-        traversal.EvaluateTerminal(node, player, reach.data() + node * opponentCount, divisors.data(), values.data() + node * count);
-    for (auto level = traversal.levels.rbegin(); level != traversal.levels.rend(); ++level)
-        for (const auto node : *level)
-            traversal.BackUp(node, player, strategy.data(), bestResponse, values.data());
-    values.resize(count);
+    auto workspace = traversal.MakeWorkspace();
+    std::copy(rootReach.begin(), rootReach.end(), workspace.reach[1 - player].begin());
+    std::vector<float> values(count);
+    traversal.Walk(0, player, strategy.data(), divisors.data(), bestResponse, workspace, 0, values.data());
     return values;
 }
 } // namespace

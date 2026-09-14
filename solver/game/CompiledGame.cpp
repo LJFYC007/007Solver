@@ -23,29 +23,71 @@ std::size_t CardPairIndex(core::Card first, core::Card second)
 }
 } // namespace
 
-GameNode::GameNode(NodeKind kind, PublicState state, std::optional<ParentEdge> parent, std::optional<TerminalOutcome> terminal)
-    : kind_(kind), state_(std::move(state)), parent_(parent), terminal_(terminal)
-{}
+GameNode::GameNode(
+    const std::vector<BettingTopologyNode>* topology,
+    std::uint32_t shape,
+    NodeId id,
+    core::Board board,
+    std::optional<ParentEdge> parent
+)
+    : topology_(topology), shape_(shape), id_(id), state_((*topology)[shape].state), parent_(parent)
+{
+    state_.board = board;
+}
 
 const TerminalOutcome& GameNode::Terminal() const
 {
-    if (!terminal_)
+    if (!Shape().terminal)
         throw std::logic_error("Non-terminal node has no terminal outcome");
-    return *terminal_;
+    return *Shape().terminal;
 }
 
-const BettingEdge& GameNode::GetBettingEdge(std::size_t index) const
+bool GameNode::IsForcedRunout() const
 {
-    return bettingEdges_.at(index);
+    return Kind() == NodeKind::Chance && (state_.stacks[0] == core::Chips{} || state_.stacks[1] == core::Chips{});
 }
 
-const ChanceOutcome& GameNode::GetChanceOutcome(std::size_t index) const
+BettingEdge GameNode::GetBettingEdge(std::size_t index) const
 {
-    return chanceOutcomes_.at(index);
+    return {Shape().actions.at(index), NodeId(id_.Value() + static_cast<std::int32_t>(Shape().childOffsets.at(index)))};
 }
 
-CompiledGame::CompiledGame(GameSpec spec, std::vector<GameNode> nodes)
-    : spec_(std::move(spec)), nodes_(std::move(nodes)), showdownRanks_(kRunoutCount * kHandCount, kBlockedRank)
+std::size_t GameNode::ChanceOutcomeCount() const
+{
+    return Kind() == NodeKind::Chance ? 52 - state_.board.CardCount() : 0;
+}
+
+ChanceOutcome GameNode::GetChanceOutcome(std::size_t index) const
+{
+    if (index >= ChanceOutcomeCount())
+        throw std::out_of_range("Chance outcome index");
+    std::size_t ordinal = 0;
+    for (int card = 0; card < 52; ++card)
+    {
+        if (core::Contains(state_.board, core::Card(card)))
+            continue;
+        if (ordinal++ == index)
+        {
+            const auto span = (*topology_)[Shape().children.front()].logicalNodes;
+            return {core::Card(card), NodeId(id_.Value() + 1 + static_cast<std::int32_t>(index * span))};
+        }
+    }
+    throw std::logic_error("Missing chance outcome");
+}
+
+GameNode GameNode::Child(std::size_t index) const
+{
+    if (Kind() == NodeKind::Chance)
+    {
+        const auto outcome = GetChanceOutcome(index);
+        return {topology_, Shape().children.front(), outcome.NextNode(), state_.board.Append(outcome.DealtCard()), ParentEdge{id_, index}};
+    }
+    const auto edge = GetBettingEdge(index);
+    return {topology_, Shape().children.at(index), edge.NextNode(), state_.board, ParentEdge{id_, index}};
+}
+
+CompiledGame::CompiledGame(GameSpec spec, std::vector<BettingTopologyNode> topology)
+    : spec_(std::move(spec)), topology_(std::move(topology)), showdownRanks_(kRunoutCount * kHandCount, kBlockedRank)
 {
     std::vector<core::HoleCards> hands;
     hands.reserve(kHandCount);
@@ -96,9 +138,38 @@ int CompiledGame::ShowdownRank(NodeId terminalNode, core::HoleCards hand) const
     return ShowdownRank(node.State().board, hand);
 }
 
-const GameNode& CompiledGame::GetNode(NodeId id) const
+GameNode CompiledGame::GetNode(NodeId id) const
 {
-    return nodes_.at(static_cast<std::size_t>(id.Value()));
+    if (id.Value() < 0 || static_cast<std::size_t>(id.Value()) >= NodeCount())
+        throw std::out_of_range("Node ID does not belong to this game");
+    GameNode node(&topology_, 0, Root(), spec_.initialBoard, std::nullopt);
+    while (node.Id() != id)
+    {
+        const auto& shape = node.Shape();
+        const auto relative = static_cast<std::uint32_t>(id.Value() - node.Id().Value());
+        std::size_t edge;
+        if (node.Kind() == NodeKind::Chance)
+            edge = (relative - 1) / topology_[shape.children.front()].logicalNodes;
+        else
+            edge = static_cast<std::size_t>(
+                std::upper_bound(shape.childOffsets.begin(), shape.childOffsets.end(), relative) - shape.childOffsets.begin() - 1
+            );
+        node = node.Child(edge);
+    }
+    return node;
+}
+
+GameTreeSize CompiledGame::Size() const
+{
+    std::size_t bytes =
+        sizeof(*this) + topology_.capacity() * sizeof(BettingTopologyNode) + showdownRanks_.capacity() * sizeof(std::uint16_t);
+    for (const auto& node : topology_)
+        bytes += node.actions.capacity() * sizeof(BettingAction) +
+                 (node.children.capacity() + node.childOffsets.capacity()) * sizeof(std::uint32_t);
+    const auto& root = topology_.front();
+    return {
+        root.logicalNodes, topology_.size(), root.traversalNodes, root.decisionNodes, root.actionEntries, root.depth, root.maxActions, bytes
+    };
 }
 
 std::pair<float, float> CompiledGame::CalculateZeroSumUtility(
