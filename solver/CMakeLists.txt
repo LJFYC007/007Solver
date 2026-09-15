@@ -28,7 +28,7 @@ endif()
 find_package(OpenMP REQUIRED COMPONENTS CXX)
 target_link_libraries(solver_lib PRIVATE OpenMP::OpenMP_CXX)
 if(MSVC)
-    target_compile_options(solver_lib PRIVATE /utf-8)
+    target_compile_options(solver_lib PRIVATE /utf-8 /arch:AVX2)
 endif()
 target_include_directories(
     solver_lib

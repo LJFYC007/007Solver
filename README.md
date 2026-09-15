@@ -17,7 +17,7 @@ The bundled [catalog](resources/gtowizard-preflop/) contains chip-EV, 100bb, 6-m
 
 On macOS, install Xcode Command Line Tools (`xcode-select --install`) and `brew install cmake ninja libomp`. Build for the Mac's native Apple Silicon or Intel architecture.
 
-On Windows, use **Developer PowerShell for Visual Studio** with Visual Studio 2022+ and **Desktop development with C++** installed. Run `chcp 65001` before building so Ninja can parse localized MSVC dependencies. Running the app also requires WebView2 and the Microsoft Visual C++ x64 runtime, including OpenMP (`VCOMP140.DLL`).
+On Windows, use **Developer PowerShell for Visual Studio** with Visual Studio 2022+ and **Desktop development with C++** installed. Run `chcp 65001` before building so Ninja can parse localized MSVC dependencies. Running the app requires an AVX2-capable CPU, WebView2 and the Microsoft Visual C++ x64 runtime, including OpenMP (`VCOMP140.DLL`).
 
 ## Setup and development
 
@@ -43,7 +43,7 @@ Mac packages link to the build machine's Homebrew `libomp` path without bundling
 For a small CLI solve after building the service:
 
 ```sh
-./build/solver/solver_service resources/default.json
+./build/release/solver/solver_service resources/default.json
 ```
 
 On Windows, append `.exe`. Use `--stdin` instead of the file path to send a scenario as the first JSON line, followed by query lines. The example and parser are [resources/default.json](resources/default.json) and [ScenarioLoader.cpp](solver/io/ScenarioLoader.cpp).
@@ -53,9 +53,9 @@ On Windows, append `.exe`. Use `--stdin` instead of the file path to send a scen
 Build and run the offline C++ correctness suite:
 
 ```sh
-cmake --preset release
-cmake --build --preset release --target 007SolverTests
-ctest --test-dir build --output-on-failure
+cmake --preset Release
+cmake --build --preset Release --target 007SolverTests
+ctest --test-dir build/release --output-on-failure
 ```
 
 For desktop changes, after installing dependencies and building/staging the service:

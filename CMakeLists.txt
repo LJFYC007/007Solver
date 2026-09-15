@@ -9,6 +9,8 @@ endif()
 project(007Solver LANGUAGES CXX)
 
 if(MSVC)
+    # Match Release inlining while retaining profiling symbols.
+    string(REPLACE "/Ob1" "/Ob2" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 endif()
 add_subdirectory(third_party/googletest EXCLUDE_FROM_ALL)

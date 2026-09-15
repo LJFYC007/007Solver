@@ -8,7 +8,7 @@
         "build": "tauri build",
         "dev:ui": "vite",
         "build:ui": "tsc --noEmit && vite build",
-        "build:solver": "cd .. && cmake --preset release && cmake --build --preset release --target stage_solver_service",
+        "build:solver": "cd .. && cmake --preset Release && cmake --build --preset Release --target stage_solver_service",
         "check": "npm run lint && npm run typecheck && npm run format:check",
         "format": "prettier --write --ignore-unknown .",
         "format:check": "prettier --check --ignore-unknown .",

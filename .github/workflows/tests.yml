@@ -25,10 +25,10 @@ jobs:
         run: brew install ninja libomp
 
       - name: Configure Release
-        run: cmake --preset release
+        run: cmake --preset Release
 
       - name: Build tests
-        run: cmake --build --preset release --target 007SolverTests
+        run: cmake --build --preset Release --target 007SolverTests
 
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build/release --output-on-failure

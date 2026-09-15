@@ -4,7 +4,7 @@ Run commands from the repository root. Use Terminal on macOS or Developer PowerS
 
 ## Correctness
 
-Use the [build and test commands](../README.md#checks). CTest writes `build/solver-test-results.json`; routine tests use checked-in references and run offline.
+Use the [build and test commands](../README.md#checks). CTest writes `build/release/solver-test-results.json`; routine tests use checked-in references and run offline.
 
 Coverage and assertions live in [domain_tests.cpp](domain_tests.cpp) and [tests.cpp](tests.cpp). Scenario inputs and independent expected answers live in [fixtures/](fixtures/); each input's `rangeSource` records its source and reductions.
 
@@ -13,9 +13,17 @@ Coverage and assertions live in [domain_tests.cpp](domain_tests.cpp) and [tests.
 The benchmark is separate from the default build and CTest:
 
 ```sh
-cmake --preset release
-cmake --build --preset release --target 007SolverBenchmark
-./build/007SolverBenchmark
+cmake --preset Release
+cmake --build --preset Release --target 007SolverBenchmark
+./build/release/007SolverBenchmark
+```
+
+For Visual Studio CPU sampling that can name functions, use RelWithDebInfo instead. It matches Release's `/O2 /Ob2` and the Windows solver's `/arch:AVX2`, and writes a PDB next to the executable; do not reuse the Release tree:
+
+```sh
+cmake --preset RelWithDebInfo
+cmake --build --preset RelWithDebInfo --target 007SolverBenchmark
+./build/relwithdebinfo/007SolverBenchmark
 ```
 
 Optional flags are `--report=<new-json-path>`, `--iterations=<count>` and `--workers=<count>`. The default workload is [utg-bb-wide.json](fixtures/utg-bb-wide.json); checks and report fields are defined in [benchmark.cpp](benchmark.cpp).

@@ -30,13 +30,33 @@ MemoryEstimate EstimateCpuMemory(const SolveProblem& problem, int workers)
     const std::uint64_t infosets = size.decisionNodes[0] * hands[0] + size.decisionNodes[1] * hands[1];
     const std::uint64_t decisions = size.decisionNodes[0] + size.decisionNodes[1];
     const int count = CpuWorkerCount(workers);
+    std::uint64_t chanceTasks = 0;
+    std::uint64_t chancePlanBytes = 0;
+    const auto countChanceTasks = [&](const auto& self, const game::GameNode& node, std::uint64_t depth) -> void
+    {
+        if (node.IsForcedRunout() || node.Kind() == game::NodeKind::Terminal)
+            return;
+        if (node.Kind() == game::NodeKind::Chance)
+        {
+            const auto tasks = node.ChanceOutcomeCount();
+            chanceTasks += tasks;
+            // Group header, shared action path, and two uint32 indices per task.
+            chancePlanBytes += 32 + 4 * depth + 8 * tasks;
+            return;
+        }
+        for (std::size_t action = 0; action < node.BettingEdgeCount(); ++action)
+            self(self, node.Child(action), depth + 1);
+    };
+    countChanceTasks(countChanceTasks, problem.game->GetNode(problem.game->Root()), 0);
     const std::uint64_t layout = size.traversalNodes * (sizeof(HandTraversal::Node) + sizeof(std::uint32_t) + sizeof(std::uint64_t));
-    const std::uint64_t ranks =
-        1176 * (4 * totalHands + 2 * sizeof(std::vector<HandTraversal::RankedHand>)) + 2 * totalHands * sizeof(HandTraversal::Hand);
+    const std::uint64_t rankBytes = 2 + 2 + 1 + 1 + 8;
+    const std::uint64_t ranks = 1176 * (rankBytes * totalHands + 2 * 5 * sizeof(std::vector<std::uint16_t>)) +
+                                2 * totalHands * sizeof(HandTraversal::Hand) + 8 * totalHands;
     const std::uint64_t stack = 8 * (size.depth + 1) * totalHands + size.depth * maxHands * (4 * size.maxActions + 8);
     // Include the bounded runout/regret scratch and per-team runtime overhead.
     const std::uint64_t policyStack = stack + 4 * size.depth * size.maxActions * maxHands;
-    const std::uint64_t workspace = policyStack * (count > 1 ? count + 1 : 1) + 52 * 4 * maxHands + (count + 1) * 128 * 1024;
+    const std::uint64_t workspace =
+        policyStack * (count > 1 ? count + 1 : 1) + (count > 1 ? chanceTasks * 4 * maxHands : 0) + (count + 1) * 128 * 1024;
     // Training retains regrets and strategy sums; current policies live in depth rows.
     const std::uint64_t flopOutcomes = board.CardCount() == 3 ? 4 * hands[0] * hands[1] : 0;
     const std::uint64_t trainingPeak = 8 * entries + workspace + flopOutcomes;
@@ -44,7 +64,8 @@ MemoryEstimate EstimateCpuMemory(const SolveProblem& problem, int workers)
     // Snapshot probabilities reuse the strategy-sum allocation; indices are built directly.
     const std::uint64_t exportPeak = 4 * entries + 4 * infosets + 80 * decisions + 4 * size.maxActions * maxHands + flopOutcomes;
     const std::uint64_t evaluationPeak = 4 * entries + 4 * infosets + 80 * decisions + policyStack;
-    const std::uint64_t peak = size.storageBytes + layout + ranks + std::max({trainingPeak, exportPeak, evaluationPeak});
+    const std::uint64_t peak =
+        size.storageBytes + layout + ranks + 2 * chancePlanBytes + std::max({trainingPeak, exportPeak, evaluationPeak});
     return {size.logicalNodes, size.topologyNodes, size.traversalNodes, entries, peak + peak / 8 + 64 * 1024 * 1024, count};
 }
 } // namespace solver::engine

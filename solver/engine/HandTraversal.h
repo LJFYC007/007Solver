@@ -4,7 +4,6 @@
 #include "engine/StrategySnapshot.h"
 #include <array>
 #include <cstdint>
-#include <functional>
 #include <vector>
 
 namespace solver::engine
@@ -36,10 +35,14 @@ struct HandTraversal
         bool forcedRunout = false;
         std::array<float, 3> utilities{};
     };
-    struct RankedHand
+    // Rank-major showdown table: sequential sweeps never chase Hand rows.
+    struct RankOrder
     {
-        std::uint16_t rank;
-        std::uint16_t hand;
+        std::vector<std::uint16_t> ranks;
+        std::vector<std::uint16_t> hands;
+        std::vector<std::uint8_t> card0;
+        std::vector<std::uint8_t> card1;
+        std::vector<std::uint64_t> masks;
     };
     // One depth-first stack per worker, reused across all subtrees and iterations.
     struct Workspace
@@ -50,25 +53,42 @@ struct HandTraversal
         std::vector<float> parallelValues;
         std::vector<float> strategies;
     };
-    using Update = std::function<void(std::uint32_t, const double*, const float*, const float*, const float*)>;
+    // Training Walk inlines regret matching and updates from these buffers.
+    struct TrainState
+    {
+        float* regrets = nullptr;
+        float* strategySums = nullptr;
+        float positiveDiscount = 0.0f;
+        float averageDiscount = 0.0f;
+    };
     std::array<std::vector<Hand>, 2> hands;
+    std::array<std::vector<std::uint64_t>, 2> handMasks;
     std::vector<Node> nodes;
     std::vector<std::uint32_t> children;
     std::vector<std::uint64_t> dealtCardMasks;
-    std::vector<std::array<std::vector<RankedHand>, 2>> rankRows;
+    std::vector<std::array<RankOrder, 2>> rankRows;
     std::array<int, 1326> rowsByRunout;
     std::size_t strategySize = 0;
     std::size_t maxDepth = 1;
     std::size_t maxActions = 1;
     float rootHalfPot = 0.0f;
 
-    // Repeated training amortizes the optional cache; one-shot analysis leaves it off.
-    HandTraversal(const SolveProblem& problem, game::NodeId root, bool cacheFlopRunout = false);
+    // Training amortizes runout caching and the chance-batch plan; analysis leaves them off.
+    HandTraversal(const SolveProblem& problem, game::NodeId root, bool prepareTraining = false);
     Workspace MakeWorkspace(bool parallel = false) const;
+    void WalkTraining(
+        std::size_t player,
+        const double* divisors,
+        Workspace& workspace,
+        float* values,
+        std::vector<Workspace>& workers,
+        TrainState& train
+    ) const;
     std::vector<double> OpponentReachAtRoot(const StrategySnapshot& strategy, std::size_t opponentPlayer) const;
     std::vector<double> CompatibleMasses(std::size_t player, const double* opponentReach) const;
-    // Training supplies regrets and an update callback; evaluation supplies a fixed
-    // snapshot. Both paths retain the entry policy in a workspace row at each depth.
+    // Training supplies TrainState; evaluation supplies a fixed snapshot. Both paths
+    // retain the entry policy in a workspace row at each depth. WalkTraining alone
+    // supplies a cursor to consume its completed chance tasks in preorder.
     void Walk(
         std::uint32_t node,
         std::size_t player,
@@ -78,12 +98,23 @@ struct HandTraversal
         Workspace& workspace,
         std::size_t depth,
         float* values,
-        const Update& update = {},
-        std::vector<Workspace>* workers = nullptr,
-        const float* regrets = nullptr
+        std::size_t* parallelCursor = nullptr,
+        TrainState* train = nullptr
     ) const;
 
 private:
+    struct ChanceGroup
+    {
+        std::uint32_t node;
+        std::vector<std::uint32_t> path;
+    };
+    struct ChanceTask
+    {
+        std::uint32_t group;
+        std::uint32_t action;
+    };
+    std::vector<ChanceGroup> chanceGroups_;
+    std::vector<ChanceTask> chanceTasks_;
     struct FlopOutcomes
     {
         std::uint16_t wins = 0;
@@ -93,6 +124,8 @@ private:
     // Counts are exact out of C(45, 2) legal runouts, independent of reach/payoffs.
     std::vector<FlopOutcomes> flopOutcomes_;
 
+    void PrepareChanceTasks();
+    void MatchRegrets(const Node& node, const TrainState& train, float* current) const;
     void PrepareFlopRunout();
     void EvaluateFlopRunout(const Node& node, std::size_t player, const double* opponentReach, const double* divisors, float* values) const;
     void PropagateChild(

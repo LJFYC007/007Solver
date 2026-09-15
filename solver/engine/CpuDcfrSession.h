@@ -39,16 +39,5 @@ private:
     int workerCount_;
     int completedIterations_ = 0;
     double trainingTimeSeconds_ = 0.0;
-
-    void UpdateRegrets(
-        std::uint32_t node,
-        std::size_t updatingPlayer,
-        const double* ownReach,
-        const float* strategy,
-        const float* children,
-        const float* values,
-        float positiveDiscount,
-        float averageDiscount
-    );
 };
 } // namespace solver::engine

@@ -4,10 +4,8 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
-#include <numeric>
 #include <stdexcept>
 #include <utility>
-#include <omp.h>
 
 namespace solver::engine
 {
@@ -58,22 +56,8 @@ void CpuDcfrSession::Run(int iterations, const std::function<void(int)>& progres
                 workspace_.reach[player][hand] = player == updatingPlayer ? 1.0f : traversal_.hands[player][hand].weight;
         }
 
-        const HandTraversal::Update update =
-            [&](std::uint32_t node, const double* ownReach, const float* strategy, const float* children, const float* values)
-        { UpdateRegrets(node, updatingPlayer, ownReach, strategy, children, values, positiveDiscount, averageDiscount); };
-        traversal_.Walk(
-            0,
-            updatingPlayer,
-            nullptr,
-            divisors_[updatingPlayer].data(),
-            false,
-            workspace_,
-            0,
-            rootValues_.data(),
-            update,
-            workerCount_ > 1 ? &workers_ : nullptr,
-            regrets_.data()
-        );
+        HandTraversal::TrainState train{regrets_.data(), strategySums_.data(), positiveDiscount, averageDiscount};
+        traversal_.WalkTraining(updatingPlayer, divisors_[updatingPlayer].data(), workspace_, rootValues_.data(), workers_, train);
         ++completedIterations_;
         if (progressCallback)
         {
@@ -86,34 +70,6 @@ void CpuDcfrSession::Run(int iterations, const std::function<void(int)>& progres
         }
     }
     trainingTimeSeconds_ += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-}
-
-void CpuDcfrSession::UpdateRegrets(
-    std::uint32_t nodeIndex,
-    std::size_t updatingPlayer,
-    const double* ownReach,
-    const float* strategy,
-    const float* children,
-    const float* values,
-    float positiveDiscount,
-    float averageDiscount
-)
-{
-    const HandTraversal::Node& node = traversal_.nodes[nodeIndex];
-    const std::size_t count = traversal_.hands[updatingPlayer].size();
-    // Traverse contiguous hand rows while retaining each hand's action accumulation order.
-    for (std::size_t action = 0; action < node.childCount; ++action)
-    {
-        const std::size_t offset = node.strategyOffset + action * count;
-        const float* childValues = children + action * count;
-        for (std::size_t hand = 0; hand < count; ++hand)
-        {
-            const float regret = regrets_[offset + hand] + (childValues[hand] - values[hand]);
-            regrets_[offset + hand] = regret * (regret > 0.0f ? positiveDiscount : 0.5f);
-            strategySums_[offset + hand] =
-                static_cast<float>(averageDiscount * (strategySums_[offset + hand] + ownReach[hand] * strategy[action * count + hand]));
-        }
-    }
 }
 
 StrategySnapshot CpuDcfrSession::ExportStrategy() &&
