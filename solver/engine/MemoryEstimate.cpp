@@ -38,10 +38,11 @@ MemoryEstimate EstimateCpuMemory(const SolveProblem& problem, int workers)
     const std::uint64_t policyStack = stack + 4 * size.depth * size.maxActions * maxHands;
     const std::uint64_t workspace = policyStack * (count > 1 ? count + 1 : 1) + 52 * 4 * maxHands + (count + 1) * 128 * 1024;
     // Training retains regrets and strategy sums; current policies live in depth rows.
-    const std::uint64_t trainingPeak = 8 * entries + workspace;
+    const std::uint64_t flopOutcomes = board.CardCount() == 3 ? 4 * hands[0] * hands[1] : 0;
+    const std::uint64_t trainingPeak = 8 * entries + workspace + flopOutcomes;
     // Final export releases regrets and workspaces before allocating the snapshot.
     // Snapshot probabilities reuse the strategy-sum allocation; indices are built directly.
-    const std::uint64_t exportPeak = 4 * entries + 4 * infosets + 80 * decisions + 4 * size.maxActions * maxHands;
+    const std::uint64_t exportPeak = 4 * entries + 4 * infosets + 80 * decisions + 4 * size.maxActions * maxHands + flopOutcomes;
     const std::uint64_t evaluationPeak = 4 * entries + 4 * infosets + 80 * decisions + policyStack;
     const std::uint64_t peak = size.storageBytes + layout + ranks + std::max({trainingPeak, exportPeak, evaluationPeak});
     return {size.logicalNodes, size.topologyNodes, size.traversalNodes, entries, peak + peak / 8 + 64 * 1024 * 1024, count};

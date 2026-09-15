@@ -13,7 +13,7 @@ namespace solver::engine
 {
 CpuDcfrSession::CpuDcfrSession(std::shared_ptr<const SolveProblem> problem, int workers)
     : problem_(std::move(problem))
-    , traversal_(problem_ ? *problem_ : throw std::invalid_argument("CPU DCFR session requires a solve problem"), game::NodeId(0))
+    , traversal_(problem_ ? *problem_ : throw std::invalid_argument("CPU DCFR session requires a solve problem"), game::NodeId(0), true)
     , workerCount_(CpuWorkerCount(workers))
 {
     if (workerCount_ <= 0)

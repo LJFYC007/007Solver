@@ -62,7 +62,8 @@ struct HandTraversal
     std::size_t maxActions = 1;
     float rootHalfPot = 0.0f;
 
-    HandTraversal(const SolveProblem& problem, game::NodeId root);
+    // Repeated training amortizes the optional cache; one-shot analysis leaves it off.
+    HandTraversal(const SolveProblem& problem, game::NodeId root, bool cacheFlopRunout = false);
     Workspace MakeWorkspace(bool parallel = false) const;
     std::vector<double> OpponentReachAtRoot(const StrategySnapshot& strategy, std::size_t opponentPlayer) const;
     std::vector<double> CompatibleMasses(std::size_t player, const double* opponentReach) const;
@@ -83,6 +84,17 @@ struct HandTraversal
     ) const;
 
 private:
+    struct FlopOutcomes
+    {
+        std::uint16_t wins = 0;
+        std::uint16_t losses = 0;
+    };
+    // One player-0-major table for this traversal's flop and exact hand layout.
+    // Counts are exact out of C(45, 2) legal runouts, independent of reach/payoffs.
+    std::vector<FlopOutcomes> flopOutcomes_;
+
+    void PrepareFlopRunout();
+    void EvaluateFlopRunout(const Node& node, std::size_t player, const double* opponentReach, const double* divisors, float* values) const;
     void PropagateChild(
         std::uint32_t node,
         std::size_t action,

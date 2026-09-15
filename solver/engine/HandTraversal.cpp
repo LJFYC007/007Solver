@@ -7,7 +7,7 @@
 
 namespace solver::engine
 {
-HandTraversal::HandTraversal(const SolveProblem& problem, game::NodeId root)
+HandTraversal::HandTraversal(const SolveProblem& problem, game::NodeId root, bool cacheFlopRunout)
 {
     if (!problem.game)
         throw std::invalid_argument("Hand traversal requires a compiled game");
@@ -156,6 +156,58 @@ HandTraversal::HandTraversal(const SolveProblem& problem, game::NodeId root)
         return index;
     };
     visit(visit, rootNode, 0);
+    if (cacheFlopRunout &&
+        std::any_of(nodes.begin(), nodes.end(), [](const Node& node) { return node.forcedRunout && node.board.CardCount() == 3; }))
+        PrepareFlopRunout();
+}
+
+void HandTraversal::PrepareFlopRunout()
+{
+    flopOutcomes_.resize(hands[0].size() * hands[1].size());
+    for (const auto& ranks : rankRows)
+        for (const RankedHand first : ranks[0])
+            for (const RankedHand second : ranks[1])
+            {
+                if (hands[0][first.hand].mask & hands[1][second.hand].mask)
+                    continue;
+                auto& outcomes = flopOutcomes_[first.hand * hands[1].size() + second.hand];
+                outcomes.wins += first.rank > second.rank;
+                outcomes.losses += first.rank < second.rank;
+            }
+}
+
+void HandTraversal::EvaluateFlopRunout(
+    const Node& node,
+    std::size_t player,
+    const double* opponentReach,
+    const double* divisors,
+    float* values
+) const
+{
+    const float tie = player == 0 ? node.utilities[1] : -node.utilities[1];
+    const float win = player == 0 ? node.utilities[0] : -node.utilities[2];
+    const float loss = player == 0 ? node.utilities[2] : -node.utilities[0];
+    const double winScale = static_cast<double>(win - tie) / 990.0;
+    const double lossScale = static_cast<double>(loss - tie) / 990.0;
+    std::array<double, kMaxHands> wins{}, losses{};
+    // Both orientations read contiguous rows from the same immutable table.
+    for (std::size_t first = 0; first < hands[0].size(); ++first)
+        for (std::size_t second = 0; second < hands[1].size(); ++second)
+        {
+            const auto outcomes = flopOutcomes_[first * hands[1].size() + second];
+            const auto hand = player == 0 ? first : second;
+            const double reach = opponentReach[player == 0 ? second : first];
+            wins[hand] += reach * (player == 0 ? outcomes.wins : outcomes.losses);
+            losses[hand] += reach * (player == 0 ? outcomes.losses : outcomes.wins);
+        }
+    const auto masses = tie == 0.0f ? std::vector<double>{} : CompatibleMasses(player, opponentReach);
+    for (std::size_t hand = 0; hand < hands[player].size(); ++hand)
+    {
+        const double baseline = tie == 0.0f ? 0.0 : masses[hand] * tie;
+        values[hand] = divisors[hand] > 0.0
+                           ? static_cast<float>((baseline + wins[hand] * winScale + losses[hand] * lossScale) / divisors[hand])
+                           : 0.0f;
+    }
 }
 
 std::vector<double> HandTraversal::OpponentReachAtRoot(const StrategySnapshot& strategy, std::size_t opponentPlayer) const
@@ -343,6 +395,11 @@ void HandTraversal::EvaluateTerminal(
 
 void HandTraversal::EvaluateRunout(Node node, std::size_t player, const double* opponentReach, const double* divisors, float* values) const
 {
+    if (node.board.CardCount() == 3 && !flopOutcomes_.empty())
+    {
+        EvaluateFlopRunout(node, player, opponentReach, divisors, values);
+        return;
+    }
     if (node.board.CardCount() == 5)
     {
         const int a = node.board.CardAt(3).Index(), b = node.board.CardAt(4).Index();
