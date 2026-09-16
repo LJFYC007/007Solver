@@ -121,7 +121,7 @@ TEST(AnalysisSessionTest, FixedPoliciesMatchIndependentNodeValuesAndReach)
     {
         const auto problem = Problem(name);
         const auto& reference = References().at(name);
-        analysis::AnalysisSession session(engine::SolveResult(problem, FixedStrategy(*problem, reference.at("policy")), {}));
+        analysis::AnalysisSession session(engine::SolveResult(problem, FixedStrategy(*problem, reference.at("policy"))));
         for (const auto& expected : reference.at("queries"))
         {
             SCOPED_TRACE(name + " path " + expected.at("path").dump());

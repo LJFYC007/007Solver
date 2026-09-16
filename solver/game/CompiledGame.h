@@ -9,12 +9,10 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <utility>
 #include <vector>
 
 namespace solver::game
 {
-struct TerminalSettlement;
 enum class NodeKind : std::uint8_t
 {
     Decision,
@@ -87,7 +85,6 @@ public:
     std::optional<ParentEdge> Parent() const { return parent_; }
     const TerminalOutcome& Terminal() const;
     bool IsForcedRunout() const;
-    std::size_t SubtreeNodeCount() const { return Shape().logicalNodes; }
     std::size_t TraversalNodeCount() const { return Shape().traversalNodes; }
     std::size_t BettingEdgeCount() const { return Shape().actions.size(); }
     BettingEdge GetBettingEdge(std::size_t index) const;
@@ -130,15 +127,7 @@ public:
     std::size_t NodeCount() const { return topology_.front().logicalNodes; }
     GameNode GetNode(NodeId id) const;
     GameTreeSize Size() const;
-    int ShowdownRank(NodeId terminalNode, core::HoleCards hand) const;
     int ShowdownRank(const core::Board& board, core::HoleCards hand) const;
-    TerminalSettlement CalculateTerminalSettlement(
-        NodeId startNode,
-        NodeId terminalNode,
-        core::HoleCards player0Hand,
-        core::HoleCards player1Hand
-    ) const;
-    std::pair<float, float> CalculateZeroSumUtility(NodeId terminalNode, core::HoleCards player0Hand, core::HoleCards player1Hand) const;
 
 private:
     friend std::shared_ptr<const CompiledGame> CompileGame(const GameSpec& gameSpec);

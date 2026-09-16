@@ -37,6 +37,22 @@ std::string StreetCode(core::Street street)
     throw std::logic_error("Unknown street");
 }
 
+const char* PhaseCode(SolvePhase phase)
+{
+    switch (phase)
+    {
+    case SolvePhase::Training:
+        return "training";
+    case SolvePhase::Checking:
+        return "checking";
+    case SolvePhase::Finalizing:
+        return "finalizing";
+    case SolvePhase::Complete:
+        return "complete";
+    }
+    throw std::logic_error("Unknown solve phase");
+}
+
 std::string ActionCode(const analysis::ActionReport& action)
 {
     switch (action.kind)
@@ -215,7 +231,7 @@ std::string ServiceMessageToJson(const ServiceMessage& message)
             {"iterations", message.completedIterations},
             {"nodeCount", message.nodeCount},
             {"rootNodeId", message.rootNodeId.Value()},
-            {"stopReason", message.stopReason},
+            {"stopReason", message.stopReason == StopReason::Accuracy ? "accuracy" : "iterationLimit"},
         };
         break;
     case ServiceMessageKind::Failed:
@@ -234,11 +250,12 @@ std::string ServiceMessageToJson(const ServiceMessage& message)
     }
     if (message.kind == ServiceMessageKind::Solving || message.kind == ServiceMessageKind::Ready)
     {
-        json["phase"] = message.phase;
-        json["elapsedSeconds"] = message.elapsedSeconds;
-        json["estimatedRemainingSeconds"] = message.estimatedRemainingSeconds ? Json(*message.estimatedRemainingSeconds) : Json(nullptr);
-        json["accuracyPercent"] = message.accuracyPercent ? Json(*message.accuracyPercent) : Json(nullptr);
-        json["targetAccuracyPercent"] = message.targetAccuracyPercent;
+        const auto& progress = message.progress;
+        json["phase"] = PhaseCode(progress.phase);
+        json["elapsedSeconds"] = progress.elapsedSeconds;
+        json["estimatedRemainingSeconds"] = progress.estimatedRemainingSeconds ? Json(*progress.estimatedRemainingSeconds) : Json(nullptr);
+        json["accuracyPercent"] = progress.accuracyPercent ? Json(*progress.accuracyPercent) : Json(nullptr);
+        json["targetAccuracyPercent"] = progress.targetAccuracyPercent;
     }
     if (message.estimate)
     {

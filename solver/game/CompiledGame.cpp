@@ -1,6 +1,5 @@
 #include "game/CompiledGame.h"
 #include "core/Evaluator.h"
-#include "game/TerminalSettlement.h"
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
@@ -130,14 +129,6 @@ int CompiledGame::ShowdownRank(const core::Board& board, core::HoleCards hand) c
     return rank;
 }
 
-int CompiledGame::ShowdownRank(NodeId terminalNode, core::HoleCards hand) const
-{
-    const GameNode& node = GetNode(terminalNode);
-    if (node.Kind() != NodeKind::Terminal || node.Terminal().kind != TerminalKind::Showdown)
-        throw std::invalid_argument("Showdown rank requires a showdown terminal");
-    return ShowdownRank(node.State().board, hand);
-}
-
 GameNode CompiledGame::GetNode(NodeId id) const
 {
     if (id.Value() < 0 || static_cast<std::size_t>(id.Value()) >= NodeCount())
@@ -172,15 +163,4 @@ GameTreeSize CompiledGame::Size() const
     };
 }
 
-std::pair<float, float> CompiledGame::CalculateZeroSumUtility(
-    NodeId terminalNode,
-    core::HoleCards player0Hand,
-    core::HoleCards player1Hand
-) const
-{
-    const TerminalSettlement settlement = CalculateTerminalSettlement(Root(), terminalNode, player0Hand, player1Hand);
-    const float initialPot = static_cast<float>(spec_.initialPot.Raw()) / static_cast<float>(core::Chips::kUnitsPerChip);
-    const float player0Value = settlement.NetPayoffFromStart(core::PlayerId::Player0()) - initialPot / 2.0f;
-    return {player0Value, -player0Value};
-}
 } // namespace solver::game

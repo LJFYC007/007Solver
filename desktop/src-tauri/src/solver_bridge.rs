@@ -69,8 +69,7 @@ impl SolverBridge {
     ) -> Result<Value, String> {
         let receiver = {
             let mut state = self.0.lock().unwrap();
-            if state.generation != generation || !matches!(state.status, SolverStatus::Ready { .. })
-            {
+            if state.generation != generation || !matches!(state.status, SolverStatus::Ready(_)) {
                 return Err("The selected solution is not ready".to_owned());
             }
             let request_id = state.next_request_id;
@@ -103,39 +102,11 @@ fn handle_protocol_message(state: &mut BridgeState, line: &[u8]) {
     };
     match message {
         ServiceMessage::Event(event) => match event {
-            ServiceEvent::BuildingTree { total_iterations } => {
-                state.status = SolverStatus::BuildingTree { total_iterations };
+            ServiceEvent::BuildingTree(progress) => {
+                state.status = SolverStatus::BuildingTree(progress)
             }
-            ServiceEvent::Solving {
-                completed_iterations,
-                total_iterations,
-                estimate,
-                progress,
-            } => {
-                state.status = SolverStatus::Solving {
-                    completed_iterations,
-                    total_iterations,
-                    estimate,
-                    progress,
-                };
-            }
-            ServiceEvent::Ready {
-                iterations,
-                node_count,
-                root_node_id,
-                estimate,
-                progress,
-                stop_reason,
-            } => {
-                state.status = SolverStatus::Ready {
-                    iterations,
-                    node_count,
-                    root_node_id,
-                    estimate,
-                    progress,
-                    stop_reason,
-                };
-            }
+            ServiceEvent::Solving(progress) => state.status = SolverStatus::Solving(progress),
+            ServiceEvent::Ready(solution) => state.status = SolverStatus::Ready(solution),
             ServiceEvent::Failed { message } => state.fail(message),
         },
         ServiceMessage::Response(response) => {

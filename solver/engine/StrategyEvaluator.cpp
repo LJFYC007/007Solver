@@ -1,6 +1,5 @@
 #include "engine/StrategyEvaluator.h"
 #include "engine/HandTraversal.h"
-#include <algorithm>
 #include <stdexcept>
 #include <vector>
 
@@ -14,24 +13,6 @@ void CheckProblem(const SolveProblem& problem, const StrategySnapshot& strategy)
         throw std::invalid_argument("Evaluation strategy belongs to a different game");
 }
 
-// Read-only evaluation needs opponent reach and separate scratch space.
-std::vector<float> EvaluateHands(
-    const HandTraversal& traversal,
-    const StrategySnapshot* strategy,
-    std::size_t player,
-    const std::vector<double>& rootReach,
-    const std::vector<double>& divisors,
-    bool bestResponse,
-    const float* strategySums = nullptr
-)
-{
-    const std::size_t count = traversal.hands[player].size();
-    auto workspace = traversal.MakeWorkspace();
-    std::copy(rootReach.begin(), rootReach.end(), workspace.reach[1 - player].begin());
-    std::vector<float> values(count);
-    traversal.Walk(0, player, strategy, divisors.data(), bestResponse, workspace, 0, values.data(), nullptr, nullptr, strategySums);
-    return values;
-}
 ExploitabilityMetrics EvaluateBestResponses(const HandTraversal& traversal, const StrategySnapshot* strategy, const float* strategySums)
 {
     std::array<float, 2> bestResponses{};
@@ -44,7 +25,9 @@ ExploitabilityMetrics EvaluateBestResponses(const HandTraversal& traversal, cons
             for (const auto& hand : traversal.hands[1 - player])
                 reach.push_back(hand.weight);
         const auto divisors = traversal.CompatibleMasses(player, reach.data());
-        const auto values = EvaluateHands(traversal, strategy, player, reach, divisors, true, strategySums);
+        const auto values = strategy
+                                ? traversal.EvaluateSnapshot(*strategy, player, reach, divisors, HandTraversal::Evaluation::BestResponse)
+                                : traversal.EvaluateAverageBestResponse(strategySums, player, reach, divisors);
         double totalValue = 0.0;
         double totalMass = 0.0;
         for (std::size_t hand = 0; hand < values.size(); ++hand)
@@ -81,7 +64,7 @@ std::map<core::HoleCards, float> EvaluateNodeStrategyEvs(
     const HandTraversal traversal(problem, node);
     const auto reach = traversal.OpponentReachAtRoot(strategy, player.Other().Index());
     const auto divisors = traversal.CompatibleMasses(player.Index(), reach.data());
-    const auto values = EvaluateHands(traversal, &strategy, player.Index(), reach, divisors, false);
+    const auto values = traversal.EvaluateSnapshot(strategy, player.Index(), reach, divisors, HandTraversal::Evaluation::StrategyValue);
     std::map<core::HoleCards, float> evs;
     for (std::size_t hand = 0; hand < values.size(); ++hand)
     {

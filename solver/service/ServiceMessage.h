@@ -20,6 +20,29 @@ enum class ServiceMessageKind : std::uint8_t
     QueryFailed,
 };
 
+enum class SolvePhase : std::uint8_t
+{
+    Training,
+    Checking,
+    Finalizing,
+    Complete,
+};
+
+enum class StopReason : std::uint8_t
+{
+    Accuracy,
+    IterationLimit,
+};
+
+struct SolveProgress
+{
+    SolvePhase phase = SolvePhase::Training;
+    double elapsedSeconds = 0.0;
+    std::optional<double> estimatedRemainingSeconds;
+    std::optional<double> accuracyPercent;
+    double targetAccuracyPercent = 0.01;
+};
+
 struct ServiceMessage
 {
     ServiceMessageKind kind;
@@ -32,12 +55,8 @@ struct ServiceMessage
     std::optional<analysis::NodeReport> node;
     std::optional<analysis::EquityReport> equity;
     std::optional<engine::MemoryEstimate> estimate;
-    std::string phase = "training";
-    double elapsedSeconds = 0.0;
-    std::optional<double> estimatedRemainingSeconds;
-    std::optional<double> accuracyPercent;
-    double targetAccuracyPercent = 0.01;
-    std::string stopReason;
+    SolveProgress progress;
+    StopReason stopReason = StopReason::IterationLimit;
 };
 
 struct ServiceRequest

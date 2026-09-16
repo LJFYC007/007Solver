@@ -1,4 +1,5 @@
 #include "engine/HandTraversal.h"
+#include "engine/AverageStrategy.h"
 #include "game/TerminalSettlement.h"
 #include <algorithm>
 #include <limits>
@@ -8,6 +9,36 @@
 
 namespace solver::engine
 {
+namespace
+{
+// Visit the first non-all-in chance boundary on each betting path, in traversal order.
+template<typename Visitor>
+void VisitChanceGroups(const game::GameNode& root, Visitor visitGroup)
+{
+    std::vector<std::uint32_t> path;
+    const auto visit = [&](const auto& self, const game::GameNode& node, std::uint32_t index) -> void
+    {
+        if (node.IsForcedRunout() || node.Kind() == game::NodeKind::Terminal)
+            return;
+        if (node.Kind() == game::NodeKind::Chance)
+        {
+            visitGroup(node, index, path);
+            return;
+        }
+        auto childIndex = index + 1;
+        for (std::uint32_t action = 0; action < node.BettingEdgeCount(); ++action)
+        {
+            const auto child = node.Child(action);
+            path.push_back(action);
+            self(self, child, childIndex);
+            path.pop_back();
+            childIndex += static_cast<std::uint32_t>(child.TraversalNodeCount());
+        }
+    };
+    visit(visit, root, 0);
+}
+} // namespace
+
 HandTraversal::HandTraversal(const SolveProblem& problem, game::NodeId root, bool prepareTraining)
 {
     if (!problem.game)
@@ -174,36 +205,24 @@ HandTraversal::HandTraversal(const SolveProblem& problem, game::NodeId root, boo
     visit(visit, rootNode, 0);
     if (prepareTraining)
     {
-        PrepareChanceTasks();
+        PrepareChanceTasks(rootNode);
         if (std::any_of(nodes.begin(), nodes.end(), [](const Node& node) { return node.forcedRunout && node.board.CardCount() == 3; }))
             PrepareFlopRunout();
     }
 }
 
-void HandTraversal::PrepareChanceTasks()
+void HandTraversal::PrepareChanceTasks(const game::GameNode& root)
 {
-    std::vector<std::uint32_t> path;
-    const auto visit = [&](const auto& self, std::uint32_t index) -> void
-    {
-        const Node& node = nodes[index];
-        if (node.forcedRunout || node.kind == game::NodeKind::Terminal)
-            return;
-        if (node.kind == game::NodeKind::Chance)
+    VisitChanceGroups(
+        root,
+        [&](const game::GameNode& node, std::uint32_t index, const std::vector<std::uint32_t>& path)
         {
             const auto group = static_cast<std::uint32_t>(chanceGroups_.size());
             chanceGroups_.push_back({index, path});
-            for (std::uint32_t action = 0; action < node.childCount; ++action)
+            for (std::uint32_t action = 0; action < node.ChanceOutcomeCount(); ++action)
                 chanceTasks_.push_back({group, action});
-            return;
         }
-        for (std::uint32_t action = 0; action < node.childCount; ++action)
-        {
-            path.push_back(action);
-            self(self, children[node.childOffset + action]);
-            path.pop_back();
-        }
-    };
-    visit(visit, 0);
+    );
 }
 
 void HandTraversal::PrepareFlopRunout()
@@ -274,8 +293,7 @@ std::vector<double> HandTraversal::OpponentReachAtRoot(const StrategySnapshot& s
             const auto& node = game.GetNode(step->node);
             if (node.Kind() == game::NodeKind::Decision && node.State().playerToAct.Index() == opponentPlayer)
             {
-                const float* probabilities = strategy.FindStrategy({step->node, hand.cards});
-                weight *= probabilities ? probabilities[step->edgeIndex] : 1.0f / static_cast<float>(node.BettingEdgeCount());
+                weight *= strategy.ActionProbability({step->node, hand.cards}, step->edgeIndex);
             }
         }
         // The root board already removes dealt cards. Earlier chance probabilities and
@@ -495,17 +513,67 @@ void HandTraversal::EvaluateRunout(
         values[hand] = static_cast<float>(accumulated[hand]);
 }
 
+HandTraversal::WorkspaceSize HandTraversal::SizeWorkspace(
+    std::size_t depth,
+    std::size_t actions,
+    const std::array<std::size_t, 2>& handCounts,
+    std::size_t chanceTasks
+)
+{
+    const auto count = std::max(handCounts[0], handCounts[1]);
+    return {
+        {(depth + 1) * handCounts[0], (depth + 1) * handCounts[1]},
+        depth * actions * count,
+        depth * count,
+        chanceTasks * count,
+        depth * actions * count,
+    };
+}
+
+std::uint64_t HandTraversal::WorkspaceSize::Bytes() const
+{
+    return (reach[0] + reach[1] + accumulated) * sizeof(double) + (childValues + parallelValues + strategies) * sizeof(float);
+}
+
+HandTraversal::StorageEstimate HandTraversal::EstimateStorage(const game::CompiledGame& game, const std::array<std::size_t, 2>& handCounts)
+{
+    const auto size = game.Size();
+    const auto& board = game.Spec().initialBoard;
+    const auto totalHands = handCounts[0] + handCounts[1];
+    const auto maxHands = std::max(handCounts[0], handCounts[1]);
+    std::uint64_t chanceTasks = 0, chancePlanBytes = 0;
+    VisitChanceGroups(
+        game.GetNode(game.Root()),
+        [&](const game::GameNode& node, std::uint32_t, const std::vector<std::uint32_t>& path)
+        {
+            chanceTasks += node.ChanceOutcomeCount();
+            chancePlanBytes += sizeof(ChanceGroup) + path.size() * sizeof(std::uint32_t) + node.ChanceOutcomeCount() * sizeof(ChanceTask);
+        }
+    );
+    const std::uint64_t layout = size.traversalNodes * (sizeof(Node) + sizeof(std::uint32_t) + sizeof(std::uint64_t));
+    const std::uint64_t rankBytes = 2 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t) + sizeof(std::uint64_t);
+    const std::uint64_t undealt = 52 - board.CardCount();
+    const std::uint64_t runouts = board.CardCount() == 3 ? undealt * (undealt - 1) / 2 : board.CardCount() == 4 ? undealt : 1;
+    const std::uint64_t ranks =
+        runouts * (rankBytes * totalHands + 2 * sizeof(RankOrder)) + 2 * totalHands * sizeof(Hand) + totalHands * sizeof(std::uint64_t);
+    return {
+        layout + ranks + 2 * chancePlanBytes,
+        SizeWorkspace(size.depth, size.maxActions, handCounts, 0).Bytes(),
+        chanceTasks * maxHands * sizeof(float),
+        board.CardCount() == 3 ? handCounts[0] * handCounts[1] * sizeof(FlopOutcomes) : 0,
+    };
+}
+
 HandTraversal::Workspace HandTraversal::MakeWorkspace(bool parallel) const
 {
     Workspace workspace;
-    const auto count = std::max(hands[0].size(), hands[1].size());
+    const auto size = SizeWorkspace(maxDepth, maxActions, {hands[0].size(), hands[1].size()}, parallel ? chanceTasks_.size() : 0);
     for (std::size_t player = 0; player < 2; ++player)
-        workspace.reach[player].resize((maxDepth + 1) * hands[player].size());
-    workspace.childValues.resize(maxDepth * maxActions * count);
-    workspace.accumulated.resize(maxDepth * count);
-    if (parallel)
-        workspace.parallelValues.resize(chanceTasks_.size() * count);
-    workspace.strategies.resize(maxDepth * maxActions * count);
+        workspace.reach[player].resize(size.reach[player]);
+    workspace.childValues.resize(size.childValues);
+    workspace.accumulated.resize(size.accumulated);
+    workspace.parallelValues.resize(size.parallelValues);
+    workspace.strategies.resize(size.strategies);
     return workspace;
 }
 
@@ -545,9 +613,12 @@ void HandTraversal::WalkTraining(
     TrainState& train
 ) const
 {
+    WalkContext context{player, divisors};
+    context.train = &train;
+    context.useRunoutCache = true;
     if (workers.size() <= 1 || chanceTasks_.empty())
     {
-        Walk(0, player, nullptr, divisors, false, workspace, 0, values, nullptr, &train);
+        Walk(0, context, workspace, 0, values);
         return;
     }
     const auto count = hands[player].size();
@@ -594,36 +665,68 @@ void HandTraversal::WalkTraining(
             );
         Walk(
             children[nodes[group.node].childOffset + task.action],
-            player,
-            nullptr,
-            divisors,
-            false,
+            context,
             scratch,
             depth + 1,
-            workspace.parallelValues.data() + index * count,
-            nullptr,
-            &train
+            workspace.parallelValues.data() + index * count
         );
     }
     // Consume each result once in the same preorder/action order as serial Walk.
     std::size_t cursor = 0;
-    Walk(0, player, nullptr, divisors, false, workspace, 0, values, &cursor, &train);
+    Walk(0, context, workspace, 0, values, &cursor);
+}
+
+std::vector<float> HandTraversal::EvaluateSnapshot(
+    const StrategySnapshot& strategy,
+    std::size_t player,
+    const std::vector<double>& opponentReach,
+    const std::vector<double>& divisors,
+    Evaluation evaluation
+) const
+{
+    WalkContext context{player, divisors.data()};
+    context.strategy = &strategy;
+    context.bestResponse = evaluation == Evaluation::BestResponse;
+    return EvaluateHands(context, opponentReach);
+}
+
+std::vector<float> HandTraversal::EvaluateAverageBestResponse(
+    const float* strategySums,
+    std::size_t player,
+    const std::vector<double>& opponentReach,
+    const std::vector<double>& divisors
+) const
+{
+    WalkContext context{player, divisors.data()};
+    context.strategySums = strategySums;
+    context.bestResponse = true;
+    return EvaluateHands(context, opponentReach);
+}
+
+std::vector<float> HandTraversal::EvaluateHands(const WalkContext& context, const std::vector<double>& opponentReach) const
+{
+    auto workspace = MakeWorkspace();
+    std::copy(opponentReach.begin(), opponentReach.end(), workspace.reach[1 - context.player].begin());
+    std::vector<float> values(hands[context.player].size());
+    Walk(0, context, workspace, 0, values.data());
+    return values;
 }
 
 void HandTraversal::Walk(
     std::uint32_t nodeIndex,
-    std::size_t player,
-    const StrategySnapshot* strategy,
-    const double* divisors,
-    bool bestResponse,
+    const WalkContext& context,
     Workspace& workspace,
     std::size_t depth,
     float* values,
-    std::size_t* parallelCursor,
-    TrainState* train,
-    const float* strategySums
+    std::size_t* parallelCursor
 ) const
 {
+    const auto player = context.player;
+    const auto* divisors = context.divisors;
+    const auto* strategy = context.strategy;
+    const auto* strategySums = context.strategySums;
+    auto* train = context.train;
+    const bool bestResponse = context.bestResponse;
     const Node& node = nodes[nodeIndex];
     const auto count = hands[player].size();
     const auto stride = std::max(hands[0].size(), hands[1].size());
@@ -632,7 +735,7 @@ void HandTraversal::Walk(
     if (node.forcedRunout)
     {
         // Checkpoints use the same runout accumulation as exported-snapshot evaluation.
-        EvaluateRunout(node, player, opponentReach, divisors, values, strategySums == nullptr);
+        EvaluateRunout(node, player, opponentReach, divisors, values, context.useRunoutCache);
         return;
     }
     if (node.kind == game::NodeKind::Terminal)
@@ -654,16 +757,8 @@ void HandTraversal::Walk(
         else if (strategySums)
         {
             const float* sums = strategySums + node.strategyOffset;
-            const float uniform = 1.0f / static_cast<float>(node.childCount);
             for (std::size_t hand = 0; hand < actorCount; ++hand)
-            {
-                double total = 0.0;
-                for (std::size_t action = 0; action < node.childCount; ++action)
-                    total += sums[action * actorCount + hand];
-                for (std::size_t action = 0; action < node.childCount; ++action)
-                    current[action * actorCount + hand] =
-                        total > 0.0 ? static_cast<float>(sums[action * actorCount + hand] / total) : uniform;
-            }
+                NormalizeAverageStrategy(sums + hand, actorCount, node.childCount, current + hand, actorCount);
         }
         else
         {
@@ -712,7 +807,7 @@ void HandTraversal::Walk(
                     workspace.reach[p].data() + depth * hands[p].size(),
                     workspace.reach[p].data() + (depth + 1) * hands[p].size()
                 );
-        Walk(childIndex, player, strategy, divisors, bestResponse, workspace, depth + 1, output, parallelCursor, train, strategySums);
+        Walk(childIndex, context, workspace, depth + 1, output, parallelCursor);
     };
     for (std::size_t action = 0; action < node.childCount; ++action)
     {

@@ -1,18 +1,10 @@
 import { useState } from "react";
 import { type EquityReport, type Player, formatNumber } from "../solver";
+import type { SpotSeat } from "../solver/study";
 import { useSolverEquity } from "../hooks/useSolverEquity";
 import EquityChart from "./EquityChart";
 import { BoardCard } from "./PlayingCards";
 
-export interface SpotSeat {
-    position: string;
-    stack: number;
-    folded: boolean;
-    acting?: boolean;
-    committed?: number;
-    combos?: number;
-    ev?: number | null;
-}
 export interface SpotSummary {
     seats: SpotSeat[];
     pot: number;

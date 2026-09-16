@@ -1,11 +1,6 @@
 import { formatNumber } from "../solver";
-import type { PreflopChoice, PreflopNode } from "../solver/catalog";
-
-interface PreflopEntry {
-    node: PreflopNode;
-    history: PreflopChoice[];
-    stack: number;
-}
+import type { PreflopChoice } from "../solver/catalog";
+import type { PreflopEntry } from "../solver/study";
 
 export default function PreflopTimeline({
     entries,

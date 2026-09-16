@@ -6,6 +6,12 @@
 
 namespace solver::engine
 {
+std::uint64_t StrategySnapshot::EstimateStorageBytes(std::size_t nodes, std::size_t hands, std::size_t probabilities)
+{
+    // Node blocks grow incrementally during export; allow for vector capacity.
+    return 2 * sizeof(NodeBlock) * nodes + sizeof(core::HoleCards) * hands + sizeof(float) * probabilities;
+}
+
 StrategySnapshot::StrategySnapshot(std::shared_ptr<const game::CompiledGame> game, std::vector<StrategyEntry> entries)
     : game_(std::move(game))
 {
@@ -123,6 +129,12 @@ const float* StrategySnapshot::FindStrategy(const game::InfoSetKey& infoSet) con
     if (hand == end || *hand != infoSet.hand)
         return nullptr;
     return block->probabilities + static_cast<std::size_t>(hand - block->hands) * block->actionCount;
+}
+
+float StrategySnapshot::ActionProbability(const game::InfoSetKey& infoSet, std::size_t action) const
+{
+    const float* strategy = FindStrategy(infoSet);
+    return strategy ? strategy[action] : 1.0f / static_cast<float>(game_->GetNode(infoSet.node).BettingEdgeCount());
 }
 
 std::vector<float> StrategySnapshot::StrategyOrUniform(const game::InfoSetKey& infoSet) const

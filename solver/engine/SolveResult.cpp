@@ -4,8 +4,8 @@
 
 namespace solver::engine
 {
-SolveResult::SolveResult(std::shared_ptr<const SolveProblem> problem, StrategySnapshot strategy, SolveReport report)
-    : problem_(std::move(problem)), strategy_(std::move(strategy)), report_(std::move(report))
+SolveResult::SolveResult(std::shared_ptr<const SolveProblem> problem, StrategySnapshot strategy)
+    : problem_(std::move(problem)), strategy_(std::move(strategy))
 {
     if (!problem_ || !problem_->game)
         throw std::invalid_argument("Solve result requires a solve problem");

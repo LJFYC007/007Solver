@@ -1,4 +1,5 @@
 #include "engine/CpuDcfrSession.h"
+#include "engine/AverageStrategy.h"
 #include "engine/MemoryEstimate.h"
 #include "engine/StrategyEvaluator.h"
 #include <algorithm>
@@ -109,13 +110,9 @@ StrategySnapshot CpuDcfrSession::ExportStrategy() &&
         {
             if (hands[hand].mask & node.boardMask)
                 continue;
-            double total = 0.0;
-            for (std::size_t action = 0; action < node.childCount; ++action)
-                total += nodeSums[action * hands.size() + hand];
             snapshotHands.push_back(hands[hand].cards);
-            for (std::size_t action = 0; action < node.childCount; ++action)
-                strategySums_[writeOffset++] =
-                    total > 0.0 ? static_cast<float>(nodeSums[action * hands.size() + hand] / total) : 1.0f / node.childCount;
+            NormalizeAverageStrategy(nodeSums.data() + hand, hands.size(), node.childCount, strategySums_.data() + writeOffset, 1);
+            writeOffset += node.childCount;
         }
         if (snapshotHands.size() != handOffset)
             nodes.push_back({node.id, handOffset, probabilityOffset, snapshotHands.size() - handOffset, node.childCount});

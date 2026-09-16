@@ -14,12 +14,56 @@ pub(crate) struct MemoryEstimate {
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+enum SolvePhase {
+    Training,
+    Checking,
+    Finalizing,
+    Complete,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum StopReason {
+    Accuracy,
+    IterationLimit,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct SolveProgress {
-    phase: String,
+    phase: SolvePhase,
     elapsed_seconds: f64,
     estimated_remaining_seconds: Option<f64>,
     accuracy_percent: Option<f64>,
     target_accuracy_percent: f64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BuildingTree {
+    total_iterations: i32,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Solving {
+    completed_iterations: i32,
+    total_iterations: i32,
+    estimate: Option<MemoryEstimate>,
+    #[serde(flatten)]
+    progress: SolveProgress,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Ready {
+    iterations: i32,
+    node_count: i32,
+    root_node_id: i32,
+    estimate: Option<MemoryEstimate>,
+    #[serde(flatten)]
+    progress: SolveProgress,
+    stop_reason: StopReason,
 }
 
 #[derive(Clone, Serialize)]
@@ -27,67 +71,19 @@ pub(crate) struct SolveProgress {
 pub(crate) enum SolverStatus {
     Idle,
     Starting,
-    BuildingTree {
-        #[serde(rename = "totalIterations")]
-        total_iterations: i32,
-    },
-    Solving {
-        #[serde(rename = "completedIterations")]
-        completed_iterations: i32,
-        #[serde(rename = "totalIterations")]
-        total_iterations: i32,
-        estimate: Option<MemoryEstimate>,
-        #[serde(flatten)]
-        progress: SolveProgress,
-    },
-    Ready {
-        iterations: i32,
-        #[serde(rename = "nodeCount")]
-        node_count: i32,
-        #[serde(rename = "rootNodeId")]
-        root_node_id: i32,
-        estimate: Option<MemoryEstimate>,
-        #[serde(flatten)]
-        progress: SolveProgress,
-        #[serde(rename = "stopReason")]
-        stop_reason: String,
-    },
-    Failed {
-        message: String,
-    },
+    BuildingTree(BuildingTree),
+    Solving(Solving),
+    Ready(Ready),
+    Failed { message: String },
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case", tag = "event")]
 pub(crate) enum ServiceEvent {
-    BuildingTree {
-        #[serde(rename = "totalIterations")]
-        total_iterations: i32,
-    },
-    Solving {
-        #[serde(rename = "completedIterations")]
-        completed_iterations: i32,
-        #[serde(rename = "totalIterations")]
-        total_iterations: i32,
-        estimate: Option<MemoryEstimate>,
-        #[serde(flatten)]
-        progress: SolveProgress,
-    },
-    Ready {
-        iterations: i32,
-        #[serde(rename = "nodeCount")]
-        node_count: i32,
-        #[serde(rename = "rootNodeId")]
-        root_node_id: i32,
-        estimate: Option<MemoryEstimate>,
-        #[serde(flatten)]
-        progress: SolveProgress,
-        #[serde(rename = "stopReason")]
-        stop_reason: String,
-    },
-    Failed {
-        message: String,
-    },
+    BuildingTree(BuildingTree),
+    Solving(Solving),
+    Ready(Ready),
+    Failed { message: String },
 }
 
 #[derive(Deserialize)]

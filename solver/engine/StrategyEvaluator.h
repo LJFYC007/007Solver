@@ -1,12 +1,18 @@
 #pragma once
 
 #include "engine/SolveProblem.h"
-#include "engine/SolveResult.h"
 #include "engine/StrategySnapshot.h"
 #include <map>
 
 namespace solver::engine
 {
+struct ExploitabilityMetrics
+{
+    float player0BestResponseEv = 0.0f;
+    float player1BestResponseEv = 0.0f;
+    float exploitability = 0.0f;
+};
+
 struct HandTraversal;
 ExploitabilityMetrics EvaluateExploitability(const SolveProblem& problem, const StrategySnapshot& strategy);
 // Borrows action-major cumulative strategies for the duration of this call.

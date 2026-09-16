@@ -4,7 +4,6 @@
 #include "core/PokerTypes.h"
 #include <array>
 #include <optional>
-#include <utility>
 
 namespace solver::game
 {

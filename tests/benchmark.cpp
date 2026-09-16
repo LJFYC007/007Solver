@@ -276,7 +276,7 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
     ASSERT_FALSE(HasFailure());
 
     StartStage("analysis_initialization");
-    analysis::AnalysisSession analysis(engine::SolveResult(problem, std::move(strategy), {}));
+    analysis::AnalysisSession analysis(engine::SolveResult(problem, std::move(strategy)));
     FinishStage("analysis_initialization");
     StartStage("root_query");
     auto root = analysis.QueryNode(analysis.RootNode());
@@ -337,11 +337,6 @@ int main(int argc, char** argv)
             const std::string arg = argv[i];
             if (arg.rfind("--report=", 0) == 0)
                 reportPath = arg.substr(9);
-            else if (arg.rfind("--algorithm=", 0) == 0)
-            {
-                if (arg.substr(12) != "dcfr")
-                    throw std::invalid_argument("Benchmark algorithm must be dcfr");
-            }
             else if (arg.rfind("--iterations=", 0) == 0)
                 iterationBudget = PositiveInteger(arg.substr(13));
             else if (arg.rfind("--workers=", 0) == 0)

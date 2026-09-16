@@ -35,15 +35,6 @@ struct HandTraversal
         bool forcedRunout = false;
         std::array<float, 3> utilities{};
     };
-    // Rank-major showdown table: sequential sweeps never chase Hand rows.
-    struct RankOrder
-    {
-        std::vector<std::uint16_t> ranks;
-        std::vector<std::uint16_t> hands;
-        std::vector<std::uint8_t> card0;
-        std::vector<std::uint8_t> card1;
-        std::vector<std::uint64_t> masks;
-    };
     // One depth-first stack per worker, reused across all subtrees and iterations.
     struct Workspace
     {
@@ -61,15 +52,24 @@ struct HandTraversal
         float positiveDiscount = 0.0f;
         float averageDiscount = 0.0f;
     };
+    enum class Evaluation
+    {
+        StrategyValue,
+        BestResponse,
+    };
+    // Allocation sizes before constructing the traversal; excludes training/snapshot state.
+    struct StorageEstimate
+    {
+        std::uint64_t fixedBytes;
+        std::uint64_t workspaceBytes;
+        std::uint64_t parallelValuesBytes;
+        std::uint64_t flopOutcomesBytes;
+    };
+    static StorageEstimate EstimateStorage(const game::CompiledGame& game, const std::array<std::size_t, 2>& handCounts);
+
     std::array<std::vector<Hand>, 2> hands;
-    std::array<std::vector<std::uint64_t>, 2> handMasks;
     std::vector<Node> nodes;
-    std::vector<std::uint32_t> children;
-    std::vector<std::uint64_t> dealtCardMasks;
-    std::vector<std::array<RankOrder, 2>> rankRows;
-    std::array<int, 1326> rowsByRunout;
     std::size_t strategySize = 0;
-    std::size_t maxDepth = 1;
     std::size_t maxActions = 1;
     float rootHalfPot = 0.0f;
 
@@ -86,24 +86,76 @@ struct HandTraversal
     ) const;
     std::vector<double> OpponentReachAtRoot(const StrategySnapshot& strategy, std::size_t opponentPlayer) const;
     std::vector<double> CompatibleMasses(std::size_t player, const double* opponentReach) const;
-    // Training supplies TrainState; evaluation supplies a snapshot or cumulative
-    // strategy sums. All paths retain the entry policy in a row per depth. WalkTraining
-    // supplies a cursor to consume its completed chance tasks in preorder.
-    void Walk(
-        std::uint32_t node,
+    std::vector<float> EvaluateSnapshot(
+        const StrategySnapshot& strategy,
         std::size_t player,
-        const StrategySnapshot* strategy,
-        const double* divisors,
-        bool bestResponse,
-        Workspace& workspace,
-        std::size_t depth,
-        float* values,
-        std::size_t* parallelCursor = nullptr,
-        TrainState* train = nullptr,
-        const float* strategySums = nullptr
+        const std::vector<double>& opponentReach,
+        const std::vector<double>& divisors,
+        Evaluation evaluation
+    ) const;
+    std::vector<float> EvaluateAverageBestResponse(
+        const float* strategySums,
+        std::size_t player,
+        const std::vector<double>& opponentReach,
+        const std::vector<double>& divisors
     ) const;
 
 private:
+    // Rank-major showdown table: sequential sweeps never chase Hand rows.
+    struct RankOrder
+    {
+        std::vector<std::uint16_t> ranks;
+        std::vector<std::uint16_t> hands;
+        std::vector<std::uint8_t> card0;
+        std::vector<std::uint8_t> card1;
+        std::vector<std::uint64_t> masks;
+    };
+    struct WorkspaceSize
+    {
+        std::array<std::size_t, 2> reach;
+        std::size_t childValues;
+        std::size_t accumulated;
+        std::size_t parallelValues;
+        std::size_t strategies;
+
+        std::uint64_t Bytes() const;
+    };
+    static WorkspaceSize SizeWorkspace(
+        std::size_t depth,
+        std::size_t actions,
+        const std::array<std::size_t, 2>& handCounts,
+        std::size_t chanceTasks
+    );
+    std::array<std::vector<std::uint64_t>, 2> handMasks;
+    std::vector<std::uint32_t> children;
+    std::vector<std::uint64_t> dealtCardMasks;
+    std::vector<std::array<RankOrder, 2>> rankRows;
+    std::array<int, kMaxHands> rowsByRunout;
+    std::size_t maxDepth = 1;
+
+    // Only the entry points construct policy combinations. Every read-only path
+    // uses exact runout accumulation, including checkpoints on a training layout.
+    struct WalkContext
+    {
+        std::size_t player;
+        const double* divisors;
+        const StrategySnapshot* strategy = nullptr;
+        const float* strategySums = nullptr;
+        TrainState* train = nullptr;
+        bool bestResponse = false;
+        bool useRunoutCache = false;
+    };
+    std::vector<float> EvaluateHands(const WalkContext& context, const std::vector<double>& opponentReach) const;
+    // All paths retain the entry policy in a row per depth. Training supplies a
+    // cursor only when consuming completed chance tasks in preorder.
+    void Walk(
+        std::uint32_t node,
+        const WalkContext& context,
+        Workspace& workspace,
+        std::size_t depth,
+        float* values,
+        std::size_t* parallelCursor = nullptr
+    ) const;
     struct ChanceGroup
     {
         std::uint32_t node;
@@ -125,7 +177,7 @@ private:
     // Counts are exact out of C(45, 2) legal runouts, independent of reach/payoffs.
     std::vector<FlopOutcomes> flopOutcomes_;
 
-    void PrepareChanceTasks();
+    void PrepareChanceTasks(const game::GameNode& root);
     void MatchRegrets(const Node& node, const TrainState& train, float* current) const;
     void PrepareFlopRunout();
     void EvaluateFlopRunout(const Node& node, std::size_t player, const double* opponentReach, const double* divisors, float* values) const;
@@ -145,7 +197,7 @@ private:
         const double* opponentReach,
         const double* divisors,
         float* values,
-        bool useCache = true
+        bool useCache
     ) const;
 };
 } // namespace solver::engine

@@ -113,7 +113,10 @@ ReachCalculator::JointReachMasses ReachCalculator::PropagateActionReach(
         const core::HoleCards hand = player == core::PlayerId::Player0() ? jointReach.player0Hand : jointReach.player1Hand;
         auto probabilityIt = actionProbabilities.find(hand);
         if (probabilityIt == actionProbabilities.end())
-            probabilityIt = actionProbabilities.emplace(hand, result_.Strategy().StrategyOrUniform({nodeId, hand})[childIndex]).first;
+        {
+            const float probability = result_.Strategy().ActionProbability({nodeId, hand}, childIndex);
+            probabilityIt = actionProbabilities.emplace(hand, probability).first;
+        }
 
         const float jointReachMass = jointReach.jointReachMass * probabilityIt->second;
         if (jointReachMass > 0.0f)
@@ -135,7 +138,7 @@ ReachCalculator::PlayerOwnReachWeights ReachCalculator::PropagateOwnReach(
     {
         if (core::Overlaps(hand, node.State().board))
             continue;
-        weight *= result_.Strategy().StrategyOrUniform({nodeId, hand})[childIndex];
+        weight *= result_.Strategy().ActionProbability({nodeId, hand}, childIndex);
     }
     return propagatedReach;
 }

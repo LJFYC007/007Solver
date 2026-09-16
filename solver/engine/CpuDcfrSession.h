@@ -1,7 +1,7 @@
 #pragma once
 
 #include "engine/HandTraversal.h"
-#include "engine/SolveResult.h"
+#include "engine/StrategyEvaluator.h"
 #include "engine/StrategySnapshot.h"
 #include <array>
 #include <cstdint>

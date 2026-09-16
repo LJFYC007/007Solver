@@ -1,23 +1,12 @@
 import type { CSSProperties } from "react";
 import { strategyGradient } from "../solver";
+import type { DetailAction, DetailCombo } from "../solver/study";
 import { Card } from "./PlayingCards";
 
 function frequency(probability: number) {
     return probability > 0 && probability < 0.001 ? "<0.1" : (probability * 100).toFixed(1);
 }
 
-export interface DetailAction {
-    id: string;
-    label: string;
-    color: string;
-    probability: number;
-}
-export interface DetailCombo {
-    cards: string[];
-    weight: number;
-    actions: DetailAction[];
-    description?: string;
-}
 export default function HandDetails({ label, combos }: { label: string; combos: DetailCombo[] }) {
     const columns = label.endsWith("s") ? 2 : 3;
     const actionCount = Math.max(1, ...combos.map((c) => c.actions.length));

@@ -3,6 +3,7 @@
 #include "core/Card.h"
 #include "game/CompiledGame.h"
 #include "game/Identifiers.h"
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -19,6 +20,7 @@ class StrategySnapshot
 {
 public:
     StrategySnapshot(std::shared_ptr<const game::CompiledGame> game, std::vector<StrategyEntry> entries);
+    static std::uint64_t EstimateStorageBytes(std::size_t nodes, std::size_t hands, std::size_t probabilities);
 
     // Borrows one node's sorted hands and hand-major probabilities from this snapshot.
     // Destruction, move or assignment of the snapshot invalidates the view.
@@ -34,6 +36,8 @@ public:
     const game::CompiledGame& Game() const { return *game_; }
     // Borrowed probabilities: length is the node's action count; invalidated by destruction, move or assignment.
     const float* FindStrategy(const game::InfoSetKey& infoSet) const;
+    // The action must belong to this decision node; missing hands use uniform play.
+    float ActionProbability(const game::InfoSetKey& infoSet, std::size_t action) const;
     std::vector<float> StrategyOrUniform(const game::InfoSetKey& infoSet) const;
 
 private:

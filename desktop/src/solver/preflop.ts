@@ -50,6 +50,14 @@ export interface PreflopState {
     complete: boolean;
 }
 
+export function preflopOutcome(state: PreflopState, stack: number) {
+    if (!state.complete) return "incomplete";
+    const alive = state.seats.filter((seat) => !seat.folded);
+    if (alive.length === 1) return "fold";
+    if (alive.filter((seat) => seat.committed < stack).length < 2) return "allIn";
+    return alive.length === 2 ? "headsUp" : "multiway";
+}
+
 export function replayPreflop(format: TableFormat, history: PreflopChoice[]): PreflopState {
     const solution = solutionFor(format);
     const seats: PreflopSeat[] = solution.positions.map((position) => ({
@@ -117,7 +125,6 @@ export interface PostflopScenario {
     initialPot: number;
     heroStack: number;
     villainStack: number;
-    algorithm: "dcfr";
     iterations: number;
     accuracyPercent: number;
     ranges: Record<string, Record<string, number>>;
@@ -134,7 +141,7 @@ export function postflopScenario(
     const solution = solutionFor(format);
     const alive = state.seats.filter((seat) => !seat.folded);
     if (!state.complete || alive.length !== 2) throw new Error("Select a completed heads-up preflop line.");
-    if (alive.some((seat) => seat.committed >= solution.stack))
+    if (preflopOutcome(state, solution.stack) === "allIn")
         throw new Error("Betting is complete after the all-in call.");
     if (board.length !== 3 || new Set(board).size !== 3 || board.some((card) => !/^[AKQJT2-9][shdc]$/.test(card)))
         throw new Error("Select three different flop cards.");
@@ -162,7 +169,6 @@ export function postflopScenario(
         initialPot: state.pot,
         heroStack: solution.stack - hero.committed,
         villainStack: solution.stack - villain.committed,
-        algorithm: "dcfr",
         iterations,
         accuracyPercent,
         ranges: { [hero.position]: hero.range, [villain.position]: villain.range },

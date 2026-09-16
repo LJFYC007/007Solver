@@ -159,6 +159,10 @@ summary:focus-visible {
 .solution-settings-actions button:hover {
     background: var(--surface-hover);
 }
+.quiet-button:hover:not(:disabled),
+.board-selection-tools button:hover:not(:disabled) {
+    background: var(--surface-hover);
+}
 .solution-dialog {
     width: 370px;
     padding: 0;
@@ -1001,6 +1005,46 @@ summary:focus-visible {
     color: var(--text-muted);
     font-size: 10px;
 }
+.solve-settings {
+    margin: 0 10px 8px;
+    font-size: 12px;
+}
+.solve-settings summary {
+    cursor: pointer;
+    color: var(--text-secondary);
+    padding: 5px 0;
+}
+.solve-settings label {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 6px;
+}
+
+.solve-phase {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+}
+.solve-phase small {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.solve-setup progress {
+    display: block;
+    width: calc(100% - 20px);
+    margin: 0 10px 10px;
+    accent-color: var(--accent);
+}
+.solve-setup .solve-context {
+    display: block;
+    padding: 0 10px 8px;
+    font-size: 12px;
+}
+.cancel-solve {
+    margin: 0 10px 10px;
+}
 .solve-button {
     padding: 10px 16px;
     border: 0;
@@ -1012,6 +1056,9 @@ summary:focus-visible {
 }
 .solve-button:disabled {
     opacity: 0.35;
+}
+.solve-button:hover:not(:disabled) {
+    filter: brightness(1.06);
 }
 .board-card {
     position: relative;
@@ -1049,6 +1096,16 @@ summary:focus-visible {
 }
 .board-card b {
     font-weight: 700;
+}
+.board-card .card-suit {
+    position: absolute;
+    right: 3px;
+    bottom: 2px;
+    font-size: 0.28em;
+    line-height: 1;
+}
+.board-card:has(.card-suit) b {
+    transform: translateY(-3px);
 }
 .board-card.empty {
     background: var(--surface-control);
@@ -1121,6 +1178,21 @@ summary:focus-visible {
 .board-selection > button:disabled .empty {
     opacity: 0.3;
     border-style: solid;
+}
+.board-slot-label {
+    display: block;
+    margin-top: 5px;
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+.board-selection > button:nth-child(4) {
+    margin-left: 10px;
+}
+.board-selection > button:disabled .board-slot-label {
+    color: var(--text-muted);
+}
+.board-selection > button[aria-pressed="true"] .board-slot-label {
+    color: var(--accent);
 }
 .board-selection-tools {
     display: flex;
@@ -1200,88 +1272,6 @@ summary:focus-visible {
         height: 25px;
         font-size: 18px;
     }
-}
-@media (max-height: 780px) {
-    .app-shell {
-        grid-template-rows: 33px 123px minmax(0, 1fr);
-    }
-    .action-cards > button {
-        height: 87px;
-    }
-}
-
-/* Compact controls share the same neutral and focus treatment across streets. */
-.quiet-button:hover:not(:disabled),
-.board-selection-tools button:hover:not(:disabled) {
-    background: var(--surface-hover);
-}
-.solve-button:hover:not(:disabled) {
-    filter: brightness(1.06);
-}
-.board-card .card-suit {
-    position: absolute;
-    right: 3px;
-    bottom: 2px;
-    font-size: 0.28em;
-    line-height: 1;
-}
-.board-card:has(.card-suit) b {
-    transform: translateY(-3px);
-}
-.board-slot-label {
-    display: block;
-    margin-top: 5px;
-    font-size: 10px;
-    color: var(--text-secondary);
-}
-.board-selection > button:nth-child(4) {
-    margin-left: 10px;
-}
-.board-selection > button:disabled .board-slot-label {
-    color: var(--text-muted);
-}
-.board-selection > button[aria-pressed="true"] .board-slot-label {
-    color: var(--accent);
-}
-
-.solve-settings {
-    margin: 0 10px 8px;
-    font-size: 12px;
-}
-.solve-settings summary {
-    cursor: pointer;
-    color: var(--text-secondary);
-    padding: 5px 0;
-}
-.solve-settings label {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    padding-top: 6px;
-}
-
-.solve-phase {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: 13px;
-}
-.solve-phase small {
-    font-size: 12px;
-    color: var(--text-secondary);
-}
-.solve-setup progress {
-    display: block;
-    width: calc(100% - 20px);
-    margin: 0 10px 10px;
-    accent-color: var(--accent);
-}
-.solve-setup .solve-context {
-    display: block;
-    padding: 0 10px 8px;
-    font-size: 12px;
-}
-@media (max-width: 1200px) {
     .combo-grid.three-columns {
         grid-auto-rows: minmax(calc(34px + var(--action-count) * 24px), 1fr);
     }
@@ -1292,7 +1282,11 @@ summary:focus-visible {
         font-size: 23px;
     }
 }
-
-.cancel-solve {
-    margin: 0 10px 10px;
+@media (max-height: 780px) {
+    .app-shell {
+        grid-template-rows: 33px 123px minmax(0, 1fr);
+    }
+    .action-cards > button {
+        height: 87px;
+    }
 }
