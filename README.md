@@ -45,10 +45,10 @@ Mac packages link to the build machine's Homebrew `libomp` path without bundling
 For a small CLI solve after building the service:
 
 ```sh
-./build/release/solver/solver_service resources/default.json
+./build/release/solver/solver_service tests/fixtures/weighted-flop.json
 ```
 
-On Windows, append `.exe`. Use `--stdin` instead of the file path to send a scenario as the first JSON line, followed by query lines. `iterations` is the update limit; optional `accuracyPercent` is a positive percentage of the initial pot and defaults to `0.01`. The example and parser are [resources/default.json](resources/default.json) and [ScenarioLoader.cpp](solver/io/ScenarioLoader.cpp).
+On Windows, append `.exe`. Use `--stdin` instead of the file path to send a scenario as the first JSON line, followed by query lines. `iterations` is the update limit; optional `accuracyPercent` is a positive percentage of the initial pot and defaults to `0.01`. The example and parser are [weighted-flop.json](tests/fixtures/weighted-flop.json) and [ScenarioLoader.cpp](solver/io/ScenarioLoader.cpp).
 
 ## Checks
 
@@ -81,7 +81,7 @@ Hooks may fix formatting. Use `pre-commit run --all-files` when a whole-reposito
 - [solver/](solver/): C++ solver and service; read [ARCHITECTURE.md](solver/ARCHITECTURE.md) for shared semantics and ownership.
 - [desktop/src/](desktop/src/) and [desktop/src-tauri/](desktop/src-tauri/): React UI and Rust bridge.
 - [tests/](tests/): correctness tests, benchmark and independent oracle.
-- [resources/](resources/) and [scripts/](scripts/): captured ranges, CLI example and tooling.
+- [resources/](resources/) and [scripts/](scripts/): captured ranges and tooling.
 - [AGENTS.md](AGENTS.md): contribution constraints and verification rules.
 
 Build targets, scripts and hooks are defined in [CMakeLists.txt](CMakeLists.txt), [CMakePresets.json](CMakePresets.json), [desktop/package.json](desktop/package.json) and [.pre-commit-config.yaml](.pre-commit-config.yaml).

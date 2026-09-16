@@ -7,6 +7,37 @@
     "heroStack": 15.0,
     "villainStack": 15.0,
     "iterations": 3000,
+    "bettingTree": {
+        "flop": {
+            "bet": [
+                50,
+                100
+            ],
+            "raise": [
+                50
+            ]
+        },
+        "turn": {
+            "bet": [
+                50,
+                100
+            ],
+            "raise": [
+                50
+            ]
+        },
+        "river": {
+            "bet": [
+                50,
+                100
+            ],
+            "raise": [
+                50
+            ]
+        },
+        "maxRaises": 2,
+        "allInSpr": 0.15
+    },
     "ranges": {
         "UTG": {
             "55": 0.05207601,
@@ -14,7 +45,7 @@
             "77": 0.285,
             "88": 0.2281,
             "99": 0.208020802080208,
-            "AA": 0.3169366,
+            "AA": 0.31703170317031704,
             "AKs": 0.674,
             "AQs": 0.9996,
             "AJs": 0.7754,
@@ -39,7 +70,7 @@
             "66": 0.0478,
             "77": 0.0217,
             "88": 0.0102,
-            "AA": 0.9994,
+            "AA": 1.0,
             "AKs": 1.0,
             "AQs": 0.0029,
             "AJs": 0.153,
@@ -52,7 +83,7 @@
             "A3s": 0.0543,
             "A2s": 0.196,
             "AKo": 0.3384,
-            "KK": 0.9999,
+            "KK": 1.0,
             "KQs": 0.5965,
             "KJs": 0.2919,
             "KTs": 0.4294,
@@ -84,7 +115,7 @@
     },
     "rangeSource": {
         "catalog": "resources/gtowizard-preflop",
-        "sha256": "8ffd54ced0567b6c6264e0faee7c18185b71b94e7c7efe1c42d1d3913f150b51",
+        "sha256": "5f41502181c1777114f9ac5a72df24486e6ee8d6b22b8768f6a0d502bc83b741",
         "solution": "8max",
         "history": [
             {
@@ -126,11 +157,5 @@
         ],
         "retainedClasses": null,
         "reduction": "Postflop pot/stacks are reduced for runtime; retained hand classes, when listed, are a test subset. Source weights are not rounded or rescaled."
-    },
-    "benchmark": {
-        "betPercentages": [
-            50,
-            100
-        ]
     }
 }

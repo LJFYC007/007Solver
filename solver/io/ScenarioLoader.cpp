@@ -2,6 +2,7 @@
 #include "core/Card.h"
 #include "core/Chips.h"
 #include "io/RangeNotationParser.h"
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -43,6 +44,53 @@ core::Range LoadRange(const Json& ranges, const std::string& position)
         weightedHandClasses.emplace_back(handClass, weight.get<float>());
     return ParseRangeNotation(weightedHandClasses);
 }
+
+std::vector<std::int64_t> ParsePercentages(const Json& values, const std::string& field)
+{
+    if (!values.is_array())
+        throw std::runtime_error(field + " must be an array of positive percentages");
+    std::vector<std::int64_t> percentages;
+    for (const auto& value : values)
+    {
+        if (!value.is_number())
+            throw std::runtime_error(field + " must contain numbers");
+        const double percent = value.get<double>();
+        const double scaled = percent * 100.0;
+        if (!std::isfinite(percent) || scaled < 1.0 || scaled > std::numeric_limits<std::int32_t>::max() ||
+            std::abs(scaled - std::round(scaled)) > 1e-6)
+            throw std::runtime_error(field + " must contain positive percentages with at most two decimal places");
+        percentages.push_back(static_cast<std::int64_t>(std::llround(scaled)));
+    }
+    return percentages;
+}
+
+game::BettingAbstraction ParseBettingTree(const Json& json)
+{
+    const auto& tree = json.at("bettingTree");
+    if (!tree.is_object())
+        throw std::runtime_error("bettingTree must be an object");
+    std::array<game::StreetBettingSizes, 3> streets;
+    const std::array<std::string, 3> streetNames{"flop", "turn", "river"};
+    for (std::size_t i = 0; i < streetNames.size(); ++i)
+    {
+        const auto& name = streetNames[i];
+        const auto& street = tree.at(name);
+        if (!street.is_object())
+            throw std::runtime_error("bettingTree." + name + " must be an object");
+        auto& sizes = streets[i];
+        for (const auto percent : ParsePercentages(street.at("bet"), "bettingTree." + name + ".bet"))
+            sizes.betSizes.push_back({game::BetSizeKind::PotFractionOfCurrentPot, percent, 10000, {}});
+        for (const auto percent : ParsePercentages(street.at("raise"), "bettingTree." + name + ".raise"))
+            sizes.raiseSizes.push_back({game::RaiseSizeKind::PotFractionOfPotAfterCallAsRaiseBy, percent, 10000, {}});
+    }
+    const auto& maxRaises = tree.at("maxRaises");
+    if (!maxRaises.is_number_unsigned() || maxRaises.get<std::uint64_t>() > 2)
+        throw std::runtime_error("bettingTree.maxRaises must be 0, 1 or 2 (excluding the opening bet)");
+    const auto& allInSpr = tree.at("allInSpr");
+    if (!allInSpr.is_number() || !std::isfinite(allInSpr.get<double>()) || allInSpr.get<double>() < 0.0)
+        throw std::runtime_error("bettingTree.allInSpr must be a finite non-negative number");
+    return {std::move(streets), maxRaises.get<std::uint32_t>(), allInSpr.get<double>()};
+}
 } // namespace
 
 Scenario LoadScenario(const std::string& jsonPath)
@@ -83,7 +131,7 @@ Scenario ReadScenario(std::istream& input)
                 ParseChips(json.at("villainStack"), "villainStack"),
             },
             json.at("heroActsFirst").get<bool>() ? core::PlayerId::Player0() : core::PlayerId::Player1(),
-            game::BettingAbstraction::Default(),
+            ParseBettingTree(json),
         },
         core::RangeSet(LoadRange(ranges, heroPosition), LoadRange(ranges, villainPosition)),
         iterations,

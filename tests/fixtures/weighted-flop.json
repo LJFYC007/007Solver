@@ -7,19 +7,47 @@
     "heroStack": 4.0,
     "villainStack": 4.0,
     "iterations": 200,
+    "bettingTree": {
+        "flop": {
+            "bet": [
+                50
+            ],
+            "raise": [
+                50
+            ]
+        },
+        "turn": {
+            "bet": [
+                50
+            ],
+            "raise": [
+                50
+            ]
+        },
+        "river": {
+            "bet": [
+                50
+            ],
+            "raise": [
+                50
+            ]
+        },
+        "maxRaises": 2,
+        "allInSpr": 0.15
+    },
     "ranges": {
         "UTG": {
             "AKs": 0.326,
             "QQ": 0.042
         },
         "BB": {
-            "KK": 0.41975802,
+            "KK": 0.4198,
             "A5s": 0.19009599040095992
         }
     },
     "rangeSource": {
         "catalog": "resources/gtowizard-preflop",
-        "sha256": "8ffd54ced0567b6c6264e0faee7c18185b71b94e7c7efe1c42d1d3913f150b51",
+        "sha256": "5f41502181c1777114f9ac5a72df24486e6ee8d6b22b8768f6a0d502bc83b741",
         "solution": "8max",
         "history": [
             {

@@ -57,14 +57,6 @@ core::Chips ResolveRaiseAmountTo(const RaiseSize& size, const PublicState& state
 }
 } // namespace
 
-BettingAbstraction BettingAbstraction::Default()
-{
-    BettingAbstraction abstraction;
-    abstraction.betSizes.push_back({BetSizeKind::PotFractionOfCurrentPot, 1, 2, core::Chips{}});
-    abstraction.raiseSizes.push_back({RaiseSizeKind::PotFractionOfPotAfterCallAsRaiseBy, 1, 2, core::Chips{}});
-    return abstraction;
-}
-
 std::vector<BettingAction> BettingAbstraction::SelectActions(const PublicState& state, const LegalActionSet& legalActions) const
 {
     std::vector<BettingAction> actions = legalActions.passiveActions;
@@ -72,10 +64,19 @@ std::vector<BettingAction> BettingAbstraction::SelectActions(const PublicState& 
         return actions;
 
     const AggressiveActionRange& range = *legalActions.aggression;
+    if (range.kind == BettingActionKind::Raise && state.raiseCount >= maxRaises)
+        return actions;
+    const auto& sizes = streets.at(static_cast<std::size_t>(state.street));
     const auto addAmountTo = [&](core::Chips amountTo)
     {
         // A configured size always yields legal aggression, including a short all-in.
         amountTo = std::min(range.maximumAmountTo, std::max(range.minimumAmountTo, amountTo));
+
+        const std::int64_t potAfterCall = static_cast<std::int64_t>(state.pot.Raw()) + 2LL * amountTo.Raw() -
+                                          state.Contribution(state.playerToAct).Raw() - state.Contribution(state.playerToAct.Other()).Raw();
+        const auto remaining = range.maximumAmountTo.Raw() - amountTo.Raw();
+        if (allInSpr > 0.0 && static_cast<double>(remaining) / static_cast<double>(potAfterCall) <= allInSpr)
+            amountTo = range.maximumAmountTo;
 
         const bool duplicate =
             std::any_of(actions.begin(), actions.end(), [&](const BettingAction& action) { return action.AmountTo() == amountTo; });
@@ -85,22 +86,15 @@ std::vector<BettingAction> BettingAbstraction::SelectActions(const PublicState& 
 
     if (range.kind == BettingActionKind::Bet)
     {
-        for (const BetSize& size : betSizes)
+        for (const BetSize& size : sizes.betSizes)
             addAmountTo(ResolveBetAmountTo(size, state));
-    }
-    else if (state.raiseCount >= maxNonAllInRaises)
-    {
-        addAmountTo(range.maximumAmountTo);
     }
     else
     {
-        for (const RaiseSize& size : raiseSizes)
+        for (const RaiseSize& size : sizes.raiseSizes)
             addAmountTo(ResolveRaiseAmountTo(size, state, range.passiveAmountTo));
     }
 
-    const bool includeMaximum = range.kind == BettingActionKind::Bet ? includeMaximumBet : includeMaximumRaise;
-    if (includeMaximum)
-        addAmountTo(range.maximumAmountTo);
     return actions;
 }
 } // namespace solver::game

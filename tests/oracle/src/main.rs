@@ -6,26 +6,28 @@ const SCALE: f32 = 500.0;
 const MAX_REFERENCE_ITERATIONS: u32 = 100_000;
 const REVISION: &str = "9d1509fe5077d019825f833eed04b16d342dfda1";
 
-// Use the independent engine's legal actions and public tree editing API. Keep one
-// ordinary raise per street, then only a shove; reset the count at chance boundaries.
-fn cap_raises(tree: &mut ActionTree, raises: usize) {
+// Apply the configured cap through the independent engine's public tree editing API.
+// Opening bets are excluded; reset the raise count at chance boundaries.
+fn cap_raises(tree: &mut ActionTree, raises: usize, maximum: usize, facing_bet: bool) {
     if tree.is_terminal_node() {
         return;
     }
     let raises = if tree.is_chance_node() { 0 } else { raises };
+    let facing_bet = !tree.is_chance_node() && facing_bet;
     let actions = tree.available_actions().to_vec();
-    let ordinary_raise = actions.iter().any(|a| matches!(a, Action::Raise(_)));
     for action in actions {
-        if (raises >= 1 && matches!(action, Action::Raise(_)))
-            || (raises == 0 && ordinary_raise && matches!(action, Action::AllIn(_)))
-        {
+        let is_raise = matches!(action, Action::Raise(_))
+            || (facing_bet && matches!(action, Action::AllIn(_)));
+        if raises >= maximum && is_raise {
             tree.remove_action(action).unwrap();
             continue;
         }
         tree.play(action).unwrap();
         cap_raises(
             tree,
-            raises + usize::from(matches!(action, Action::Raise(_))),
+            raises + usize::from(is_raise),
+            maximum,
+            matches!(action, Action::Bet(_) | Action::Raise(_) | Action::AllIn(_)),
         );
         tree.undo().unwrap();
     }
@@ -54,35 +56,39 @@ fn game_for(scenario: &Value) -> PostFlopGame {
         turn: NOT_DEALT,
         river: NOT_DEALT,
     };
-    let bet_percentages = scenario
-        .get("benchmark")
-        .map(|benchmark| benchmark["betPercentages"].as_array().unwrap().clone())
-        .unwrap_or_else(|| vec![json!(50)]);
-    let mut bets = bet_percentages
-        .iter()
-        .map(|percent| format!("{}%", percent.as_u64().unwrap()))
-        .collect::<Vec<_>>();
-    let wide = scenario.get("benchmark").is_some();
-    if wide {
-        bets.push("a".to_owned());
-    }
-    let bet_sizes = bets.join(", ");
-    let sizes =
-        BetSizeOptions::try_from((bet_sizes.as_str(), if wide { "a" } else { "50%, a" })).unwrap();
+    let percentages = |values: &Value| {
+        values
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|percent| format!("{}%", percent.as_f64().unwrap()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let sizes = |street: &str| {
+        let bets = percentages(&scenario["bettingTree"][street]["bet"]);
+        let raises = percentages(&scenario["bettingTree"][street]["raise"]);
+        let sizes = BetSizeOptions::try_from((bets.as_str(), raises.as_str())).unwrap();
+        [sizes.clone(), sizes]
+    };
     let tree = TreeConfig {
         initial_state: BoardState::Flop,
         starting_pot: (scenario["initialPot"].as_f64().unwrap() * SCALE as f64).round() as i32,
         effective_stack: (scenario["heroStack"].as_f64().unwrap() * SCALE as f64).round() as i32,
-        flop_bet_sizes: [sizes.clone(), sizes.clone()],
-        turn_bet_sizes: [sizes.clone(), sizes.clone()],
-        river_bet_sizes: [sizes.clone(), sizes],
-        // Defaults disable rake, automatic all-in and size merging.
+        flop_bet_sizes: sizes("flop"),
+        turn_bet_sizes: sizes("turn"),
+        river_bet_sizes: sizes("river"),
+        force_allin_threshold: scenario["bettingTree"]["allInSpr"].as_f64().unwrap(),
+        // Defaults disable rake, additional all-ins and merging of nearby sizes.
         ..Default::default()
     };
     let mut tree = ActionTree::new(tree).unwrap();
-    if !wide {
-        cap_raises(&mut tree, 0);
-    }
+    cap_raises(
+        &mut tree,
+        0,
+        scenario["bettingTree"]["maxRaises"].as_u64().unwrap() as usize,
+        false,
+    );
     let mut game = PostFlopGame::with_config(cards, tree).unwrap();
     game.allocate_memory(false);
     game
@@ -215,7 +221,10 @@ fn main() {
         // These values avoid different chip rounding / minimum-bet rules in the two solvers.
         assert_eq!(scenario["initialPot"], 5.0);
         assert_eq!(scenario["heroStack"], 15.0);
-        assert_eq!(scenario["benchmark"]["betPercentages"], json!([50, 100]));
+        for street in ["flop", "turn", "river"] {
+            assert_eq!(scenario["bettingTree"][street]["bet"], json!([50, 100]));
+            assert_eq!(scenario["bettingTree"][street]["raise"], json!([50]));
+        }
         let mut game = game_for(&scenario);
         let uniform = metrics(&game);
         let exploitability = solve(&mut game, MAX_REFERENCE_ITERATIONS, SCALE * 1e-5, true) / SCALE;

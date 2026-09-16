@@ -46,6 +46,16 @@ Joint reach is normalized at the root, not at every node. A hand can have positi
 
 Each chance outcome has probability `1 / (52 - boardCardCount - 4)` for a compatible private-hand pair. Called all-ins still include every legal remaining runout. Exploitability measures the chosen betting tree and does not account for omitted action sizes.
 
+## Betting tree
+
+Every scenario supplies a complete `bettingTree` that configures `flop`, `turn` and `river` independently. Each street requires `bet` and `raise` arrays of positive percentages (up to two decimal places); an empty array disables that aggression. `maxRaises` and `allInSpr` are also required. Both players use the same settings. The desktop initializes bets and raises to `[50]`, `maxRaises` to `2` and `allInSpr` to `0.15`. See [the correctness fixture](../tests/fixtures/weighted-flop.json).
+
+Bet percentages use the current pot. Raise percentages specify the additional raise above a call, as a fraction of the pot after calling. Amounts round half up to tenths of a chip, then clamp to the legal minimum and effective-stack maximum.
+
+`maxRaises` accepts 0–2 and counts raises per street, excluding the opening bet. At the cap only call/fold remain; reaching the cap never forces a shove. `allInSpr` replaces a configured bet/raise with the effective-stack maximum when the remaining effective stack divided by the pot **after the opponent calls** is at most the threshold. Zero disables this replacement. Equal resulting sizes are deduplicated. No separate all-in size is added. The application, correctness fixtures and benchmark use the same scenario settings and build rules.
+
+All-in remains a property of a bet, raise or call, not a separate action kind. Covering the opponent's stack does not necessarily set `isAllIn` for the acting player.
+
 ## Preflop input
 
 The [catalog](../resources/gtowizard-preflop/) is the source of application and test ranges. Missing branches and missing continuation hands have no inferred fallback.

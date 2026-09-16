@@ -1,155 +1,180 @@
 {
-    "source": {
-        "chipScale": 500.0,
-        "repository": "https://github.com/b-inary/postflop-solver",
-        "revision": "9d1509fe5077d019825f833eed04b16d342dfda1"
-    },
-    "utg-bb-wide": {
-        "scenario": {
-            "board": "Ac Kh Qs",
-            "heroPosition": "UTG",
-            "villainPosition": "BB",
-            "heroActsFirst": false,
-            "initialPot": 5.0,
-            "heroStack": 15.0,
-            "villainStack": 15.0,
-            "iterations": 3000,
-            "ranges": {
-                "UTG": {
-                    "55": 0.05207601,
-                    "66": 0.19606522,
-                    "77": 0.285,
-                    "88": 0.2281,
-                    "99": 0.208020802080208,
-                    "AA": 0.3169366,
-                    "AKs": 0.674,
-                    "AQs": 0.9996,
-                    "AJs": 0.7754,
-                    "ATs": 0.3874,
-                    "A5s": 0.4532,
-                    "A4s": 0.0006,
-                    "AKo": 0.5053,
-                    "KK": 0.6191,
-                    "KQs": 0.1496,
-                    "QQ": 0.958,
-                    "JJ": 0.516951695169517,
-                    "JTs": 0.5495,
-                    "TT": 0.293,
-                    "T9s": 0.5703838800000001,
-                    "87s": 0.16043543999999998,
-                    "76s": 0.219978,
-                    "65s": 0.5558406,
-                    "54s": 0.11096547000000001
-                },
-                "BB": {
-                    "55": 0.0255,
-                    "66": 0.0478,
-                    "77": 0.0217,
-                    "88": 0.0102,
-                    "AA": 0.9994,
-                    "AKs": 1.0,
-                    "AQs": 0.0029,
-                    "AJs": 0.153,
-                    "ATs": 0.0846,
-                    "A8s": 0.0593,
-                    "A7s": 0.0345,
-                    "A6s": 0.2483,
-                    "A5s": 0.3236,
-                    "A4s": 0.4641,
-                    "A3s": 0.0543,
-                    "A2s": 0.196,
-                    "AKo": 0.3384,
-                    "KK": 0.9999,
-                    "KQs": 0.5965,
-                    "KJs": 0.2919,
-                    "KTs": 0.4294,
-                    "K9s": 0.0531,
-                    "K8s": 0.030303030303030304,
-                    "K7s": 0.2151,
-                    "K6s": 0.1643,
-                    "K5s": 0.0916,
-                    "K4s": 0.0897,
-                    "AQo": 0.0622,
-                    "QQ": 0.141,
-                    "QJs": 0.2522,
-                    "QTs": 0.018,
-                    "Q9s": 0.0885,
-                    "Q8s": 0.0078,
-                    "AJo": 0.09119088091190881,
-                    "JTs": 0.3214,
-                    "J9s": 0.0007,
-                    "J8s": 0.0045,
-                    "ATo": 0.0015,
-                    "T9s": 0.2777,
-                    "T8s": 0.0408,
-                    "98s": 0.058,
-                    "87s": 0.4347,
-                    "76s": 0.3028,
-                    "65s": 0.3405,
-                    "54s": 0.2802
-                }
-            },
-            "rangeSource": {
-                "catalog": "resources/gtowizard-preflop",
-                "sha256": "8ffd54ced0567b6c6264e0faee7c18185b71b94e7c7efe1c42d1d3913f150b51",
-                "solution": "8max",
-                "history": [
-                    {
-                        "actor": "UTG",
-                        "action": "Raise 2.5"
-                    },
-                    {
-                        "actor": "UTG1",
-                        "action": "Fold"
-                    },
-                    {
-                        "actor": "LJ",
-                        "action": "Fold"
-                    },
-                    {
-                        "actor": "HJ",
-                        "action": "Fold"
-                    },
-                    {
-                        "actor": "CO",
-                        "action": "Fold"
-                    },
-                    {
-                        "actor": "BTN",
-                        "action": "Fold"
-                    },
-                    {
-                        "actor": "SB",
-                        "action": "Fold"
-                    },
-                    {
-                        "actor": "BB",
-                        "action": "Raise 13"
-                    },
-                    {
-                        "actor": "UTG",
-                        "action": "Call"
-                    }
-                ],
-                "retainedClasses": null,
-                "reduction": "Postflop pot/stacks are reduced for runtime; retained hand classes, when listed, are a test subset. Source weights are not rounded or rescaled."
-            },
-            "benchmark": {
-                "betPercentages": [
-                    50,
-                    100
-                ]
-            }
+  "source": {
+    "chipScale": 500.0,
+    "repository": "https://github.com/b-inary/postflop-solver",
+    "revision": "9d1509fe5077d019825f833eed04b16d342dfda1"
+  },
+  "utg-bb-wide": {
+    "scenario": {
+      "bettingTree": {
+        "allInSpr": 0.15,
+        "flop": {
+          "bet": [
+            50,
+            100
+          ],
+          "raise": [
+            50
+          ]
         },
-        "solved": {
-            "exploitability": 9.979247806768399e-06,
-            "heroBestResponseEv": -0.18932507932186127,
-            "villainBestResponseEv": 0.18934503197669983
+        "maxRaises": 2,
+        "river": {
+          "bet": [
+            50,
+            100
+          ],
+          "raise": [
+            50
+          ]
         },
-        "uniform": {
-            "exploitability": 4.1399312019348145,
-            "heroBestResponseEv": 3.4652175903320312,
-            "villainBestResponseEv": 4.8146443367004395
+        "turn": {
+          "bet": [
+            50,
+            100
+          ],
+          "raise": [
+            50
+          ]
         }
+      },
+      "board": "Ac Kh Qs",
+      "heroActsFirst": false,
+      "heroPosition": "UTG",
+      "heroStack": 15.0,
+      "initialPot": 5.0,
+      "iterations": 3000,
+      "rangeSource": {
+        "catalog": "resources/gtowizard-preflop",
+        "history": [
+          {
+            "action": "Raise 2.5",
+            "actor": "UTG"
+          },
+          {
+            "action": "Fold",
+            "actor": "UTG1"
+          },
+          {
+            "action": "Fold",
+            "actor": "LJ"
+          },
+          {
+            "action": "Fold",
+            "actor": "HJ"
+          },
+          {
+            "action": "Fold",
+            "actor": "CO"
+          },
+          {
+            "action": "Fold",
+            "actor": "BTN"
+          },
+          {
+            "action": "Fold",
+            "actor": "SB"
+          },
+          {
+            "action": "Raise 13",
+            "actor": "BB"
+          },
+          {
+            "action": "Call",
+            "actor": "UTG"
+          }
+        ],
+        "reduction": "Postflop pot/stacks are reduced for runtime; retained hand classes, when listed, are a test subset. Source weights are not rounded or rescaled.",
+        "retainedClasses": null,
+        "sha256": "5f41502181c1777114f9ac5a72df24486e6ee8d6b22b8768f6a0d502bc83b741",
+        "solution": "8max"
+      },
+      "ranges": {
+        "BB": {
+          "54s": 0.2802,
+          "55": 0.0255,
+          "65s": 0.3405,
+          "66": 0.0478,
+          "76s": 0.3028,
+          "77": 0.0217,
+          "87s": 0.4347,
+          "88": 0.0102,
+          "98s": 0.058,
+          "A2s": 0.196,
+          "A3s": 0.0543,
+          "A4s": 0.4641,
+          "A5s": 0.3236,
+          "A6s": 0.2483,
+          "A7s": 0.0345,
+          "A8s": 0.0593,
+          "AA": 1.0,
+          "AJo": 0.09119088091190881,
+          "AJs": 0.153,
+          "AKo": 0.3384,
+          "AKs": 1.0,
+          "AQo": 0.0622,
+          "AQs": 0.0029,
+          "ATo": 0.0015,
+          "ATs": 0.0846,
+          "J8s": 0.0045,
+          "J9s": 0.0007,
+          "JTs": 0.3214,
+          "K4s": 0.0897,
+          "K5s": 0.0916,
+          "K6s": 0.1643,
+          "K7s": 0.2151,
+          "K8s": 0.030303030303030304,
+          "K9s": 0.0531,
+          "KJs": 0.2919,
+          "KK": 1.0,
+          "KQs": 0.5965,
+          "KTs": 0.4294,
+          "Q8s": 0.0078,
+          "Q9s": 0.0885,
+          "QJs": 0.2522,
+          "QQ": 0.141,
+          "QTs": 0.018,
+          "T8s": 0.0408,
+          "T9s": 0.2777
+        },
+        "UTG": {
+          "54s": 0.11096547000000001,
+          "55": 0.05207601,
+          "65s": 0.5558406,
+          "66": 0.19606522,
+          "76s": 0.219978,
+          "77": 0.285,
+          "87s": 0.16043543999999998,
+          "88": 0.2281,
+          "99": 0.208020802080208,
+          "A4s": 0.0006,
+          "A5s": 0.4532,
+          "AA": 0.31703170317031704,
+          "AJs": 0.7754,
+          "AKo": 0.5053,
+          "AKs": 0.674,
+          "AQs": 0.9996,
+          "ATs": 0.3874,
+          "JJ": 0.516951695169517,
+          "JTs": 0.5495,
+          "KK": 0.6191,
+          "KQs": 0.1496,
+          "QQ": 0.958,
+          "T9s": 0.5703838800000001,
+          "TT": 0.293
+        }
+      },
+      "villainPosition": "BB",
+      "villainStack": 15.0
+    },
+    "solved": {
+      "exploitability": 9.94873062154511e-6,
+      "heroBestResponseEv": -0.18671075999736786,
+      "villainBestResponseEv": 0.18673065304756165
+    },
+    "uniform": {
+      "exploitability": 4.1353936195373535,
+      "heroBestResponseEv": 3.4101994037628174,
+      "villainBestResponseEv": 4.8605875968933105
     }
+  }
 }

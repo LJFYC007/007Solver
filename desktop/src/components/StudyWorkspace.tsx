@@ -23,6 +23,8 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
         setIterations,
         accuracyPercent,
         setAccuracyPercent,
+        bettingTree,
+        changeBettingTree,
         error,
         picker,
         navigation,
@@ -202,6 +204,8 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                             accuracyPercent={accuracyPercent}
                             onIterations={setIterations}
                             onAccuracyPercent={setAccuracyPercent}
+                            bettingTree={bettingTree}
+                            onBettingTree={(value) => void changeBettingTree(value)}
                             onBoard={openFlop}
                             onSolve={() => (root ? viewPost(navigation.activeIndex) : void solve())}
                             onResolve={() => void solve()}

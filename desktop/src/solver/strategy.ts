@@ -33,8 +33,7 @@ export function actionLabel(action: Pick<DecisionAction, "amountTo" | "chipsComm
     if (action.kind === "fold") return "Fold";
     if (action.kind === "check") return "Check";
     if (action.kind === "call") return "Call";
-    if (action.isAllIn) return `Allin ${formatNumber(action.amountTo)}`;
-    return `${action.kind === "bet" ? "Bet" : "Raise"} ${formatNumber(action.amountTo)}`;
+    return `${action.kind === "bet" ? "Bet" : "Raise"} ${formatNumber(action.amountTo)}${action.isAllIn ? " (all-in)" : ""}`;
 }
 
 export function actionColor(action: Pick<DecisionAction, "isAllIn" | "kind">): string {

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import type { SolverStatus } from "../solver";
 import { BoardCard } from "./PlayingCards";
+import BettingTreeSettings from "./BettingTreeSettings";
+import type { BettingTreeDraft } from "../solver/bettingTree";
 
 export default function SolvePanel({
     board,
@@ -17,6 +19,8 @@ export default function SolvePanel({
     onCancel,
     onIterations,
     onAccuracyPercent,
+    bettingTree,
+    onBettingTree,
 }: {
     board: string[];
     status: SolverStatus;
@@ -32,6 +36,8 @@ export default function SolvePanel({
     onCancel: () => void;
     onIterations: (value: number) => void;
     onAccuracyPercent: (value: number) => void;
+    bettingTree: BettingTreeDraft;
+    onBettingTree: (value: BettingTreeDraft) => void;
 }) {
     const progress = status.state === "solving" ? status : undefined;
     const sample = progress?.elapsedSeconds;
@@ -162,6 +168,7 @@ export default function SolvePanel({
                     )}
                 </details>
             )}
+            <BettingTreeSettings value={bettingTree} disabled={busy || changing} onChange={onBettingTree} />
             <small className="solve-context">{context}</small>
         </section>
     );

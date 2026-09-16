@@ -154,19 +154,8 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
         kTolerance
     );
     auto scenario = io::LoadScenario(fixturePath);
-    const auto& betPercentages = input.at("benchmark").at("betPercentages");
-    ASSERT_EQ(betPercentages, Json::array({50, 100}));
     ASSERT_EQ(input.at("heroStack"), 15.0);
     ASSERT_EQ(input.at("villainStack"), 15.0);
-    // Benchmark-only sizing; the external oracle reads the same fixture list.
-    scenario.game.bettingAbstraction.betSizes.clear();
-    // Keep this larger, historical workload fixed to measure storage/traversal changes
-    // against the same independent reference, regardless of the desktop preset.
-    scenario.game.bettingAbstraction.raiseSizes.clear();
-    scenario.game.bettingAbstraction.includeMaximumBet = true;
-    scenario.game.bettingAbstraction.includeMaximumRaise = true;
-    for (const auto& percent : betPercentages)
-        scenario.game.bettingAbstraction.betSizes.push_back({game::BetSizeKind::PotFractionOfCurrentPot, percent.get<int>(), 100, {}});
     const auto problem =
         std::make_shared<const engine::SolveProblem>(engine::SolveProblem{game::CompileGame(scenario.game), std::move(scenario.ranges)});
     const int iterations = iterationBudget == 0 ? scenario.iterations : iterationBudget;
@@ -220,7 +209,7 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
         {
             const int remaining = iterations - session->CompletedIterations();
             session->Run(
-                checkConvergence ? std::min(200, remaining) : remaining,
+                checkConvergence ? (std::min)(200, remaining) : remaining,
                 [&](int completed)
                 {
                     if (completed - lastProgress >= 100 || completed == iterations)

@@ -2,7 +2,9 @@
 
 #include "core/Chips.h"
 #include "game/BettingAction.h"
+#include <array>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace solver::game
@@ -38,17 +40,24 @@ struct RaiseSize
     core::Chips absoluteAmountTo;
 };
 
-struct BettingAbstraction
+struct StreetBettingSizes
 {
     std::vector<BetSize> betSizes;
     std::vector<RaiseSize> raiseSizes;
-    // Append the effective-stack maximum in addition to explicitly configured sizes.
-    bool includeMaximumBet = false;
-    bool includeMaximumRaise = false;
-    // After this many raises on a street, further aggression uses the effective-stack cap.
-    std::uint32_t maxNonAllInRaises = 1;
+};
 
-    static BettingAbstraction Default();
+struct BettingAbstraction
+{
+    BettingAbstraction(std::array<StreetBettingSizes, 3> streetSizes, std::uint32_t maximumRaises, double allInThreshold)
+        : streets(std::move(streetSizes)), maxRaises(maximumRaises), allInSpr(allInThreshold)
+    {}
+
+    // Flop, turn, river; both players use the same sizes on each street.
+    std::array<StreetBettingSizes, 3> streets;
+    // The opening bet does not count. At the cap, only passive actions remain.
+    std::uint32_t maxRaises;
+    // Replace a configured size when the effective SPR after a call is at most this value.
+    double allInSpr;
 
     std::vector<BettingAction> SelectActions(const PublicState& state, const LegalActionSet& legalActions) const;
 };

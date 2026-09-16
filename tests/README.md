@@ -36,7 +36,7 @@ For comparisons, rebuild the changed source, run without competing builds/solves
 
 ## Updating inputs and references
 
-All range inputs derive from [the captured GTO Wizard catalog](../resources/gtowizard-preflop/). To refresh fixtures and the CLI example after a catalog or subset change:
+All range inputs derive from [the captured GTO Wizard catalog](../resources/gtowizard-preflop/). To refresh fixtures after a catalog or subset change:
 
 ```sh
 python3 scripts/sync-preflop-fixtures.py

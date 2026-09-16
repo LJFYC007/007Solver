@@ -3,6 +3,7 @@ import { isForcedRunout, type ChanceNode, type SolverNode, type SolverStatus } f
 import { choiceKey, solutionFor, type PreflopChoice, type TableFormat } from "../solver/catalog";
 import { postflopScenario, preflopOutcome, replayPreflop, type PostflopScenario } from "../solver/preflop";
 import { buildStudyView } from "../solver/study";
+import { defaultBettingTree, parseBettingTree, type BettingTreeDraft } from "../solver/bettingTree";
 import { useSolverNavigation } from "./useSolverNavigation";
 
 export interface StudyWorkspaceProps {
@@ -30,6 +31,7 @@ export function useStudyWorkspace({
     const [board, setBoard] = useState<string[]>([]);
     const [iterations, setIterations] = useState(3000);
     const [accuracyPercent, setAccuracyPercent] = useState(0.01);
+    const [bettingTree, setBettingTree] = useState(defaultBettingTree);
     const [rangeSeat, setRangeSeat] = useState<string>();
     const [error, setError] = useState<string>();
     const [picker, setPicker] = useState<{ kind: "flop" } | { kind: "runout"; node: ChanceNode; index: number }>();
@@ -122,10 +124,25 @@ export function useStudyWorkspace({
             setRangeSeat(undefined);
         });
     }
+    async function changeBettingTree(value: BettingTreeDraft) {
+        if (status.state === "idle") setBettingTree(value);
+        else
+            await changeStudy(() => {
+                setBettingTree(value);
+                setPreIndex(history.length);
+            });
+    }
     async function solve() {
         if (editing.current || view.busy) return;
         try {
-            const next = postflopScenario(format, history, board, iterations, accuracyPercent);
+            const next = postflopScenario(
+                format,
+                history,
+                board,
+                iterations,
+                accuracyPercent,
+                parseBettingTree(bettingTree),
+            );
             setError(undefined);
             setPreIndex(null);
             await onSolve(next);
@@ -232,6 +249,8 @@ export function useStudyWorkspace({
         setIterations,
         accuracyPercent,
         setAccuracyPercent,
+        bettingTree,
+        changeBettingTree,
         error,
         picker,
         navigation,

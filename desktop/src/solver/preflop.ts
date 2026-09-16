@@ -1,4 +1,5 @@
 import { actionColor, HAND_CLASSES, handClassCombos } from "./strategy";
+import type { BettingTree } from "./bettingTree";
 import {
     nodeFor,
     solutionFor,
@@ -127,6 +128,7 @@ export interface PostflopScenario {
     villainStack: number;
     iterations: number;
     accuracyPercent: number;
+    bettingTree: BettingTree;
     ranges: Record<string, Record<string, number>>;
     rangeSource: { solution: TableFormat; history: PreflopChoice[] };
 }
@@ -136,6 +138,7 @@ export function postflopScenario(
     board: string[],
     iterations: number,
     accuracyPercent: number,
+    bettingTree: BettingTree,
 ): PostflopScenario {
     const state = replayPreflop(format, history);
     const solution = solutionFor(format);
@@ -171,6 +174,7 @@ export function postflopScenario(
         villainStack: solution.stack - villain.committed,
         iterations,
         accuracyPercent,
+        bettingTree,
         ranges: { [hero.position]: hero.range, [villain.position]: villain.range },
         rangeSource: { solution: format, history },
     };

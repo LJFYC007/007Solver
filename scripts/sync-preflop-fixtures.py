@@ -74,6 +74,9 @@ def scenario(format_name, bet_level, selected, stack, board="Ks 9s 2d", pot=2.0,
     return {
         "board": board, "heroPosition": "UTG", "villainPosition": "BB", "heroActsFirst": False,
         "initialPot": pot, "heroStack": stack, "villainStack": stack, "iterations": iterations,
+        # Half-pot fixture sizes avoid cross-engine chip-rounding differences.
+        "bettingTree": {**{street: {"bet": [50], "raise": [50]} for street in ("flop", "turn", "river")},
+                        "maxRaises": 2, "allInSpr": 0.15},
         "ranges": retained,
         "rangeSource": {"catalog": "resources/gtowizard-preflop", "sha256": digest, "solution": format_name,
                         "history": history, "retainedClasses": selected,
@@ -85,9 +88,8 @@ fixtures = ROOT / "tests/fixtures"
 weighted = scenario("8max", 4, {"UTG": ["AKs", "QQ"], "BB": ["KK", "A5s"]}, 4.0)
 raised = scenario("6max", 4, {"UTG": ["KJs"], "BB": ["AQs"]}, 8.0)
 wide = scenario("8max", 3, None, 15.0, "Ac Kh Qs", 5.0, 3000)
-wide["benchmark"] = {"betPercentages": [50, 100]}
+for street in ("flop", "turn", "river"):
+    wide["bettingTree"][street]["bet"] = [50, 100]
 for name, value in [("weighted-flop", weighted), ("raise-flop", raised), ("utg-bb-wide", wide)]:
     (fixtures / f"{name}.json").write_text(json.dumps(value, indent=4) + "\n")
-# A small sourced CLI example; the desktop starts in the preflop browser instead.
-(ROOT / "resources/default.json").write_text(json.dumps(weighted, indent=4) + "\n")
-print("Updated three input fixtures and the CLI example from GTO Wizard; regenerate independent references next.")
+print("Updated three input fixtures from GTO Wizard; regenerate independent references next.")
