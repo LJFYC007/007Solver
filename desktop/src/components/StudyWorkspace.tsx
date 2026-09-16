@@ -66,7 +66,8 @@ export default function StudyWorkspace({
     const [preIndex, setPreIndex] = useState<number | null>(0);
     const [selected, setSelected] = useState("AA");
     const [board, setBoard] = useState<string[]>([]);
-    const [iterations, setIterations] = useState(200);
+    const [iterations, setIterations] = useState(3000);
+    const [accuracyPercent, setAccuracyPercent] = useState(0.01);
     const [rangeSeat, setRangeSeat] = useState<string>();
     const [error, setError] = useState<string>();
     const [picker, setPicker] = useState<{ kind: "flop" } | { kind: "runout"; node: ChanceNode; index: number }>();
@@ -204,7 +205,7 @@ export default function StudyWorkspace({
     async function solve() {
         if (editing.current || busy) return;
         try {
-            const next = postflopScenario(format, history, board, iterations);
+            const next = postflopScenario(format, history, board, iterations, accuracyPercent);
             setError(undefined);
             setPreIndex(null);
             await onSolve(next);
@@ -358,10 +359,28 @@ export default function StudyWorkspace({
                 <div
                     className="study-status"
                     role="status"
-                    title={status.state === "ready" ? `${status.iterations.toLocaleString()} iterations` : undefined}
+                    title={
+                        status.state === "ready"
+                            ? `${status.iterations.toLocaleString()} iterations · ${Math.round(status.elapsedSeconds)} seconds · Target ${status.targetAccuracyPercent}% pot`
+                            : undefined
+                    }
                 >
                     <span className={status.state === "ready" ? "solved-dot" : ""} />
-                    {status.state === "ready" ? "Solution ready" : busy ? "Solving…" : "GTO Wizard · chip EV · 100bb"}
+                    {status.state === "ready"
+                        ? `${status.stopReason === "accuracy" ? "Target reached" : "Iteration limit reached"}${status.accuracyPercent === null ? "" : ` · ${status.accuracyPercent.toPrecision(3)}% pot`}`
+                        : busy
+                          ? "Solving…"
+                          : "GTO Wizard · chip EV · 100bb"}
+                    {status.state === "ready" && (
+                        <button
+                            type="button"
+                            className="quiet-button"
+                            disabled={changing}
+                            onClick={() => viewPre(history.length)}
+                        >
+                            Adjust solve
+                        </button>
+                    )}
                 </div>
             </header>
             <div className="study-browser">
@@ -549,9 +568,12 @@ export default function StudyWorkspace({
                             changing={changing}
                             ready={!!root}
                             iterations={iterations}
+                            accuracyPercent={accuracyPercent}
                             onIterations={setIterations}
+                            onAccuracyPercent={setAccuracyPercent}
                             onBoard={openFlop}
                             onSolve={() => (root ? viewPost(navigation.activeIndex) : void solve())}
+                            onResolve={() => void solve()}
                             onCancel={() => void changeStudy(() => setPreIndex(history.length))}
                             context={`Pot ${formatNumber(fullState.pot)} · ${fullState.seats
                                 .filter((seat) => !seat.folded)

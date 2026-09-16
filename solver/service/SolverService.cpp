@@ -1,11 +1,13 @@
 #include "service/SolverService.h"
 #include "analysis/AnalysisSession.h"
 #include "engine/CpuDcfrSession.h"
-#include "engine/StrategyEvaluator.h"
 #include "game/GameCompiler.h"
 #include "io/ScenarioLoader.h"
+#include "service/ConvergenceEstimate.h"
 #include "service/JsonAdapter.h"
 #include "service/ServiceMessage.h"
+#include <algorithm>
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -42,6 +44,9 @@ int SolverService::Run(const std::string& scenarioPath)
             std::istringstream scenarioInput(line);
             return io::ReadScenario(scenarioInput);
         }();
+        using Clock = std::chrono::steady_clock;
+        const auto solveStart = Clock::now();
+        const auto elapsed = [&] { return std::chrono::duration<double>(Clock::now() - solveStart).count(); };
         WriteMessage(output_, {ServiceMessageKind::BuildingTree, 0, 0, scenario.iterations});
 
         diagnostics_ << "Start building decision tree...\n";
@@ -55,38 +60,72 @@ int SolverService::Run(const std::string& scenarioPath)
                      << " strategy entries; solve peak estimate " << estimate.peakBytes << " bytes\n";
 
         diagnostics_ << "Start solving game...\n";
-        const auto progress = [&](int completed)
-        {
-            ServiceMessage message{ServiceMessageKind::Solving, 0, completed, scenario.iterations};
-            message.estimate = estimate;
-            WriteMessage(output_, message);
-        };
-        progress(0);
+        const double initialPot = static_cast<double>(game->Spec().initialPot.Raw()) / core::Chips::kUnitsPerChip;
+        const double target = initialPot * (scenario.accuracyPercent / 100.0);
         engine::SolveReport report{"dcfr", "cpu"};
+        std::optional<double> accuracyPercent;
         engine::StrategySnapshot strategy = [&]
         {
             engine::CpuDcfrSession session(problem);
-            session.Run(scenario.iterations, progress);
+            ConvergenceEstimate convergence;
+            int nextCheck = convergence.NextCheck(scenario.iterations, target);
+            const auto progress = [&](int completed, const std::string& phase)
+            {
+                ServiceMessage message{ServiceMessageKind::Solving, 0, completed, scenario.iterations};
+                message.estimate = estimate;
+                message.phase = phase;
+                message.elapsedSeconds = elapsed();
+                message.accuracyPercent = accuracyPercent;
+                message.targetAccuracyPercent = scenario.accuracyPercent;
+                message.estimatedRemainingSeconds = phase == "finalizing"
+                                                        ? convergence.FinalizationSeconds()
+                                                        : convergence.RemainingSeconds(completed, nextCheck, scenario.iterations, target);
+                WriteMessage(output_, message);
+            };
+            progress(0, "training");
+            while (session.CompletedIterations() < scenario.iterations)
+            {
+                session.Run(nextCheck - session.CompletedIterations(), [&](int completed) { progress(completed, "training"); });
+                const int completed = session.CompletedIterations();
+                progress(completed, "checking");
+                const auto checkStart = Clock::now();
+                report.metrics = session.EvaluateExploitability();
+                const double evaluationSeconds = std::chrono::duration<double>(Clock::now() - checkStart).count();
+                convergence.Observe(completed, report.metrics.exploitability, session.TrainingTimeSeconds(), evaluationSeconds);
+                if (initialPot > 0.0)
+                    accuracyPercent = 100.0 * std::max(0.0f, report.metrics.exploitability) / initialPot;
+                if (report.metrics.exploitability <= target)
+                    break;
+
+                nextCheck = convergence.NextCheck(scenario.iterations, target);
+            }
             report.completedIterations = session.CompletedIterations();
             report.trainingTimeSeconds = session.TrainingTimeSeconds();
             diagnostics_ << "Algorithm: dcfr, configured CPU worker limit: " << session.WorkerCount() << '\n';
+            progress(report.completedIterations, "finalizing");
             return std::move(session).ExportStrategy();
         }();
         diagnostics_ << "Training time: " << report.trainingTimeSeconds << " s\n";
 
-        diagnostics_ << "Evaluate exploitability...\n";
-        report.metrics = engine::EvaluateExploitability(*problem, strategy);
         diagnostics_ << "Iteration: " << report.completedIterations << " Hero BR EV: " << report.metrics.player0BestResponseEv
                      << " Villain BR EV: " << report.metrics.player1BestResponseEv << " Exploitability: " << report.metrics.exploitability
                      << '\n';
 
+        const int completedIterations = report.completedIterations;
+        const bool targetReached = report.metrics.exploitability <= target;
         analysis::AnalysisSession analysis(engine::SolveResult(problem, std::move(strategy), std::move(report)));
         diagnostics_ << "Solving complete.\n";
         ServiceMessage ready{ServiceMessageKind::Ready};
-        ready.completedIterations = scenario.iterations;
+        ready.completedIterations = completedIterations;
         ready.nodeCount = static_cast<int>(game->NodeCount());
         ready.rootNodeId = analysis.RootNode();
         ready.estimate = estimate;
+        ready.phase = "complete";
+        ready.elapsedSeconds = elapsed();
+        ready.estimatedRemainingSeconds = 0.0;
+        ready.accuracyPercent = accuracyPercent;
+        ready.targetAccuracyPercent = scenario.accuracyPercent;
+        ready.stopReason = targetReached ? "accuracy" : "iterationLimit";
         WriteMessage(output_, ready);
 
         std::string requestLine;

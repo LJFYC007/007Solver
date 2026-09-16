@@ -450,9 +450,16 @@ void HandTraversal::EvaluateTerminal(
     }
 }
 
-void HandTraversal::EvaluateRunout(Node node, std::size_t player, const double* opponentReach, const double* divisors, float* values) const
+void HandTraversal::EvaluateRunout(
+    Node node,
+    std::size_t player,
+    const double* opponentReach,
+    const double* divisors,
+    float* values,
+    bool useCache
+) const
 {
-    if (node.board.CardCount() == 3 && !flopOutcomes_.empty())
+    if (useCache && node.board.CardCount() == 3 && !flopOutcomes_.empty())
     {
         EvaluateFlopRunout(node, player, opponentReach, divisors, values);
         return;
@@ -480,7 +487,7 @@ void HandTraversal::EvaluateRunout(Node node, std::size_t player, const double* 
         child.boardMask |= mask;
         for (std::size_t hand = 0; hand < opponentCount; ++hand)
             childReach[hand] = masks[hand] & mask ? 0.0 : opponentReach[hand] * chance;
-        EvaluateRunout(child, player, childReach.data(), divisors, childValues.data());
+        EvaluateRunout(child, player, childReach.data(), divisors, childValues.data(), useCache);
         for (std::size_t hand = 0; hand < hands[player].size(); ++hand)
             accumulated[hand] += childValues[hand];
     }
@@ -613,7 +620,8 @@ void HandTraversal::Walk(
     std::size_t depth,
     float* values,
     std::size_t* parallelCursor,
-    TrainState* train
+    TrainState* train,
+    const float* strategySums
 ) const
 {
     const Node& node = nodes[nodeIndex];
@@ -623,7 +631,8 @@ void HandTraversal::Walk(
     const double* opponentReach = workspace.reach[1 - player].data() + depth * opponentCount;
     if (node.forcedRunout)
     {
-        EvaluateRunout(node, player, opponentReach, divisors, values);
+        // Checkpoints use the same runout accumulation as exported-snapshot evaluation.
+        EvaluateRunout(node, player, opponentReach, divisors, values, strategySums == nullptr);
         return;
     }
     if (node.kind == game::NodeKind::Terminal)
@@ -641,6 +650,20 @@ void HandTraversal::Walk(
             // Preserve this entry strategy until reach, backup and average-strategy
             // accumulation finish. Descendants and other workers use separate rows.
             MatchRegrets(node, *train, current);
+        }
+        else if (strategySums)
+        {
+            const float* sums = strategySums + node.strategyOffset;
+            const float uniform = 1.0f / static_cast<float>(node.childCount);
+            for (std::size_t hand = 0; hand < actorCount; ++hand)
+            {
+                double total = 0.0;
+                for (std::size_t action = 0; action < node.childCount; ++action)
+                    total += sums[action * actorCount + hand];
+                for (std::size_t action = 0; action < node.childCount; ++action)
+                    current[action * actorCount + hand] =
+                        total > 0.0 ? static_cast<float>(sums[action * actorCount + hand] / total) : uniform;
+            }
         }
         else
         {
@@ -689,7 +712,7 @@ void HandTraversal::Walk(
                     workspace.reach[p].data() + depth * hands[p].size(),
                     workspace.reach[p].data() + (depth + 1) * hands[p].size()
                 );
-        Walk(childIndex, player, strategy, divisors, bestResponse, workspace, depth + 1, output, parallelCursor, train);
+        Walk(childIndex, player, strategy, divisors, bestResponse, workspace, depth + 1, output, parallelCursor, train, strategySums);
     };
     for (std::size_t action = 0; action < node.childCount; ++action)
     {

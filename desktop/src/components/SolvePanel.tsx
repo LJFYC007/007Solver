@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { SolverStatus } from "../solver";
 import { BoardCard } from "./PlayingCards";
 
@@ -8,11 +9,14 @@ export default function SolvePanel({
     changing,
     ready,
     iterations,
+    accuracyPercent,
     context,
     onBoard,
     onSolve,
+    onResolve,
     onCancel,
     onIterations,
+    onAccuracyPercent,
 }: {
     board: string[];
     status: SolverStatus;
@@ -20,12 +24,30 @@ export default function SolvePanel({
     changing: boolean;
     ready: boolean;
     iterations: number;
+    accuracyPercent: number;
     context: string;
     onBoard: () => void;
     onSolve: () => void;
+    onResolve: () => void;
     onCancel: () => void;
     onIterations: (value: number) => void;
+    onAccuracyPercent: (value: number) => void;
 }) {
+    const progress = status.state === "solving" ? status : undefined;
+    const sample = progress?.elapsedSeconds;
+    const [tick, setTick] = useState<{ sample?: number; age: number }>({ age: 0 });
+    useEffect(() => {
+        if (sample === undefined) return;
+        const receivedAt = performance.now();
+        const timer = window.setInterval(() => setTick({ sample, age: (performance.now() - receivedAt) / 1000 }), 250);
+        return () => window.clearInterval(timer);
+    }, [sample]);
+    const age = tick.sample === sample ? tick.age : 0;
+    const elapsed = (sample ?? 0) + age;
+    const remaining =
+        progress?.estimatedRemainingSeconds == null ? undefined : progress.estimatedRemainingSeconds - age;
+    const timeProgress =
+        progress && remaining !== undefined ? Math.min(0.99, elapsed / (elapsed + Math.max(1, remaining))) : undefined;
     return (
         <section className="solve-setup">
             <div className="panel-strip-title">
@@ -60,18 +82,36 @@ export default function SolvePanel({
                     <div className="solve-phase" role="status">
                         <strong>
                             {status.state === "solving"
-                                ? status.completedIterations === status.totalIterations
+                                ? status.phase === "finalizing"
                                     ? "Finalizing solution"
-                                    : "Training strategy"
+                                    : status.phase === "checking"
+                                      ? "Checking accuracy"
+                                      : "Training strategy"
                                 : status.state === "buildingTree"
                                   ? "Preparing solution"
                                   : "Starting solver"}
                         </strong>
                         <small>
                             {status.state === "solving"
-                                ? `${Math.round((status.completedIterations / status.totalIterations) * 100)}% complete${status.estimate ? ` · Estimated memory ${(status.estimate.peakBytes / 1024 ** 3).toFixed(2)} GiB` : ""}`
+                                ? `${remaining === undefined ? "Measuring convergence…" : remaining <= 0 ? "Updating time estimate…" : `About ${Math.ceil(remaining)} seconds remaining`} · ${Math.floor(elapsed)}s elapsed`
                                 : "Please wait…"}
                         </small>
+                        {progress && (
+                            <small>
+                                {progress.accuracyPercent === null
+                                    ? `Target ${progress.targetAccuracyPercent}% pot`
+                                    : `${progress.accuracyPercent.toPrecision(3)}% pot · Target ${progress.targetAccuracyPercent}%`}
+                            </small>
+                        )}
+                        {progress && (
+                            <small>
+                                {progress.completedIterations.toLocaleString()} /{" "}
+                                {progress.totalIterations.toLocaleString()} updates
+                                {progress.estimate
+                                    ? ` · ${(progress.estimate.peakBytes / 1024 ** 3).toFixed(2)} GiB estimated`
+                                    : ""}
+                            </small>
+                        )}
                     </div>
                 ) : (
                     <button className="solve-button" disabled={board.length !== 3 || changing} onClick={onSolve}>
@@ -81,31 +121,45 @@ export default function SolvePanel({
             </div>
             {busy && (
                 <>
-                    <progress
-                        aria-label="Postflop solve progress"
-                        max={status.state === "solving" ? status.totalIterations : 1}
-                        value={status.state === "solving" ? status.completedIterations : undefined}
-                    />
+                    <progress aria-label="Estimated solve time progress" max={1} value={timeProgress} />
                     <button className="quiet-button cancel-solve" disabled={changing} onClick={onCancel}>
                         Cancel solve
                     </button>
                 </>
             )}
-            {!busy && !ready && (
+            {!busy && (
                 <details className="solve-settings">
                     <summary>Solver settings</summary>
                     <label>
-                        Iterations
+                        Accuracy (% pot)
                         <input
-                            aria-label="Iterations"
+                            aria-label="Accuracy (% pot)"
+                            type="number"
+                            min="0.000001"
+                            step="any"
+                            disabled={changing}
+                            value={accuracyPercent}
+                            onChange={(e) => onAccuracyPercent(Number(e.target.value))}
+                        />
+                    </label>
+                    <label>
+                        Iteration limit
+                        <input
+                            aria-label="Iteration limit"
                             type="number"
                             min="1"
                             max="2147483647"
                             step="1"
+                            disabled={changing}
                             value={iterations}
                             onChange={(e) => onIterations(Number(e.target.value))}
                         />
                     </label>
+                    {ready && (
+                        <button type="button" className="solve-button" disabled={changing} onClick={onResolve}>
+                            Solve again
+                        </button>
+                    )}
                 </details>
             )}
             <small className="solve-context">{context}</small>

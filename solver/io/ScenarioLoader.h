@@ -12,6 +12,7 @@ struct Scenario
     game::GameSpec game;
     core::RangeSet ranges;
     int iterations;
+    double accuracyPercent = 0.01;
 };
 
 Scenario LoadScenario(const std::string& jsonPath);

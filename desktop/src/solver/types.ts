@@ -72,6 +72,14 @@ export interface MemoryEstimate {
     workers: number;
 }
 
+export interface SolveProgress {
+    phase: "training" | "checking" | "finalizing" | "complete";
+    elapsedSeconds: number;
+    estimatedRemainingSeconds: number | null;
+    accuracyPercent: number | null;
+    targetAccuracyPercent: number;
+}
+
 export type SolverStatus =
     | { state: "idle" }
     | {
@@ -81,19 +89,20 @@ export type SolverStatus =
           state: "buildingTree";
           totalIterations: number;
       }
-    | {
+    | (SolveProgress & {
           completedIterations: number;
           state: "solving";
           totalIterations: number;
           estimate?: MemoryEstimate | null;
-      }
-    | {
+      })
+    | (SolveProgress & {
           iterations: number;
           nodeCount: number;
           rootNodeId: number;
           state: "ready";
+          stopReason: "accuracy" | "iterationLimit";
           estimate?: MemoryEstimate | null;
-      }
+      })
     | {
           message: string;
           state: "failed";

@@ -86,8 +86,8 @@ struct HandTraversal
     ) const;
     std::vector<double> OpponentReachAtRoot(const StrategySnapshot& strategy, std::size_t opponentPlayer) const;
     std::vector<double> CompatibleMasses(std::size_t player, const double* opponentReach) const;
-    // Training supplies TrainState; evaluation supplies a fixed snapshot. Both paths
-    // retain the entry policy in a workspace row at each depth. WalkTraining alone
+    // Training supplies TrainState; evaluation supplies a snapshot or cumulative
+    // strategy sums. All paths retain the entry policy in a row per depth. WalkTraining
     // supplies a cursor to consume its completed chance tasks in preorder.
     void Walk(
         std::uint32_t node,
@@ -99,7 +99,8 @@ struct HandTraversal
         std::size_t depth,
         float* values,
         std::size_t* parallelCursor = nullptr,
-        TrainState* train = nullptr
+        TrainState* train = nullptr,
+        const float* strategySums = nullptr
     ) const;
 
 private:
@@ -138,6 +139,13 @@ private:
         double* child
     ) const;
     void EvaluateTerminal(const Node& node, std::size_t player, const double* opponentReach, const double* divisors, float* values) const;
-    void EvaluateRunout(Node node, std::size_t player, const double* opponentReach, const double* divisors, float* values) const;
+    void EvaluateRunout(
+        Node node,
+        std::size_t player,
+        const double* opponentReach,
+        const double* divisors,
+        float* values,
+        bool useCache = true
+    ) const;
 };
 } // namespace solver::engine

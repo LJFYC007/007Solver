@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/HandTraversal.h"
+#include "engine/SolveResult.h"
 #include "engine/StrategySnapshot.h"
 #include <array>
 #include <cstdint>
@@ -18,6 +19,8 @@ public:
 
     // One iteration is a full update of one player, alternating across successive runs.
     void Run(int iterations, const std::function<void(int completedIterations)>& progressCallback = {});
+    // Reads the current average policy without exporting or consuming training state.
+    ExploitabilityMetrics EvaluateExploitability() const;
     // Final export consumes training state; this session must not be run again.
     StrategySnapshot ExportStrategy() &&;
     int CompletedIterations() const { return completedIterations_; }

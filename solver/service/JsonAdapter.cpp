@@ -215,6 +215,7 @@ std::string ServiceMessageToJson(const ServiceMessage& message)
             {"iterations", message.completedIterations},
             {"nodeCount", message.nodeCount},
             {"rootNodeId", message.rootNodeId.Value()},
+            {"stopReason", message.stopReason},
         };
         break;
     case ServiceMessageKind::Failed:
@@ -230,6 +231,14 @@ std::string ServiceMessageToJson(const ServiceMessage& message)
     case ServiceMessageKind::QueryFailed:
         json = {{"requestId", message.requestId}, {"ok", false}, {"error", message.text}};
         break;
+    }
+    if (message.kind == ServiceMessageKind::Solving || message.kind == ServiceMessageKind::Ready)
+    {
+        json["phase"] = message.phase;
+        json["elapsedSeconds"] = message.elapsedSeconds;
+        json["estimatedRemainingSeconds"] = message.estimatedRemainingSeconds ? Json(*message.estimatedRemainingSeconds) : Json(nullptr);
+        json["accuracyPercent"] = message.accuracyPercent ? Json(*message.accuracyPercent) : Json(nullptr);
+        json["targetAccuracyPercent"] = message.targetAccuracyPercent;
     }
     if (message.estimate)
     {

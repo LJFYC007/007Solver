@@ -38,6 +38,8 @@ std::filesystem::path reportPath;
 Clock::time_point stageStart;
 int iterationBudget = 0;
 int workers = 0;
+bool checkConvergence = false;
+bool stopAtAccuracy = false;
 
 int PositiveInteger(const std::string& value)
 {
@@ -213,22 +215,45 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
         FinishStage("session_initialization");
         StartStage("training");
         int lastProgress = 0;
-        session->Run(
-            iterations,
-            [&](int completed)
-            {
-                if (completed - lastProgress >= 100 || completed == iterations)
+        const auto trainingStart = Clock::now();
+        while (session->CompletedIterations() < iterations)
+        {
+            const int remaining = iterations - session->CompletedIterations();
+            session->Run(
+                checkConvergence ? std::min(200, remaining) : remaining,
+                [&](int completed)
                 {
-                    std::cout << "Training: " << completed << " / " << iterations << " updates" << std::endl;
-                    lastProgress = completed;
+                    if (completed - lastProgress >= 100 || completed == iterations)
+                    {
+                        std::cout << "Training: " << completed << " / " << iterations << " updates" << std::endl;
+                        lastProgress = completed;
+                    }
                 }
+            );
+            if (checkConvergence)
+            {
+                const auto metrics = session->EvaluateExploitability();
+                CheckMetrics(metrics);
+                report["checkpoint"] = Metrics(metrics);
+                report["convergence"].push_back({
+                    {"iterations", session->CompletedIterations()},
+                    {"elapsed_seconds", std::chrono::duration<double>(Clock::now() - trainingStart).count()},
+                    {"training_seconds", session->TrainingTimeSeconds()},
+                    {"exploitability", metrics.exploitability},
+                });
+                SaveReport();
+                if (stopAtAccuracy && metrics.exploitability <= kMaxExploitability)
+                    break;
             }
-        );
+        }
         report["workers"] = session->WorkerCount();
         report["training_loop_seconds"] = session->TrainingTimeSeconds();
         report["completed_iterations"] = session->CompletedIterations();
         FinishStage("training");
-        EXPECT_EQ(session->CompletedIterations(), iterations);
+        if (stopAtAccuracy)
+            EXPECT_LE(session->CompletedIterations(), iterations);
+        else
+            EXPECT_EQ(session->CompletedIterations(), iterations);
         StartStage("snapshot_export");
         auto snapshot = std::move(*session).ExportStrategy();
         FinishStage("snapshot_export");
@@ -243,6 +268,8 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
     report["trained"] = Metrics(actual);
     FinishStage("trained_evaluation");
     CheckMetrics(actual);
+    if (checkConvergence)
+        EXPECT_NEAR(actual.exploitability, report.at("checkpoint").at("exploitability").get<double>(), 1e-6);
     EXPECT_GE(actual.player0BestResponseEv, -solved.at("villainBestResponseEv").get<double>() - kTolerance);
     EXPECT_GE(actual.player1BestResponseEv, -solved.at("heroBestResponseEv").get<double>() - kTolerance);
     EXPECT_LE(actual.exploitability, kMaxExploitability);
@@ -319,6 +346,10 @@ int main(int argc, char** argv)
                 iterationBudget = PositiveInteger(arg.substr(13));
             else if (arg.rfind("--workers=", 0) == 0)
                 workers = PositiveInteger(arg.substr(10));
+            else if (arg == "--convergence")
+                checkConvergence = true;
+            else if (arg == "--stop-at-accuracy")
+                checkConvergence = stopAtAccuracy = true;
             else
             {
                 ++i;
@@ -338,6 +369,7 @@ int main(int argc, char** argv)
             {"algorithm", "dcfr"},
             {"iteration_unit", "full_player_update"},
             {"exploitability_limit", kMaxExploitability},
+            {"accuracy_stopping", stopAtAccuracy},
             {"status", "running"},
             {"failures", Json::array()},
             {"build",

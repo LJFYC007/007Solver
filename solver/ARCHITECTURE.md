@@ -6,13 +6,15 @@ This document records semantics shared across modules. Implementation details li
 
 The calculation layers are `analysis -> engine -> game -> core`. The `io` adapter parses scenarios; `service` composes the solve and query lifecycle. JSON and presentation concerns stay outside core, game and engine.
 
-Each service process owns one solve. It exports one strategy snapshot, releases training state, evaluates exploitability, then retains the result for queries. A result and its snapshot must refer to the same compiled game. Node views and borrowed strategy data must not outlive their owners.
+Each service process owns one solve. It checks exploitability on the current average strategy without consuming training state, stopping at the target or update limit. It then exports one strategy snapshot, releases training state, and retains the result for queries. The final metrics belong to that same strategy; checkpoint normalization must match snapshot export. A result and its snapshot must refer to the same compiled game. Node views and borrowed strategy data must not outlive their owners.
 
 Each CPU training iteration updates one player, alternating across successive `Run` calls. Reach propagation, value backup and strategy accumulation use the policy at entry to each decision node. Training may batch disjoint chance subtrees within an update: ancestor regrets remain unchanged while workers replay their entry paths and solve those subtrees. Workers own separate scratch buffers and result rows; after they finish, ancestor updates consume the results in the original tree/action order. Scheduling must not change reach propagation, floating-point backup order, or the alternating-player iteration boundary.
 
 The desktop scopes requests and caches to a solution generation. Replacing or cancelling a solve invalidates pending requests and cached reports; responses from an old generation must not update the current view.
 
 Service stdout is one protocol JSON message per line; diagnostics go to stderr. Protocol changes must agree across the [C++ serializer](service/JsonAdapter.cpp), [Rust envelope](../desktop/src-tauri/src/solver_protocol.rs) and [TypeScript types](../desktop/src/solver/types.ts). Rust passes node and equity payloads through.
+
+The service accuracy target is exploitability as a percentage of the initial pot (`0.01` means `0.01%`). Ready reports actual completed updates and whether accuracy or the iteration limit stopped training. Elapsed time includes preparation, checks and export. Remaining seconds require a measured decreasing convergence trend and include future checks; an insufficient or unstable trend has no estimate. The iteration limit alone is not a convergence forecast. The UI interpolates time between samples and reserves completion for Ready.
 
 ## Identity and amounts
 

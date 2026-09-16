@@ -119,6 +119,7 @@ export interface PostflopScenario {
     villainStack: number;
     algorithm: "dcfr";
     iterations: number;
+    accuracyPercent: number;
     ranges: Record<string, Record<string, number>>;
     rangeSource: { solution: TableFormat; history: PreflopChoice[] };
 }
@@ -127,6 +128,7 @@ export function postflopScenario(
     history: PreflopChoice[],
     board: string[],
     iterations: number,
+    accuracyPercent: number,
 ): PostflopScenario {
     const state = replayPreflop(format, history);
     const solution = solutionFor(format);
@@ -138,6 +140,8 @@ export function postflopScenario(
         throw new Error("Select three different flop cards.");
     if (!Number.isInteger(iterations) || iterations < 1 || iterations > 2147483647)
         throw new Error("Iterations must be a positive integer.");
+    if (!Number.isFinite(accuracyPercent) || accuracyPercent <= 0)
+        throw new Error("Accuracy must be a positive percentage of the pot.");
     const order = ["SB", "BB", ...solution.positions.filter((position) => position !== "SB" && position !== "BB")];
     alive.sort((a, b) => order.indexOf(a.position) - order.indexOf(b.position));
     const [villain, hero] = alive;
@@ -160,6 +164,7 @@ export function postflopScenario(
         villainStack: solution.stack - villain.committed,
         algorithm: "dcfr",
         iterations,
+        accuracyPercent,
         ranges: { [hero.position]: hero.range, [villain.position]: villain.range },
         rangeSource: { solution: format, history },
     };

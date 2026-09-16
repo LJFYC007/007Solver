@@ -64,6 +64,9 @@ Scenario ReadScenario(std::istream& input)
         iterationCount.get<std::uint64_t>() > std::numeric_limits<int>::max())
         throw std::runtime_error("Solve iterations must be an integer between 1 and INT_MAX");
     const int iterations = iterationCount.get<int>();
+    const double accuracyPercent = json.value("accuracyPercent", 0.01);
+    if (!std::isfinite(accuracyPercent) || accuracyPercent <= 0.0)
+        throw std::runtime_error("Accuracy must be a finite positive percentage of the initial pot");
     if (json.value("algorithm", std::string("dcfr")) != "dcfr")
         throw std::runtime_error("Solve algorithm must be dcfr");
 
@@ -84,6 +87,7 @@ Scenario ReadScenario(std::istream& input)
         },
         core::RangeSet(LoadRange(ranges, heroPosition), LoadRange(ranges, villainPosition)),
         iterations,
+        accuracyPercent,
     };
 }
 } // namespace solver::io

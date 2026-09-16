@@ -28,6 +28,8 @@ cmake --build --preset RelWithDebInfo --target 007SolverBenchmark
 
 Optional flags are `--report=<new-json-path>`, `--iterations=<count>` and `--workers=<count>`. The default workload is [utg-bb-wide.json](fixtures/utg-bb-wide.json); checks and report fields are defined in [benchmark.cpp](benchmark.cpp).
 
+Add `--convergence` to record exploitability every 200 updates while preserving the fixed budget. `--stop-at-accuracy` also stops when the benchmark's accuracy requirement is reached. Both record checkpoint wall time separately from pure training time; use the same checkpoint mode when comparing discount schedules. The final exported snapshot is evaluated independently of the checkpoints.
+
 Reports are local artifacts under `build/benchmark-results/` by default. Existing report paths are not overwritten. Read timings, memory and accuracy directly from a completed report; `status: running` is incomplete. Builds and CTest do not refresh benchmark results.
 
 For comparisons, rebuild the changed source, run without competing builds/solves, and hold inputs, references, iteration budget and worker count constant. Check achieved exploitability alongside timing. Identify the Git revision and any uncommitted changes in the report filename or comparison notes; the report does not record them. Windows and macOS memory metrics have different meanings.

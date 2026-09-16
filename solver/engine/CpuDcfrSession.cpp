@@ -1,5 +1,6 @@
 #include "engine/CpuDcfrSession.h"
 #include "engine/MemoryEstimate.h"
+#include "engine/StrategyEvaluator.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -70,6 +71,11 @@ void CpuDcfrSession::Run(int iterations, const std::function<void(int)>& progres
         }
     }
     trainingTimeSeconds_ += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
+ExploitabilityMetrics CpuDcfrSession::EvaluateExploitability() const
+{
+    return EvaluateAverageStrategy(traversal_, strategySums_.data());
 }
 
 StrategySnapshot CpuDcfrSession::ExportStrategy() &&

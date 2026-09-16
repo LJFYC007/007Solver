@@ -6,7 +6,9 @@
 
 007 Solver is a Windows/macOS desktop app with a C++17 CPU DCFR engine and a React/Tauri interface. Select a captured GTO Wizard preflop line and a flop, solve the heads-up continuation, then inspect strategies, node EVs and exact showdown equity.
 
-The bundled [catalog](resources/gtowizard-preflop/) contains chip-EV, 100bb, 6-max and 8-max ranges. Only captured branches are available. Postflop solving is heads-up and rake-free; folded players' card-removal effects are not modeled. Finishing the iteration budget does not guarantee convergence. The displayed memory estimate is informational and does not limit the solve.
+The bundled [catalog](resources/gtowizard-preflop/) contains chip-EV, 100bb, 6-max and 8-max ranges. Only captured branches are available. Postflop solving is heads-up and rake-free; folded players' card-removal effects are not modeled. Solves stop at the target exploitability or the iteration limit, and report which condition ended the solve. The displayed memory estimate is informational and does not limit the solve.
+
+Solver settings default to **0.01% of the initial pot** and a **3,000-update limit**. One update trains one player. Remaining seconds and the time progress bar estimate completion from measured speed and convergence; they can change as accuracy is checked. The estimate is unavailable until a stable convergence trend is measured. After a solve, use **Adjust solve** to change settings and solve the same flop again.
 
 ## Requirements
 
@@ -46,7 +48,7 @@ For a small CLI solve after building the service:
 ./build/release/solver/solver_service resources/default.json
 ```
 
-On Windows, append `.exe`. Use `--stdin` instead of the file path to send a scenario as the first JSON line, followed by query lines. The example and parser are [resources/default.json](resources/default.json) and [ScenarioLoader.cpp](solver/io/ScenarioLoader.cpp).
+On Windows, append `.exe`. Use `--stdin` instead of the file path to send a scenario as the first JSON line, followed by query lines. `iterations` is the update limit; optional `accuracyPercent` is a positive percentage of the initial pot and defaults to `0.01`. The example and parser are [resources/default.json](resources/default.json) and [ScenarioLoader.cpp](solver/io/ScenarioLoader.cpp).
 
 ## Checks
 

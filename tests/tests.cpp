@@ -46,7 +46,8 @@ void CheckSolve(const std::string& name)
     for (const int workers : {1, 4})
     {
         SCOPED_TRACE("dcfr workers=" + std::to_string(workers));
-        // Match the service: release training state before best-response evaluation.
+        engine::ExploitabilityMetrics checkpoint;
+        // The service checks accuracy before consuming the training state.
         const auto strategy = [&]
         {
             engine::CpuDcfrSession session(problem, workers);
@@ -54,9 +55,12 @@ void CheckSolve(const std::string& name)
             session.Run(101);
             session.Run(iterations - 101);
             EXPECT_EQ(session.CompletedIterations(), iterations);
+            checkpoint = session.EvaluateExploitability();
             return std::move(session).ExportStrategy();
         }();
         const auto actual = engine::EvaluateExploitability(*problem, strategy);
+        EXPECT_NEAR(checkpoint.player0BestResponseEv, actual.player0BestResponseEv, 1e-6f);
+        EXPECT_NEAR(checkpoint.player1BestResponseEv, actual.player1BestResponseEv, 1e-6f);
         const auto& expected = References().at(name).at("solved");
         ASSERT_TRUE(std::isfinite(actual.player0BestResponseEv));
         ASSERT_TRUE(std::isfinite(actual.player1BestResponseEv));

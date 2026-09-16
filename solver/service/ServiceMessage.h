@@ -32,6 +32,12 @@ struct ServiceMessage
     std::optional<analysis::NodeReport> node;
     std::optional<analysis::EquityReport> equity;
     std::optional<engine::MemoryEstimate> estimate;
+    std::string phase = "training";
+    double elapsedSeconds = 0.0;
+    std::optional<double> estimatedRemainingSeconds;
+    std::optional<double> accuracyPercent;
+    double targetAccuracyPercent = 0.01;
+    std::string stopReason;
 };
 
 struct ServiceRequest
