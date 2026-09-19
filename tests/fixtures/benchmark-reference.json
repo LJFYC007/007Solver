@@ -42,7 +42,7 @@
       "heroPosition": "UTG",
       "heroStack": 15.0,
       "initialPot": 5.0,
-      "iterations": 3000,
+      "iterations": 3500,
       "rangeSource": {
         "catalog": "resources/gtowizard-preflop",
         "history": [

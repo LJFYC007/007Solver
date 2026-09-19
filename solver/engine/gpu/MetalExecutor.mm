@@ -140,10 +140,10 @@ private:
     }
     void Encode(id<MTLComputeCommandEncoder> encoder, Pass pass)
     {
-        id<MTLComputePipelineState> pipeline = pipelines_[static_cast<std::size_t>(pass.kernel)];
+        id<MTLComputePipelineState> pipeline = pipelines_[static_cast<std::size_t>(pass.operation)];
         [encoder setComputePipelineState:pipeline];
         [encoder setBytes:&pass length:sizeof(pass) atIndex:14];
-        const auto threads = pass.count * (pass.kernel == Kernel::Prefix || pass.kernel == Kernel::Outcomes ? 1 : shape_.stride);
+        const auto threads = pass.count * (pass.operation == Kernel::Prefix || pass.operation == Kernel::Outcomes ? 1 : shape_.stride);
         [encoder dispatchThreads:MTLSizeMake(threads, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(std::min<NSUInteger>(256, pipeline.maxTotalThreadsPerThreadgroup), 1, 1)];
         [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];

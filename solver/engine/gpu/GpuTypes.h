@@ -61,7 +61,7 @@ enum class Kernel : U32
 };
 struct Pass
 {
-    Kernel kernel;
+    Kernel operation;
     U32 offset;
     U32 count;
 };

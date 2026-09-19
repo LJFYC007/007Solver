@@ -114,7 +114,7 @@ private:
     }
     void Launch(Pass pass)
     {
-        const auto threads = pass.count * (pass.kernel == Kernel::Prefix || pass.kernel == Kernel::Outcomes ? 1 : shape_.stride);
+        const auto threads = pass.count * (pass.operation == Kernel::Prefix || pass.operation == Kernel::Outcomes ? 1 : shape_.stride);
         const auto blocks = (threads + 255) / 256;
 #define LAUNCH(name)                                     \
     name<<<blocks, 256, 0, stream_>>>(                   \
@@ -134,7 +134,7 @@ private:
         static_cast<const State*>(buffers_[13]),         \
         pass                                             \
     )
-        switch (pass.kernel)
+        switch (pass.operation)
         {
         case Kernel::Reach:
             LAUNCH(Reach);

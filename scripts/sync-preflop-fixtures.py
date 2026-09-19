@@ -87,7 +87,7 @@ def scenario(format_name, bet_level, selected, stack, board="Ks 9s 2d", pot=2.0,
 fixtures = ROOT / "tests/fixtures"
 weighted = scenario("8max", 4, {"UTG": ["AKs", "QQ"], "BB": ["KK", "A5s"]}, 4.0)
 raised = scenario("6max", 4, {"UTG": ["KJs"], "BB": ["AQs"]}, 8.0)
-wide = scenario("8max", 3, None, 15.0, "Ac Kh Qs", 5.0, 3000)
+wide = scenario("8max", 3, None, 15.0, "Ac Kh Qs", 5.0, 3500)
 for street in ("flop", "turn", "river"):
     wide["bettingTree"][street]["bet"] = [50, 100]
 for name, value in [("weighted-flop", weighted), ("raise-flop", raised), ("utg-bb-wide", wide)]:
