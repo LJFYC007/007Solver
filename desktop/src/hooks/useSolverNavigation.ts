@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { type SolverNode, querySolverNode } from "../solver";
+import { type SolverNode, querySolverNode, querySolverNodeEvs } from "../solver";
 
 interface Navigation {
     root?: SolverNode;
@@ -16,7 +16,11 @@ export function useSolverNavigation(root?: SolverNode, generation?: number) {
     if (current !== stored) setStored(current);
     const [pending, setPending] = useState<{ generation?: number; error?: string; busy: boolean }>();
     const navigationRequest = useRef(0);
-    const cache = useMemo(() => ({ generation, nodes: new Map<number, SolverNode>() }), [generation]);
+    const cache = useMemo(
+        () => ({ generation, nodes: new Map<number, SolverNode>(), evs: new Map<number, Promise<SolverNode>>() }),
+        [generation],
+    );
+    const [evFailure, setEvFailure] = useState<{ generation: number; nodeId: number; message: string }>();
     useEffect(
         () => () => {
             navigationRequest.current++;
@@ -25,6 +29,37 @@ export function useSolverNavigation(root?: SolverNode, generation?: number) {
     );
     const node = current.path[current.activeIndex];
     const navigationPending = pending?.generation === generation && pending?.busy;
+    const evNodeId = node?.kind === "decision" && !node.evsReady ? node.nodeId : undefined;
+    useEffect(() => {
+        if (generation === undefined || evNodeId === undefined) return;
+        let cancelled = false;
+        let request = cache.evs.get(evNodeId);
+        if (!request) {
+            request = querySolverNodeEvs(evNodeId, generation);
+            cache.evs.set(evNodeId, request);
+        }
+        void request.then(
+            (enriched) => {
+                cache.nodes.set(evNodeId, enriched);
+                setStored((previous) =>
+                    previous.root === root && previous.generation === generation
+                        ? {
+                              ...previous,
+                              path: previous.path.map((entry) => (entry.nodeId === evNodeId ? enriched : entry)),
+                          }
+                        : previous,
+                );
+                if (!cancelled) setEvFailure(undefined);
+            },
+            (error) => {
+                cache.evs.delete(evNodeId);
+                if (!cancelled) setEvFailure({ generation, nodeId: evNodeId, message: String(error) });
+            },
+        );
+        return () => {
+            cancelled = true;
+        };
+    }, [generation, evNodeId, root, cache]);
     async function selectChild(nodeId: number, parentIndex = current.activeIndex) {
         if (generation === undefined || navigationPending) return;
         const request = ++navigationRequest.current;
@@ -36,11 +71,15 @@ export function useSolverNavigation(root?: SolverNode, generation?: number) {
                 cache.nodes.set(nodeId, child);
             }
             if (request !== navigationRequest.current) return;
-            const path =
-                current.path[parentIndex + 1]?.nodeId === child.nodeId
-                    ? current.path
-                    : [...current.path.slice(0, parentIndex + 1), child];
-            setStored({ ...current, path, activeIndex: parentIndex + 1 });
+            const selected = child;
+            setStored((previous) => {
+                if (previous.root !== root || previous.generation !== generation) return previous;
+                const path =
+                    previous.path[parentIndex + 1]?.nodeId === selected.nodeId
+                        ? previous.path
+                        : [...previous.path.slice(0, parentIndex + 1), selected];
+                return { ...previous, path, activeIndex: parentIndex + 1 };
+            });
             setPending({ generation, busy: false });
             return child;
         } catch (error) {
@@ -51,6 +90,13 @@ export function useSolverNavigation(root?: SolverNode, generation?: number) {
         ...current,
         node,
         navigationPending: !!navigationPending,
+        evError:
+            evFailure &&
+            evFailure.generation === generation &&
+            evFailure.nodeId === node?.nodeId &&
+            evNodeId !== undefined
+                ? evFailure.message
+                : undefined,
         navigationError: pending?.generation === generation ? pending?.error : undefined,
         selectChild,
         selectPath: (index: number) => {

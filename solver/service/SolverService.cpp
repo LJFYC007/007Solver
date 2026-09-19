@@ -8,11 +8,15 @@
 #include "service/ServiceMessage.h"
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 
 namespace solver::service
@@ -24,6 +28,72 @@ void WriteMessage(std::ostream& output, const ServiceMessage& message)
     output << ServiceMessageToJson(message) << '\n';
     output.flush();
 }
+// EV traversal owns its scratch and only reads the immutable solve result.
+// Navigation keeps the reach cache on the input thread and never waits for EVs.
+class NodeEvWorker
+{
+public:
+    NodeEvWorker(const analysis::AnalysisSession& analysis, std::ostream& output, std::mutex& outputMutex)
+        : analysis_(analysis), output_(output), outputMutex_(outputMutex), thread_([this] { Run(); })
+    {}
+
+    ~NodeEvWorker()
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stopping_ = true;
+        }
+        ready_.notify_one();
+        thread_.join();
+    }
+
+    void Enqueue(ServiceMessage response)
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            pending_.push_back(std::move(response));
+        }
+        ready_.notify_one();
+    }
+
+private:
+    void Run()
+    {
+        for (;;)
+        {
+            ServiceMessage response{ServiceMessageKind::QuerySucceeded};
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                ready_.wait(lock, [this] { return stopping_ || !pending_.empty(); });
+                if (pending_.empty())
+                    return;
+                response = std::move(pending_.front());
+                pending_.pop_front();
+            }
+            try
+            {
+                response.node = analysis_.EvaluateNodeEvs(std::move(*response.node));
+            }
+            catch (const std::exception& error)
+            {
+                response.kind = ServiceMessageKind::QueryFailed;
+                response.text = error.what();
+                response.node.reset();
+            }
+            std::lock_guard<std::mutex> lock(outputMutex_);
+            WriteMessage(output_, response);
+        }
+    }
+
+    const analysis::AnalysisSession& analysis_;
+    std::ostream& output_;
+    std::mutex& outputMutex_;
+    std::mutex mutex_;
+    std::condition_variable ready_;
+    std::deque<ServiceMessage> pending_;
+    bool stopping_ = false;
+    std::thread thread_;
+};
 } // namespace
 
 SolverService::SolverService(std::istream& input, std::ostream& output, std::ostream& diagnostics)
@@ -134,6 +204,8 @@ int SolverService::Run(const std::string& scenarioPath, engine::ComputeDevice de
         ready.stopReason = targetReached ? StopReason::Accuracy : StopReason::IterationLimit;
         WriteMessage(output_, ready);
 
+        std::mutex outputMutex;
+        NodeEvWorker evWorker(analysis, output_, outputMutex);
         std::string requestLine;
         while (std::getline(input_, requestLine))
         {
@@ -144,17 +216,24 @@ int SolverService::Run(const std::string& scenarioPath, engine::ComputeDevice de
                     throw std::invalid_argument(request.validationError);
                 ServiceMessage response{ServiceMessageKind::QuerySucceeded};
                 response.requestId = request.requestId;
-                if (request.equity)
+                if (request.kind == QueryKind::Equity)
                     response.equity = analysis.QueryEquity(*request.nodeId);
                 else
                     response.node = analysis.QueryNode(*request.nodeId);
-                WriteMessage(output_, response);
+                if (request.kind == QueryKind::NodeEvs)
+                    evWorker.Enqueue(std::move(response));
+                else
+                {
+                    std::lock_guard<std::mutex> lock(outputMutex);
+                    WriteMessage(output_, response);
+                }
             }
             catch (const std::exception& error)
             {
                 ServiceMessage response{ServiceMessageKind::QueryFailed};
                 response.requestId = request.requestId;
                 response.text = error.what();
+                std::lock_guard<std::mutex> lock(outputMutex);
                 WriteMessage(output_, response);
             }
         }

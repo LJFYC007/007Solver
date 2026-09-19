@@ -59,11 +59,18 @@ struct ServiceMessage
     StopReason stopReason = StopReason::IterationLimit;
 };
 
+enum class QueryKind : std::uint8_t
+{
+    Node,
+    NodeEvs,
+    Equity,
+};
+
 struct ServiceRequest
 {
     std::uint64_t requestId = 0;
     std::optional<game::NodeId> nodeId;
     std::string validationError;
-    bool equity = false;
+    QueryKind kind = QueryKind::Node;
 };
 } // namespace solver::service

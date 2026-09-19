@@ -156,6 +156,7 @@ Json BuildNodeJson(const analysis::NodeReport& node)
 
     jsonNode["kind"] = "decision";
     jsonNode["actor"] = PlayerCode(*node.actor);
+    jsonNode["evsReady"] = node.evsReady;
     jsonNode["hands"] = Json::array();
     for (const analysis::HandReport& hand : node.hands)
     {
@@ -194,8 +195,13 @@ ServiceRequest ParseServiceRequest(const std::string& jsonLine)
             throw std::invalid_argument("requestId must be a non-negative integer");
         request.requestId = json.at("requestId").get<std::uint64_t>();
         const auto command = json.at("command").get<std::string>();
-        request.equity = command == "query_equity";
-        if (command != "query_node" && !request.equity)
+        if (command == "query_node")
+            request.kind = QueryKind::Node;
+        else if (command == "query_node_evs")
+            request.kind = QueryKind::NodeEvs;
+        else if (command == "query_equity")
+            request.kind = QueryKind::Equity;
+        else
             throw std::invalid_argument("Unknown solver command");
 
         const Json& nodeId = json.at("nodeId");

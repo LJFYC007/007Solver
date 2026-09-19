@@ -55,5 +55,6 @@ struct NodeReport
     std::vector<ActionReport> actions;
     std::vector<ChanceOutcomeReport> outcomes;
     std::optional<game::TerminalOutcome> terminal;
+    bool evsReady = false;
 };
 } // namespace solver::analysis

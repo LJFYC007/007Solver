@@ -29,6 +29,7 @@ export interface DecisionAction {
 }
 
 export interface DecisionNode {
+    evsReady: boolean;
     actions: DecisionAction[];
     actor: Player;
     hands: HandStrategy[];

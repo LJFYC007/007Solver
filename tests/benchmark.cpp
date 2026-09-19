@@ -278,6 +278,9 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
     StartStage("root_query");
     auto root = analysis.QueryNode(analysis.RootNode());
     FinishStage("root_query");
+    StartStage("root_evs");
+    root = analysis.EvaluateNodeEvs(std::move(root));
+    FinishStage("root_evs");
     ASSERT_EQ(root.kind, game::NodeKind::Decision);
     ASSERT_EQ(root.actor, core::PlayerId::Player1());
     EXPECT_EQ(root.hands.size(), hands[1]);

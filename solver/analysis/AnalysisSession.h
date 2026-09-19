@@ -19,6 +19,8 @@ public:
 
     game::NodeId RootNode() const { return result_.Problem().game->Root(); }
     NodeReport QueryNode(game::NodeId nodeId);
+    // Reads only the immutable solve result; may run alongside node/reach queries.
+    NodeReport EvaluateNodeEvs(NodeReport report) const;
     EquityReport QueryEquity(game::NodeId nodeId);
 
 private:

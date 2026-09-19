@@ -21,3 +21,7 @@ export function querySolverNode(nodeId: number, generation: number): Promise<Sol
 export function querySolverEquity(nodeId: number, generation: number): Promise<EquityReport> {
     return invoke<EquityReport>("query_solver_equity", { nodeId, generation });
 }
+
+export function querySolverNodeEvs(nodeId: number, generation: number): Promise<SolverNode> {
+    return invoke<SolverNode>("query_solver_node_evs", { nodeId, generation });
+}

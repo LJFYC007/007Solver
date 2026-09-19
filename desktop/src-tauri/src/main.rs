@@ -23,6 +23,15 @@ async fn query_solver_node(
 }
 
 #[tauri::command]
+async fn query_solver_node_evs(
+    node_id: i32,
+    generation: u64,
+    state: State<'_, SolverBridge>,
+) -> Result<Value, String> {
+    state.query(node_id, generation, "query_node_evs").await
+}
+
+#[tauri::command]
 async fn query_solver_equity(
     node_id: i32,
     generation: u64,
@@ -48,6 +57,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             solver_status,
             query_solver_node,
+            query_solver_node_evs,
             query_solver_equity,
             solve_scenario,
             cancel_solver

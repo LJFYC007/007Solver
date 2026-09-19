@@ -170,6 +170,9 @@ TEST(AnalysisSessionTest, FixedPoliciesMatchIndependentNodeValuesAndReach)
                 }
             }
             ASSERT_EQ(node.kind, game::NodeKind::Decision);
+            EXPECT_FALSE(node.evsReady);
+            node = session.EvaluateNodeEvs(std::move(node));
+            EXPECT_TRUE(node.evsReady);
             EXPECT_EQ(node.actor, core::PlayerId(expected.at("actor").get<std::uint8_t>()));
             EXPECT_EQ(node.state.board, core::ParseBoard(expected.at("board").get<std::string>(), core::BoardCardCount(node.state.street)));
             EXPECT_DOUBLE_EQ(static_cast<double>(node.state.pot.Raw()) / core::Chips::kUnitsPerChip, expected.at("pot").get<double>());

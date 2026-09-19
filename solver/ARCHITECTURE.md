@@ -18,6 +18,8 @@ CPU and GPU use float arithmetic; their accumulation and traversal orders can pr
 
 Desktop requests and caches belong to a solution generation. Replacing or cancelling a solve invalidates pending requests and cached reports; old responses must not update the current view. Line and board edits must invalidate before applying changes. Solver settings are drafts for the next solve and preserve the current result and submitted scenario.
 
+Node navigation returns strategy and reach without waiting for EV evaluation. Decision reports use `evsReady: false` until a separate `query_node_evs` response supplies the complete report. While pending, null hand EVs must not be aggregated as zero. The EV worker reads the immutable solve result and owns its report/traversal scratch; the input thread owns the reach cache. Responses may arrive out of request order and are matched by request ID. EOF drains accepted EV requests before destroying the analysis session.
+
 Service stdout is one protocol JSON message per line; diagnostics go to stderr. Protocol changes must agree across the [C++ serializer](service/JsonAdapter.cpp), [Rust envelope](../desktop/src-tauri/src/solver_protocol.rs) and [TypeScript types](../desktop/src/solver/types.ts). Rust passes node and equity payloads through.
 
 The service accuracy target is exploitability as a percentage of the initial pot (`0.01` means `0.01%`). Ready reports actual completed updates and the stop reason. Elapsed time includes preparation, checks and export. Remaining time requires a measured decreasing convergence trend and includes future checks; an unstable or insufficient trend has no estimate. Only Ready marks completion.

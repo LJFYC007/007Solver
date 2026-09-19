@@ -90,6 +90,21 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
     return report;
 }
 
+NodeReport AnalysisSession::EvaluateNodeEvs(NodeReport report) const
+{
+    if (report.kind != game::NodeKind::Decision)
+        return report;
+    if (std::any_of(report.hands.begin(), report.hands.end(), [](const auto& hand) { return hand.marginalReachMass > 0.0f; }))
+    {
+        const auto evs = engine::EvaluateNodeStrategyEvs(result_.Problem(), result_.Strategy(), report.nodeId, *report.actor);
+        for (auto& hand : report.hands)
+            if (hand.marginalReachMass > 0.0f)
+                hand.nodeStrategyEv = evs.at(hand.cards);
+    }
+    report.evsReady = true;
+    return report;
+}
+
 std::vector<HandReport> AnalysisSession::BuildHandReports(
     game::NodeId nodeId,
     const core::Range& range,
@@ -98,9 +113,6 @@ std::vector<HandReport> AnalysisSession::BuildHandReports(
     core::PlayerId player
 ) const
 {
-    std::map<core::HoleCards, float> evs;
-    if (std::any_of(marginalReachMasses.begin(), marginalReachMasses.end(), [](const auto& entry) { return entry.second > 0.0f; }))
-        evs = engine::EvaluateNodeStrategyEvs(result_.Problem(), result_.Strategy(), nodeId, player);
     std::vector<HandReport> hands;
     const core::Board board = result_.Problem().game->GetNode(nodeId).State().board;
     for (const auto& [hand, inputRangeWeight] : range.Entries())
@@ -112,20 +124,16 @@ std::vector<HandReport> AnalysisSession::BuildHandReports(
         const float marginalReachMass = marginalReachIt == marginalReachMasses.end() ? 0.0f : marginalReachIt->second;
         const auto ownReachIt = ownReachWeights.find(hand);
         const float ownReachWeight = ownReachIt == ownReachWeights.end() ? 0.0f : ownReachIt->second;
-        std::optional<float> nodeStrategyEv;
         std::vector<float> strategy;
         if (marginalReachMass > 0.0f)
-        {
             strategy = result_.Strategy().StrategyOrUniform({nodeId, hand});
-            nodeStrategyEv = evs.at(hand);
-        }
 
         hands.push_back({
             hand,
             inputRangeWeight,
             ownReachWeight,
             marginalReachMass,
-            nodeStrategyEv,
+            std::nullopt,
             std::move(strategy),
         });
     }
