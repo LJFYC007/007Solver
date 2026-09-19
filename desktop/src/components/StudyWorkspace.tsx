@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { formatNumber } from "../solver";
-import { catalog, spotCount } from "../solver/catalog";
 import { useStudyWorkspace, type StudyWorkspaceProps } from "../hooks/useStudyWorkspace";
 import BoardPicker from "./BoardPicker";
 import { BoardCard } from "./PlayingCards";
@@ -45,6 +44,7 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
         cancel,
         closePicker,
     } = useStudyWorkspace(props);
+    const [solverOpen, setSolverOpen] = useState(false);
     const [selected, setSelected] = useState("AA");
     const scroll = useRef<HTMLElement>(null);
     const { preflop, strategy, busy, showPostflop } = view;
@@ -64,30 +64,60 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                     <strong>007 Solver</strong>
                     <span className="preflop-nav-label">Study</span>
                 </div>
-                <div
-                    className="study-status"
-                    role="status"
-                    title={
-                        status.state === "ready"
-                            ? `${status.iterations.toLocaleString()} iterations · ${Math.round(status.elapsedSeconds)} seconds · Target ${status.targetAccuracyPercent}% pot`
-                            : undefined
-                    }
-                >
-                    <span className={status.state === "ready" ? "solved-dot" : ""} />
-                    {status.state === "ready"
-                        ? `${status.stopReason === "accuracy" ? "Target reached" : "Iteration limit reached"}${status.accuracyPercent === null ? "" : ` · ${status.accuracyPercent.toPrecision(3)}% pot`}`
-                        : busy
-                          ? "Solving…"
-                          : "GTO Wizard · chip EV · 100bb"}
-                    {status.state === "ready" && (
-                        <button
-                            type="button"
-                            className="quiet-button"
-                            disabled={changing}
-                            onClick={() => viewPre(history.length)}
+                <div className="solver-menu">
+                    <button
+                        type="button"
+                        className="solver-toggle"
+                        aria-expanded={solverOpen}
+                        aria-controls="solver-panel"
+                        onClick={() => setSolverOpen(!solverOpen)}
+                    >
+                        <span className={status.state === "ready" ? "solved-dot" : ""} />
+                        Solver{" "}
+                        <span>
+                            {busy
+                                ? "Solving…"
+                                : status.state === "ready"
+                                  ? `${Math.round(status.elapsedSeconds)}s · ${status.stopReason === "accuracy" ? "Target reached" : "Update limit reached"}`
+                                  : status.state === "failed"
+                                    ? "Failed"
+                                    : "Settings"}
+                        </span>
+                        <span aria-hidden="true">{solverOpen ? "▴" : "▾"}</span>
+                    </button>
+                    {solverOpen && (
+                        <div
+                            id="solver-panel"
+                            className="solver-popover"
+                            onKeyDown={(event) => {
+                                if (event.key === "Escape") setSolverOpen(false);
+                            }}
                         >
-                            Adjust solve
-                        </button>
+                            <SolvePanel
+                                board={board}
+                                status={status}
+                                busy={busy}
+                                changing={changing}
+                                ready={!!root}
+                                iterations={iterations}
+                                accuracyPercent={accuracyPercent}
+                                onIterations={setIterations}
+                                onAccuracyPercent={setAccuracyPercent}
+                                bettingTree={bettingTree}
+                                onBettingTree={(value) => void changeBettingTree(value)}
+                                onSolve={() => {
+                                    if (root) {
+                                        viewPost(navigation.activeIndex);
+                                        setSolverOpen(false);
+                                    } else void solve();
+                                }}
+                                onResolve={() => void solve()}
+                                onCancel={cancel}
+                                scenario={props.scenario}
+                                canSolve={preflop.canPlayPostflop}
+                                error={error}
+                            />
+                        </div>
                     )}
                 </div>
             </header>
@@ -174,16 +204,8 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                             />
                         )}
                     </div>
-                    <footer className="study-footnote">
-                        {showPostflop
-                            ? "Current solution · exact cards and action history"
-                            : `GTO Wizard · ${spotCount(format)} saved spots · ${catalog.capturedAt}`}
-                        {(error || navigation.navigationError) && (
-                            <span role="alert">{error ?? navigation.navigationError}</span>
-                        )}
-                    </footer>
                 </section>
-                <aside className="inspector">
+                <aside className={`inspector${view.panel === "solve" ? " without-actions" : ""}`}>
                     <SpotOverview
                         generation={generation}
                         spot={{
@@ -193,26 +215,7 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                             onBoard: boardAction,
                         }}
                     />
-                    {view.panel === "solve" ? (
-                        <SolvePanel
-                            board={board}
-                            status={status}
-                            busy={busy}
-                            changing={changing}
-                            ready={!!root}
-                            iterations={iterations}
-                            accuracyPercent={accuracyPercent}
-                            onIterations={setIterations}
-                            onAccuracyPercent={setAccuracyPercent}
-                            bettingTree={bettingTree}
-                            onBettingTree={(value) => void changeBettingTree(value)}
-                            onBoard={openFlop}
-                            onSolve={() => (root ? viewPost(navigation.activeIndex) : void solve())}
-                            onResolve={() => void solve()}
-                            onCancel={cancel}
-                            context={view.solveContext}
-                        />
-                    ) : view.panel === "complete" ? (
+                    {view.panel === "solve" ? null : view.panel === "complete" ? (
                         <section className="line-complete" role="status">
                             <strong>Betting complete</strong>
                             <span>No more actions to choose.</span>
@@ -223,6 +226,11 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                     <HandDetails label={selected} combos={strategy.handDetails(selected)} />
                 </aside>
             </div>
+            {(error || navigation.navigationError) && (
+                <div className="study-error" role="alert">
+                    {error ?? navigation.navigationError}
+                </div>
+            )}
             {picker && (
                 <BoardPicker
                     key={picker.kind === "flop" ? "flop" : picker.node.nodeId}

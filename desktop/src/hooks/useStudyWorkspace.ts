@@ -3,7 +3,7 @@ import { isForcedRunout, type ChanceNode, type SolverNode, type SolverStatus } f
 import { choiceKey, solutionFor, type PreflopChoice, type TableFormat } from "../solver/catalog";
 import { postflopScenario, preflopOutcome, replayPreflop, type PostflopScenario } from "../solver/preflop";
 import { buildStudyView } from "../solver/study";
-import { defaultBettingTree, parseBettingTree, type BettingTreeDraft } from "../solver/bettingTree";
+import { defaultBettingTree, parseBettingTree } from "../solver/bettingTree";
 import { useSolverNavigation } from "./useSolverNavigation";
 
 export interface StudyWorkspaceProps {
@@ -124,14 +124,6 @@ export function useStudyWorkspace({
             setRangeSeat(undefined);
         });
     }
-    async function changeBettingTree(value: BettingTreeDraft) {
-        if (status.state === "idle") setBettingTree(value);
-        else
-            await changeStudy(() => {
-                setBettingTree(value);
-                setPreIndex(history.length);
-            });
-    }
     async function solve() {
         if (editing.current || view.busy) return;
         try {
@@ -228,7 +220,12 @@ export function useStudyWorkspace({
                       ? () => void actPost(navigation.activeIndex, nodeId)
                       : undefined
                   : preNode
-                    ? () => void choose(view.preflop.shownHistory, preNode.actor, action.label)
+                    ? () =>
+                          void choose(
+                              view.preflop.shownHistory,
+                              preNode.actor,
+                              preNode.actions.find((candidate) => candidate.code === action.id)!.label,
+                          )
                     : undefined,
         };
     });
@@ -250,7 +247,7 @@ export function useStudyWorkspace({
         accuracyPercent,
         setAccuracyPercent,
         bettingTree,
-        changeBettingTree,
+        changeBettingTree: setBettingTree,
         error,
         picker,
         navigation,

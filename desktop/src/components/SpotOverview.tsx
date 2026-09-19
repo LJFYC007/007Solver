@@ -116,7 +116,12 @@ export default function SpotOverview({ spot, generation }: { spot: SpotSummary; 
                     </button>
                 ))}
             </div>
-            <div id="spot-information" role="tabpanel" aria-labelledby={`spot-tab-${tab.replace(" ", "-")}`}>
+            <div
+                className={`spot-body${tab === "Overview" ? "" : " expanded"}`}
+                id="spot-information"
+                role="tabpanel"
+                aria-labelledby={`spot-tab-${tab.replace(" ", "-")}`}
+            >
                 {tab === "Overview" ? (
                     <div className="overview-row">
                         <div className="overview-seats">
@@ -137,10 +142,23 @@ export default function SpotOverview({ spot, generation }: { spot: SpotSummary; 
                         </div>
                         <div className="overview-copy">
                             <div>
-                                <strong>{formatNumber(spot.pot)} pot</strong>
-                                {basePot !== spot.pot && <span>{formatNumber(basePot)} start</span>}
+                                <span>Pot</span>
+                                <strong>{formatNumber(spot.pot)}</strong>
                             </div>
-                            <span>Pot odds: {potOdds === undefined ? "—" : `${(potOdds * 100).toFixed(0)}%`}</span>
+                            <div>
+                                <span>Street start</span>
+                                <strong>{formatNumber(basePot)}</strong>
+                            </div>
+                            <div
+                                title={
+                                    potOdds === undefined
+                                        ? "No call to make"
+                                        : `Call ${formatNumber(spot.toCall!)} / ${formatNumber(spot.pot + spot.toCall!)} pot after calling. Break-even equity if no further betting.`
+                                }
+                            >
+                                <span>Pot odds ⓘ</span>
+                                <strong>{potOdds === undefined ? "—" : `${(potOdds * 100).toFixed(1)}%`}</strong>
+                            </div>
                         </div>
                         {board}
                     </div>

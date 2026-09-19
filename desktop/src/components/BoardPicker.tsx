@@ -20,48 +20,58 @@ export default function BoardPicker({
     onClose: () => void;
     onConfirm: (cards: string[]) => void;
 }) {
-    const [selected, setSelected] = useState(board.slice(0, count));
-    const [slot, setSlot] = useState(Math.min(board.length, count - 1));
+    const [selected, setSelected] = useState<(string | undefined)[]>(Array.from({ length: count }, (_, i) => board[i]));
+    const [slot, setSlot] = useState(board.length < count ? board.length : locked);
     const dialog = useRef<HTMLDialogElement>(null);
     useEffect(() => {
         const el = dialog.current!;
         el.showModal();
+        el.focus();
         return () => el.close();
     }, []);
     const deck = SUITS.flatMap((s) => RANKS.map((r) => r + s));
+    const selectedCount = selected.filter(Boolean).length;
+    function apply(next: (string | undefined)[]) {
+        setSelected(next);
+        const empty = next.findIndex((card, index) => index >= locked && !card);
+        setSlot(empty < 0 ? locked : empty);
+        if (next.every((card): card is string => card !== undefined)) onConfirm(next);
+    }
     function choose(card: string) {
         if (selected.slice(0, locked).includes(card)) return;
         const existing = selected.indexOf(card);
+        const next = selected.slice();
         if (existing >= locked) {
-            setSelected(selected.filter((_, i) => i !== existing));
+            next[existing] = undefined;
+            setSelected(next);
             setSlot(existing);
             return;
         }
-        const target = Math.max(locked, Math.min(slot, selected.length));
-        const next = selected.slice();
-        next[target] = card;
-        setSelected(next);
-        setSlot(Math.min(count - 1, target + 1));
+        next[slot] = card;
+        apply(next);
     }
     function undo() {
-        if (selected.length <= locked) return;
-        setSelected(selected.slice(0, -1));
-        setSlot(selected.length - 1);
+        const last = selected.reduce((found, card, index) => (index >= locked && card ? index : found), -1);
+        if (last < locked) return;
+        const next = selected.slice();
+        next[last] = undefined;
+        setSelected(next);
+        setSlot(last);
     }
     function randomize() {
         const next = selected.slice(0, locked);
         while (next.length < count) {
             const choices = deck.filter((c) => !next.includes(c) && (!available || available.includes(c)));
-            if (!choices.length) break;
+            if (!choices.length) return;
             next.push(choices[Math.floor(Math.random() * choices.length)]);
         }
-        setSelected(next);
-        setSlot(count - 1);
+        apply(next);
     }
     return (
         <dialog
             ref={dialog}
             className="board-dialog"
+            tabIndex={-1}
             aria-label={title}
             onCancel={onClose}
             onKeyDown={(event) => {
@@ -69,15 +79,6 @@ export default function BoardPicker({
                 if (event.key === "Backspace") {
                     event.preventDefault();
                     if (!event.repeat) undo();
-                } else if (
-                    event.key === "Enter" &&
-                    selected.length === count &&
-                    !(event.target as HTMLElement).closest(
-                        ".board-selection-tools, .dialog-close, .board-selection > button",
-                    )
-                ) {
-                    event.preventDefault();
-                    if (!event.repeat) onConfirm(selected);
                 }
             }}
             onClick={(e) => {
@@ -91,8 +92,8 @@ export default function BoardPicker({
                 <div className="board-picker-heading">
                     <strong>{title}</strong>
                     <small>
-                        {selected.length === count
-                            ? "Ready to confirm"
+                        {selectedCount === count
+                            ? "Choose a slot to replace a card"
                             : count === 3
                               ? `Flop · Card ${Math.min(slot + 1, 3)} of 3`
                               : `${count === 4 ? "Turn" : "River"} · Choose one card`}
@@ -120,7 +121,9 @@ export default function BoardPicker({
                             aria-label="Clear unlocked cards"
                             title="Clear unlocked cards"
                             onClick={() => {
-                                setSelected(selected.slice(0, locked));
+                                setSelected(
+                                    Array.from({ length: count }, (_, i) => (i < locked ? selected[i] : undefined)),
+                                );
                                 setSlot(locked);
                             }}
                         >
@@ -142,30 +145,20 @@ export default function BoardPicker({
                             key={card}
                             type="button"
                             aria-label={card}
-                            aria-pressed={selected.includes(card)}
+                            aria-pressed={selected.slice(locked).includes(card)}
                             disabled={
                                 selected.slice(0, locked).includes(card) || (!!available && !available.includes(card))
                             }
                             onClick={() => choose(card)}
                         >
-                            <BoardCard card={card} locked={selected.slice(0, locked).includes(card)} />
+                            <BoardCard card={card} />
                         </button>
                     ))}
                 </div>
                 <div className="board-dialog-footer">
                     <span>
-                        {selected.length - locked}/{count - locked} cards selected
-                        <br />
-                        Enter to confirm · Backspace to undo
+                        {selectedCount - locked}/{count - locked} selected · Completes automatically · Backspace to undo
                     </span>
-                    <button
-                        type="button"
-                        className="solve-button"
-                        disabled={selected.length !== count}
-                        onClick={() => onConfirm(selected)}
-                    >
-                        Confirm
-                    </button>
                 </div>
             </div>
         </dialog>

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import type { SolverStatus } from "../solver";
-import { BoardCard } from "./PlayingCards";
 import BettingTreeSettings from "./BettingTreeSettings";
-import type { BettingTreeDraft } from "../solver/bettingTree";
+import type { PostflopScenario } from "../solver/preflop";
+import { STREETS, type BettingTreeDraft } from "../solver/bettingTree";
 
 export default function SolvePanel({
     board,
@@ -12,8 +12,6 @@ export default function SolvePanel({
     ready,
     iterations,
     accuracyPercent,
-    context,
-    onBoard,
     onSolve,
     onResolve,
     onCancel,
@@ -21,7 +19,13 @@ export default function SolvePanel({
     onAccuracyPercent,
     bettingTree,
     onBettingTree,
+    scenario,
+    canSolve,
+    error,
 }: {
+    scenario?: PostflopScenario;
+    canSolve: boolean;
+    error?: string;
     board: string[];
     status: SolverStatus;
     busy: boolean;
@@ -29,8 +33,6 @@ export default function SolvePanel({
     ready: boolean;
     iterations: number;
     accuracyPercent: number;
-    context: string;
-    onBoard: () => void;
     onSolve: () => void;
     onResolve: () => void;
     onCancel: () => void;
@@ -40,6 +42,7 @@ export default function SolvePanel({
     onBettingTree: (value: BettingTreeDraft) => void;
 }) {
     const progress = status.state === "solving" ? status : undefined;
+    const result = status.state === "ready" ? status : undefined;
     const sample = progress?.elapsedSeconds;
     const [tick, setTick] = useState<{ sample?: number; age: number }>({ age: 0 });
     useEffect(() => {
@@ -49,127 +52,180 @@ export default function SolvePanel({
         return () => window.clearInterval(timer);
     }, [sample]);
     const age = tick.sample === sample ? tick.age : 0;
-    const elapsed = (sample ?? 0) + age;
+    const elapsed = result?.elapsedSeconds ?? (sample === undefined ? undefined : sample + age);
     const remaining =
         progress?.estimatedRemainingSeconds == null ? undefined : progress.estimatedRemainingSeconds - age;
     const timeProgress =
-        progress && remaining !== undefined ? Math.min(0.99, elapsed / (elapsed + Math.max(1, remaining))) : undefined;
+        elapsed !== undefined && remaining !== undefined
+            ? Math.min(0.99, elapsed / (elapsed + Math.max(1, remaining)))
+            : undefined;
+    const accuracy = result?.accuracyPercent ?? progress?.accuracyPercent;
+    const updates = result?.iterations ?? progress?.completedIterations;
+    const limit = result ? scenario?.iterations : progress?.totalIterations;
+    const target = result?.targetAccuracyPercent ?? progress?.targetAccuracyPercent;
+    const phase =
+        status.state === "solving"
+            ? status.phase === "finalizing"
+                ? "Finalizing solution"
+                : status.phase === "checking"
+                  ? "Checking accuracy"
+                  : "Training strategy"
+            : status.state === "buildingTree"
+              ? "Preparing solution"
+              : "Starting solver";
     return (
-        <section className="solve-setup">
-            <div className="panel-strip-title">
-                <strong>
-                    {busy
-                        ? "Solving postflop"
-                        : ready
-                          ? "Solution ready"
+        <section className="solve-setup" aria-label="Postflop solver">
+            <header className="solve-heading">
+                <h2>Postflop solver</h2>
+                <span className={`solve-state${result?.stopReason === "accuracy" ? " reached" : ""}`}>
+                    {result
+                        ? result.stopReason === "accuracy"
+                            ? "Target reached"
+                            : "Update limit reached"
+                        : busy
+                          ? "Solving"
                           : status.state === "failed"
-                            ? "Solve failed"
-                            : board.length === 3
-                              ? "Ready to solve"
-                              : "Select a flop"}
-                </strong>
-                <button type="button" disabled={busy || changing} onClick={onBoard}>
-                    Select cards
-                </button>
-            </div>
-            <div className="solve-setup-row">
-                <button
-                    type="button"
-                    className="stage-cards"
-                    aria-label="Choose flop cards"
-                    disabled={busy || changing}
-                    onClick={onBoard}
-                >
-                    {Array.from({ length: 3 }, (_, i) => (
-                        <BoardCard key={i} card={board[i]} />
-                    ))}
-                </button>
-                {busy ? (
-                    <div className="solve-phase" role="status">
-                        <strong>
-                            {status.state === "solving"
-                                ? status.phase === "finalizing"
-                                    ? "Finalizing solution"
-                                    : status.phase === "checking"
-                                      ? "Checking accuracy"
-                                      : "Training strategy"
-                                : status.state === "buildingTree"
-                                  ? "Preparing solution"
-                                  : "Starting solver"}
-                        </strong>
-                        <small>
-                            {status.state === "solving"
-                                ? `${remaining === undefined ? "Measuring convergence…" : remaining <= 0 ? "Updating time estimate…" : `About ${Math.ceil(remaining)} seconds remaining`} · ${Math.floor(elapsed)}s elapsed`
-                                : "Please wait…"}
-                        </small>
-                        {progress && (
-                            <small>
-                                {progress.accuracyPercent === null
-                                    ? `Target ${progress.targetAccuracyPercent}% pot`
-                                    : `${progress.accuracyPercent.toPrecision(3)}% pot · Target ${progress.targetAccuracyPercent}%`}
-                            </small>
-                        )}
-                        {progress && (
-                            <small>
-                                {progress.completedIterations.toLocaleString()} /{" "}
-                                {progress.totalIterations.toLocaleString()} updates
-                                {progress.estimate
-                                    ? ` · ${(progress.estimate.peakBytes / 1024 ** 3).toFixed(2)} GiB estimated`
-                                    : ""}
-                            </small>
-                        )}
-                    </div>
-                ) : (
-                    <button className="solve-button" disabled={board.length !== 3 || changing} onClick={onSolve}>
-                        {ready ? "View solution" : status.state === "failed" ? "Retry solve" : "Solve postflop"}
-                    </button>
-                )}
-            </div>
-            {busy && (
-                <>
-                    <progress aria-label="Estimated solve time progress" max={1} value={timeProgress} />
-                    <button className="quiet-button cancel-solve" disabled={changing} onClick={onCancel}>
-                        Cancel solve
-                    </button>
-                </>
+                            ? "Failed"
+                            : "Setup"}
+                </span>
+            </header>
+            {(busy || result) && (
+                <div className="solve-report">
+                    <dl className="solve-metrics">
+                        <div>
+                            <dt>Elapsed</dt>
+                            <dd>{elapsed === undefined ? "—" : `${elapsed.toFixed(1)}s`}</dd>
+                        </div>
+                        <div>
+                            <dt>Updates</dt>
+                            <dd>{updates?.toLocaleString() ?? "—"}</dd>
+                            <small>{limit ? `of ${limit.toLocaleString()}` : "Preparing"}</small>
+                        </div>
+                        <div>
+                            <dt>Exploitability</dt>
+                            <dd>{accuracy == null ? "—" : `${accuracy.toPrecision(3)}%`}</dd>
+                            <small>{target === undefined ? "Initial pot" : `Target ${target}% · initial pot`}</small>
+                        </div>
+                    </dl>
+                    {busy && (
+                        <div className="solve-phase" role="status">
+                            <div>
+                                <strong>{phase}</strong>
+                                <span>
+                                    {remaining === undefined
+                                        ? "Estimating time…"
+                                        : remaining <= 0
+                                          ? "Updating estimate…"
+                                          : `~${Math.ceil(remaining)}s remaining`}
+                                </span>
+                            </div>
+                            <progress aria-label="Estimated solve time progress" max={1} value={timeProgress} />
+                        </div>
+                    )}
+                    {result && scenario && (
+                        <details className="solve-snapshot">
+                            <summary>Settings used</summary>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Street</th>
+                                        <th>Bet %</th>
+                                        <th>Raise %</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {STREETS.map((street) => (
+                                        <tr key={street}>
+                                            <th>{street}</th>
+                                            <td>{scenario.bettingTree[street].bet.join(", ") || "None"}</td>
+                                            <td>{scenario.bettingTree[street].raise.join(", ") || "None"}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            <p>
+                                {scenario.bettingTree.maxRaises} raises per street <span>·</span> All-in SPR{" "}
+                                {scenario.bettingTree.allInSpr}
+                            </p>
+                        </details>
+                    )}
+                </div>
             )}
             {!busy && (
-                <details className="solve-settings">
-                    <summary>Solver settings</summary>
-                    <label>
-                        Accuracy (% pot)
-                        <input
-                            aria-label="Accuracy (% pot)"
-                            type="number"
-                            min="0.000001"
-                            step="any"
-                            disabled={changing}
-                            value={accuracyPercent}
-                            onChange={(e) => onAccuracyPercent(Number(e.target.value))}
-                        />
-                    </label>
-                    <label>
-                        Iteration limit
-                        <input
-                            aria-label="Iteration limit"
-                            type="number"
-                            min="1"
-                            max="2147483647"
-                            step="1"
-                            disabled={changing}
-                            value={iterations}
-                            onChange={(e) => onIterations(Number(e.target.value))}
-                        />
-                    </label>
-                    {ready && (
-                        <button type="button" className="solve-button" disabled={changing} onClick={onResolve}>
-                            Solve again
-                        </button>
-                    )}
+                <details className="solve-settings" open={!ready}>
+                    <summary>{ready ? "Next solve" : "Solve settings"}</summary>
+                    <div className="solve-targets">
+                        <label>
+                            Target exploitability
+                            <div className="solve-input-unit">
+                                <input
+                                    aria-label="Target exploitability (% initial pot)"
+                                    type="number"
+                                    min="0.000001"
+                                    step="any"
+                                    disabled={changing}
+                                    value={accuracyPercent}
+                                    onChange={(e) => onAccuracyPercent(Number(e.target.value))}
+                                />
+                                <span>%</span>
+                            </div>
+                            <small>of initial pot</small>
+                        </label>
+                        <label>
+                            Update limit
+                            <input
+                                aria-label="Update limit"
+                                type="number"
+                                min="1"
+                                max="2147483647"
+                                step="1"
+                                disabled={changing}
+                                value={iterations}
+                                onChange={(e) => onIterations(Number(e.target.value))}
+                            />
+                        </label>
+                    </div>
+                    <BettingTreeSettings value={bettingTree} disabled={changing} onChange={onBettingTree} />
                 </details>
             )}
-            <BettingTreeSettings value={bettingTree} disabled={busy || changing} onChange={onBettingTree} />
-            <small className="solve-context">{context}</small>
+            {error && (
+                <p className="solve-error" role="alert">
+                    {error}
+                </p>
+            )}
+            {status.state === "failed" && (
+                <p className="solve-error" role="alert">
+                    {status.message}
+                </p>
+            )}
+            {!canSolve ? (
+                <p className="solve-hint">Complete a heads-up preflop line to solve.</p>
+            ) : (
+                board.length !== 3 && <p className="solve-hint">Choose a flop in the action history to continue.</p>
+            )}
+            <footer className="solve-footer">
+                {busy ? (
+                    <button type="button" className="quiet-button" disabled={changing} onClick={onCancel}>
+                        Cancel solve
+                    </button>
+                ) : (
+                    <>
+                        {ready && (
+                            <button type="button" className="quiet-button" disabled={changing} onClick={onSolve}>
+                                View solution
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            className="solve-button"
+                            disabled={!canSolve || board.length !== 3 || changing}
+                            onClick={ready ? onResolve : onSolve}
+                        >
+                            {ready ? "Solve again" : status.state === "failed" ? "Retry solve" : "Solve"}
+                        </button>
+                    </>
+                )}
+            </footer>
         </section>
     );
 }

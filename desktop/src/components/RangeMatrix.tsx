@@ -8,7 +8,7 @@ import {
     strategyGradient,
 } from "../solver";
 import type { PreflopNode } from "../solver/catalog";
-import { preflopActionColor, probabilities } from "../solver/preflop";
+import { probabilities } from "../solver/preflop";
 
 interface MatrixCell {
     label: string;
@@ -69,7 +69,7 @@ export function PreflopRangeMatrix({
                     background: node
                         ? strategyGradient(
                               node.actions.map((action, index) => ({
-                                  color: preflopActionColor(action),
+                                  color: action.color,
                                   probability: weights?.[index] ?? 0,
                               })),
                           )

@@ -9,7 +9,6 @@ function frequency(probability: number) {
 
 export default function HandDetails({ label, combos }: { label: string; combos: DetailCombo[] }) {
     const columns = label.endsWith("s") ? 2 : 3;
-    const actionCount = Math.max(1, ...combos.map((c) => c.actions.length));
     return (
         <section className="hand-panel" aria-label={`${label} hand combinations`}>
             <div className="panel-strip-title">
@@ -18,14 +17,7 @@ export default function HandDetails({ label, combos }: { label: string; combos: 
                     {label} · {combos.length} combinations
                 </span>
             </div>
-            <div
-                className={`combo-grid ${columns === 2 ? "two-columns" : "three-columns"}`}
-                style={
-                    {
-                        "--action-count": actionCount,
-                    } as CSSProperties
-                }
-            >
+            <div className={`combo-grid ${columns === 2 ? "two-columns" : "three-columns"}`}>
                 {combos.map((combo) => {
                     return (
                         <article

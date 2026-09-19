@@ -2,21 +2,13 @@ import { nodeFor, solutionFor, type PreflopChoice, type PreflopNode, type TableF
 import {
     aggregatePreflopActions,
     comboCount,
-    preflopActionColor,
     preflopOutcome,
     probabilities,
     replayPreflop,
     type PostflopScenario,
     type PreflopState,
 } from "./preflop";
-import {
-    aggregateActions,
-    formatNumber,
-    handClassCombos,
-    isForcedRunout,
-    orderedActions,
-    type AggregatedAction,
-} from "./strategy";
+import { aggregateActions, handClassCombos, isForcedRunout, orderedActions, type AggregatedAction } from "./strategy";
 import type { DecisionNode, HandStrategy, Player, SolverNode, SolverStatus } from "./types";
 
 export interface PreflopEntry {
@@ -79,7 +71,7 @@ function preflopHandDetails(selected: string, range: Record<string, number>, pre
             ? preNode.actions.map((action, index) => ({
                   id: action.code,
                   label: action.label,
-                  color: preflopActionColor(action),
+                  color: action.color,
                   probability: selectedWeights[index],
               }))
             : [];
@@ -274,7 +266,7 @@ export function buildStudyView({
                 description:
                     solveState === "failed"
                         ? solveError
-                        : "Preparing your strategy. Follow progress in the solve panel.",
+                        : "Preparing your strategy. Open Solver above to view progress.",
             };
     } else if (!preNode && !state.complete)
         matrix = {
@@ -362,9 +354,5 @@ export function buildStudyView({
                 : !showPostflop && canPlayPostflop
                   ? "flop"
                   : undefined,
-        solveContext: `Pot ${formatNumber(fullState.pot)} · ${fullState.seats
-            .filter((seat) => !seat.folded)
-            .map((seat) => `${seat.position} ${formatNumber(solution.stack - seat.committed)}`)
-            .join(" / ")}`,
     };
 }

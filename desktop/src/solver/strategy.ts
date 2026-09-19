@@ -29,20 +29,44 @@ export const SUIT_SYMBOLS: Record<string, string> = {
     s: "♠",
 };
 
-export function actionLabel(action: Pick<DecisionAction, "amountTo" | "chipsCommitted" | "isAllIn" | "kind">): string {
+function actionPotPercent(action: DecisionAction, node: DecisionNode): number {
+    const toCall = action.kind === "raise" ? (node.actions.find((a) => a.kind === "call")?.chipsCommitted ?? 0) : 0;
+    return ((action.chipsCommitted - toCall) / (node.state.pot + toCall)) * 100;
+}
+
+export function actionLabel(action: DecisionAction): string {
     if (action.kind === "fold") return "Fold";
     if (action.kind === "check") return "Check";
     if (action.kind === "call") return "Call";
-    return `${action.kind === "bet" ? "Bet" : "Raise"} ${formatNumber(action.amountTo)}${action.isAllIn ? " (all-in)" : ""}`;
+    return `${action.kind === "bet" ? "Bet" : "Raise"} ${formatNumber(action.amountTo)}${action.isAllIn ? " · All-in" : ""}`;
 }
 
-export function actionColor(action: Pick<DecisionAction, "isAllIn" | "kind">): string {
+function aggressionBand(action: DecisionAction, node: DecisionNode): number {
+    if (action.isAllIn) return 3;
+    const percent = actionPotPercent(action, node);
+    if (percent < 36) return 0;
+    if (percent < 67) return 1;
+    return action.kind === "raise" || percent < 101 ? 2 : 3;
+}
+
+export function actionColor(action: DecisionAction, node: DecisionNode): string {
     if (action.kind === "fold") return "var(--action-fold)";
     if (action.kind === "call") return "var(--action-call)";
     if (action.kind === "check") return "var(--action-check)";
-    if (action.isAllIn) return "var(--action-allin)";
-    if (action.kind === "bet" || action.kind === "raise") return "var(--action-raise)";
-    return "var(--action-other)";
+    // GTO Wizard's Tadara theme: size bands, with a narrow gradient inside each band.
+    const band = aggressionBand(action, node);
+    const colors = ["small", "medium", "large", "overbet"];
+    const sizes = [
+        ...new Set(
+            node.actions
+                .filter((a) => a.kind === action.kind && aggressionBand(a, node) === band)
+                .map((a) => a.amountTo),
+        ),
+    ].sort((a, b) => a - b);
+    const start = `var(--action-${colors[band]})`;
+    if (sizes.length < 2) return start;
+    const shade = (sizes.indexOf(action.amountTo) / (sizes.length - 1)) * 100;
+    return `color-mix(in srgb, ${start} ${100 - shade}%, var(--action-${colors[band]}-end))`;
 }
 
 function actionDisplayOrder(action: Pick<DecisionAction, "isAllIn" | "kind">): number {
@@ -71,7 +95,7 @@ export function aggregateActions(node: DecisionNode, hands: HandStrategy[] = nod
 
         return {
             combos: weightedProbability,
-            color: actionColor(action),
+            color: actionColor(action, node),
             index,
             isAllIn: action.isAllIn,
             kind: action.kind,

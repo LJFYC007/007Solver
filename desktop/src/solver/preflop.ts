@@ -1,13 +1,6 @@
-import { actionColor, HAND_CLASSES, handClassCombos } from "./strategy";
+import { HAND_CLASSES, handClassCombos } from "./strategy";
 import type { BettingTree } from "./bettingTree";
-import {
-    nodeFor,
-    solutionFor,
-    type PreflopAction,
-    type PreflopChoice,
-    type PreflopNode,
-    type TableFormat,
-} from "./catalog";
+import { nodeFor, solutionFor, type PreflopChoice, type PreflopNode, type TableFormat } from "./catalog";
 
 export const probabilities = (node: PreflopNode, hand: string) => {
     const row = node.hands[hand];
@@ -32,7 +25,7 @@ export function aggregatePreflopActions(node: PreflopNode, range: Record<string,
     return node.actions.map((action, index) => ({
         id: action.code,
         label: action.label,
-        color: preflopActionColor(action),
+        color: action.color,
         probability: total > 0 ? totals[index] / total : 0,
         combos: totals[index],
     }));
@@ -178,9 +171,4 @@ export function postflopScenario(
         ranges: { [hero.position]: hero.range, [villain.position]: villain.range },
         rangeSource: { solution: format, history },
     };
-}
-
-export function preflopActionColor(action: PreflopAction): string {
-    const kind = action.code === "F" ? "fold" : action.code === "C" ? "call" : action.code === "X" ? "check" : "raise";
-    return actionColor({ kind, isAllIn: action.code === "RAI" });
 }

@@ -14,7 +14,7 @@ export default function EquityChart({
     selected?: string;
 }) {
     const plot = useRef<HTMLDivElement>(null);
-    const [size, setSize] = useState({ width: 360, height: 215 });
+    const [size, setSize] = useState({ width: 0, height: 0 });
     const [visible, setVisible] = useState<Record<Player, boolean>>({ hero: true, villain: true });
     const [hover, setHover] = useState<{
         nodeId: number;
@@ -59,7 +59,8 @@ export default function EquityChart({
         <div className="equity-chart">
             <div className="equity-plot" ref={plot}>
                 <svg
-                    viewBox={`0 0 ${size.width} ${size.height}`}
+                    viewBox={`0 0 ${size.width || 1} ${size.height || 1}`}
+                    style={{ visibility: size.width ? "visible" : "hidden" }}
                     role="img"
                     aria-label="Equity distribution by weighted hand percentile"
                     onMouseLeave={() => setHover(undefined)}

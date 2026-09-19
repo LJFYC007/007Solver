@@ -42,7 +42,6 @@ const files = import.meta.glob<PreflopNode[]>("../../../resources/gtowizard-pref
     import: "default",
 });
 const nodeIndex = new Map<string, PreflopNode>();
-const counts = new Map<TableFormat, number>();
 for (const [path, nodes] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
     const [format, filename] = path.split("/").slice(-2);
     const solution = catalog.solutions.find((candidate) => candidate.id === format);
@@ -57,10 +56,8 @@ for (const [path, nodes] of Object.entries(files).sort(([a], [b]) => a.localeCom
         const key = `${format}:${choiceKey(node.history)}`;
         if (nodeIndex.has(key)) throw new Error(`Duplicate source history: ${path}`);
         nodeIndex.set(key, node);
-        counts.set(format as TableFormat, (counts.get(format as TableFormat) ?? 0) + 1);
     }
 }
 
 export const nodeFor = (format: TableFormat, history: PreflopChoice[]) =>
     nodeIndex.get(`${format}:${choiceKey(history)}`);
-export const spotCount = (format: TableFormat) => counts.get(format) ?? 0;

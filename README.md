@@ -8,7 +8,7 @@
 
 The bundled [catalog](resources/gtowizard-preflop/) contains chip-EV, 100bb, 6-max and 8-max ranges. Only captured branches are available. Postflop solving is heads-up and rake-free; folded players' card-removal effects are not modeled. Solves stop at the target exploitability or the iteration limit, and report which condition ended the solve. The displayed memory estimate is informational and does not limit the solve.
 
-Solver settings default to **0.01% of the initial pot** and a **3,000-update limit**. One update trains one player. Remaining seconds and the time progress bar estimate completion from measured speed and convergence; they can change as accuracy is checked. The estimate is unavailable until a stable convergence trend is measured. After a solve, use **Adjust solve** to change settings and solve the same flop again.
+Solver settings default to **0.01% of the initial pot** and a **3,000-update limit**. One update trains one player. Remaining seconds and the time progress bar estimate completion from measured speed and convergence; they can change as accuracy is checked. The estimate is unavailable until a stable convergence trend is measured. Open **Solver** in the top-right corner to configure or monitor a solve. After completion, the same panel keeps the total time, achieved exploitability, stop reason and settings used for the current solution. Editing the next solve settings preserves that solution until **Solve again** is selected. Card selection completes automatically when all required slots are filled; click a selected card to clear its slot before completion.
 
 ## Requirements
 
