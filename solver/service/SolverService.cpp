@@ -1,6 +1,6 @@
 #include "service/SolverService.h"
 #include "analysis/AnalysisSession.h"
-#include "engine/CpuDcfrSession.h"
+#include "engine/DcfrSession.h"
 #include "game/GameCompiler.h"
 #include "io/ScenarioLoader.h"
 #include "service/ConvergenceEstimate.h"
@@ -30,7 +30,7 @@ SolverService::SolverService(std::istream& input, std::ostream& output, std::ost
     : input_(input), output_(output), diagnostics_(diagnostics)
 {}
 
-int SolverService::Run(const std::string& scenarioPath)
+int SolverService::Run(const std::string& scenarioPath, engine::ComputeDevice device)
 {
     try
     {
@@ -46,7 +46,7 @@ int SolverService::Run(const std::string& scenarioPath)
         }();
         using Clock = std::chrono::steady_clock;
         const auto solveStart = Clock::now();
-        const auto elapsed = [&] { return std::chrono::duration<double>(Clock::now() - solveStart).count(); };
+        const auto elapsed = [&] { return std::chrono::duration<float>(Clock::now() - solveStart).count(); };
         WriteMessage(output_, {ServiceMessageKind::BuildingTree, 0, 0, scenario.iterations});
 
         diagnostics_ << "Start building decision tree...\n";
@@ -54,22 +54,23 @@ int SolverService::Run(const std::string& scenarioPath)
         diagnostics_ << "Decision tree has " << game->NodeCount() << " nodes\n";
 
         auto problem = std::make_shared<const engine::SolveProblem>(engine::SolveProblem{game, std::move(scenario.ranges)});
-        const auto estimate = engine::EstimateCpuMemory(*problem);
-        diagnostics_ << "Tree estimate: " << estimate.logicalNodes << " logical nodes, " << estimate.topologyNodes << " topology nodes, "
-                     << estimate.traversalNodes << " active nodes, " << estimate.strategyEntries
-                     << " strategy entries; solve peak estimate " << estimate.peakBytes << " bytes\n";
+        engine::MemoryEstimate estimate{};
 
         diagnostics_ << "Start solving game...\n";
-        const double initialPot = static_cast<double>(game->Spec().initialPot.Raw()) / core::Chips::kUnitsPerChip;
-        const double target = initialPot * (scenario.accuracyPercent / 100.0);
+        const float initialPot = static_cast<float>(game->Spec().initialPot.Raw()) / core::Chips::kUnitsPerChip;
+        const float target = initialPot * (scenario.accuracyPercent / 100.0f);
         engine::ExploitabilityMetrics metrics;
         int completedIterations = 0;
-        double trainingSeconds = 0.0;
+        float trainingSeconds = 0.0f;
         SolveProgress solveProgress;
         solveProgress.targetAccuracyPercent = scenario.accuracyPercent;
         engine::StrategySnapshot strategy = [&]
         {
-            engine::CpuDcfrSession session(problem);
+            engine::DcfrSession session(problem, device);
+            estimate = session.Memory();
+            diagnostics_ << "Device: " << session.DeviceName() << "; CPU workers: " << session.WorkerCount() << "; "
+                         << estimate.strategyEntries << " strategy entries; combined allocation peak estimate " << estimate.peakBytes
+                         << " bytes\n";
             ConvergenceEstimate convergence;
             int nextCheck = convergence.NextCheck(scenario.iterations, target);
             const auto progress = [&](int completed, SolvePhase phase)
@@ -91,11 +92,18 @@ int SolverService::Run(const std::string& scenarioPath)
                 const int completed = session.CompletedIterations();
                 progress(completed, SolvePhase::Checking);
                 const auto checkStart = Clock::now();
-                metrics = session.EvaluateExploitability();
-                const double evaluationSeconds = std::chrono::duration<double>(Clock::now() - checkStart).count();
+                if (completed == scenario.iterations)
+                    metrics = session.CertifyExploitability();
+                else
+                {
+                    metrics = session.EvaluateExploitability();
+                    if (session.Device() == engine::ComputeDevice::Gpu && metrics.exploitability <= target)
+                        metrics = session.CertifyExploitability();
+                }
+                const float evaluationSeconds = std::chrono::duration<float>(Clock::now() - checkStart).count();
                 convergence.Observe(completed, metrics.exploitability, session.TrainingTimeSeconds(), evaluationSeconds);
-                if (initialPot > 0.0)
-                    solveProgress.accuracyPercent = 100.0 * std::max(0.0f, metrics.exploitability) / initialPot;
+                if (initialPot > 0.0f)
+                    solveProgress.accuracyPercent = 100.0f * std::max(0.0f, metrics.exploitability) / initialPot;
                 if (metrics.exploitability <= target)
                     break;
 
@@ -103,7 +111,6 @@ int SolverService::Run(const std::string& scenarioPath)
             }
             completedIterations = session.CompletedIterations();
             trainingSeconds = session.TrainingTimeSeconds();
-            diagnostics_ << "Algorithm: dcfr, configured CPU worker limit: " << session.WorkerCount() << '\n';
             progress(completedIterations, SolvePhase::Finalizing);
             return std::move(session).ExportStrategy();
         }();
@@ -122,7 +129,7 @@ int SolverService::Run(const std::string& scenarioPath)
         ready.estimate = estimate;
         solveProgress.phase = SolvePhase::Complete;
         solveProgress.elapsedSeconds = elapsed();
-        solveProgress.estimatedRemainingSeconds = 0.0;
+        solveProgress.estimatedRemainingSeconds = 0.0f;
         ready.progress = solveProgress;
         ready.stopReason = targetReached ? StopReason::Accuracy : StopReason::IterationLimit;
         WriteMessage(output_, ready);

@@ -6,7 +6,7 @@
     "initialPot": 5.0,
     "heroStack": 15.0,
     "villainStack": 15.0,
-    "iterations": 3000,
+    "iterations": 3500,
     "bettingTree": {
         "flop": {
             "bet": [

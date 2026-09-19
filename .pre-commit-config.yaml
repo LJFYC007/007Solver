@@ -18,7 +18,7 @@ repos:
         name: clang-format (local)
         entry: clang-format -i
         language: system
-        files: ^(solver/|tests/).*\.(cpp|cc|cxx|h|hpp|hh)$
+        files: ^(solver/|tests/).*\.(cpp|cc|cxx|cu|mm|inc|h|hpp|hh)$
 
       - id: eslint
         name: ESLint (auto-fix)

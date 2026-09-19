@@ -41,7 +41,7 @@ public:
     std::vector<float> StrategyOrUniform(const game::InfoSetKey& infoSet) const;
 
 private:
-    friend class CpuDcfrSession;
+    friend struct HandTraversalData;
 
     struct NodeBlock
     {

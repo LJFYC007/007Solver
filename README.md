@@ -4,11 +4,9 @@
 
 <h1 align="center">007 Solver</h1>
 
-007 Solver is a Windows/macOS desktop app with a C++17 CPU DCFR engine and a React/Tauri interface. Select a captured GTO Wizard preflop line and a flop, solve the heads-up continuation, then inspect strategies, node EVs and exact showdown equity.
+007 Solver is a Windows/macOS desktop app for heads-up postflop solving and strategy analysis. Its C++17 DCFR engine supports CPU, CUDA on Windows and Metal on Apple Silicon.
 
-The bundled [catalog](resources/gtowizard-preflop/) contains chip-EV, 100bb, 6-max and 8-max ranges. Only captured branches are available. Postflop solving is heads-up and rake-free; folded players' card-removal effects are not modeled. Solves stop at the target exploitability or the iteration limit, and report which condition ended the solve. The displayed memory estimate is informational and does not limit the solve.
-
-Solver settings default to **0.01% of the initial pot** and a **3,000-update limit**. One update trains one player. Remaining seconds and the time progress bar estimate completion from measured speed and convergence; they can change as accuracy is checked. The estimate is unavailable until a stable convergence trend is measured. Open **Solver** in the top-right corner to configure or monitor a solve. After completion, the same panel keeps the total time, achieved exploitability, stop reason and settings used for the current solution. Editing the next solve settings preserves that solution until **Solve again** is selected. Card selection completes automatically when all required slots are filled; click a selected card to clear its slot before completion.
+The bundled [GTO Wizard catalog](resources/gtowizard-preflop/) contains chip-EV, 100bb, 6-max and 8-max ranges. Missing branches are not inferred. Solving is rake-free and does not model folded players' card-removal effects.
 
 ## Requirements
 
@@ -20,6 +18,8 @@ Solver settings default to **0.01% of the initial pot** and a **3,000-update lim
 On macOS, install Xcode Command Line Tools (`xcode-select --install`) and `brew install cmake ninja libomp`. Build for the Mac's native Apple Silicon or Intel architecture.
 
 On Windows, use **Developer PowerShell for Visual Studio** with Visual Studio 2022+ and **Desktop development with C++** installed. Run `chcp 65001` before building so Ninja can parse localized MSVC dependencies. Running the app requires an AVX2-capable CPU, WebView2 and the Microsoft Visual C++ x64 runtime, including OpenMP (`VCOMP140.DLL`).
+
+GPU support is enabled by default. Apple Silicon uses Metal; Intel Macs use CPU. Windows builds use CUDA when CMake finds a CUDA Toolkit compatible with the native MSVC compiler. CUDA requires compute capability 8.9 or newer and a compatible NVIDIA driver; without a CUDA compiler, the build uses CPU. Pass `-DSOLVER_ENABLE_GPU=OFF` for a CPU-only build, or `-DCMAKE_CUDA_COMPILER=<path-to-nvcc>` if the toolkit is outside the compiler search path.
 
 ## Setup and development
 
@@ -48,7 +48,9 @@ For a small CLI solve after building the service:
 ./build/release/solver/solver_service tests/fixtures/weighted-flop.json
 ```
 
-On Windows, append `.exe`. Use `--stdin` instead of the file path to send a scenario as the first JSON line, followed by query lines. `iterations` is the update limit; optional `accuracyPercent` is a positive percentage of the initial pot and defaults to `0.01`. The example and parser are [weighted-flop.json](tests/fixtures/weighted-flop.json) and [ScenarioLoader.cpp](solver/io/ScenarioLoader.cpp).
+On Windows, append `.exe`. Use `--stdin` instead of the file path to send a scenario as the first JSON line, followed by query lines. `iterations` limits player updates; `accuracyPercent` is a percentage of the initial pot (`0.01` means `0.01%`). See [the input fixture](tests/fixtures/weighted-flop.json) and [parser](solver/io/ScenarioLoader.cpp) for the schema and defaults.
+
+The service and desktop select an available GPU automatically. Append `--device=cpu`, `--device=gpu` or `--device=auto` to select explicitly; stderr reports the backend. An unavailable requested GPU or insufficient device memory is an error. The displayed memory estimate covers combined host/device allocations and does not impose a limit. CPU and GPU use float arithmetic; the CPU evaluator independently certifies GPU stopping and final metrics with the exported strategy's normalization.
 
 ## Checks
 
@@ -76,12 +78,4 @@ git diff --check
 
 Hooks may fix formatting. Use `pre-commit run --all-files` when a whole-repository check is needed; it only includes tracked files. Benchmark commands and independent reference generation are in [tests/README.md](tests/README.md).
 
-## Code and documentation
-
-- [solver/](solver/): C++ solver and service; read [ARCHITECTURE.md](solver/ARCHITECTURE.md) for shared semantics and ownership.
-- [desktop/src/](desktop/src/) and [desktop/src-tauri/](desktop/src-tauri/): React UI and Rust bridge.
-- [tests/](tests/): correctness tests, benchmark and independent oracle.
-- [resources/](resources/) and [scripts/](scripts/): captured ranges and tooling.
-- [AGENTS.md](AGENTS.md): contribution constraints and verification rules.
-
-Build targets, scripts and hooks are defined in [CMakeLists.txt](CMakeLists.txt), [CMakePresets.json](CMakePresets.json), [desktop/package.json](desktop/package.json) and [.pre-commit-config.yaml](.pre-commit-config.yaml).
+Shared semantics and ownership are in [solver/ARCHITECTURE.md](solver/ARCHITECTURE.md); contribution rules are in [AGENTS.md](AGENTS.md).

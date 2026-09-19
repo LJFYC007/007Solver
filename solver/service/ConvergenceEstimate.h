@@ -10,23 +10,23 @@ namespace solver::service
 class ConvergenceEstimate
 {
 public:
-    void Observe(int iterations, double exploitability, double trainingSeconds, double evaluationSeconds);
-    std::optional<double> TargetIteration(double target) const;
-    int NextCheck(int iterationLimit, double target) const;
-    std::optional<double> RemainingSeconds(int completed, int nextCheck, int iterationLimit, double target) const;
-    double FinalizationSeconds() const;
+    void Observe(int iterations, float exploitability, float trainingSeconds, float evaluationSeconds);
+    std::optional<float> TargetIteration(float target) const;
+    int NextCheck(int iterationLimit, float target) const;
+    std::optional<float> RemainingSeconds(int completed, int nextCheck, int iterationLimit, float target) const;
+    float FinalizationSeconds() const;
 
 private:
     struct Sample
     {
         int iterations = 0;
-        double exploitability = 0.0;
-        double trainingSeconds = 0.0;
-        double evaluationSeconds = 0.0;
+        float exploitability = 0.0f;
+        float trainingSeconds = 0.0f;
+        float evaluationSeconds = 0.0f;
     };
-    double SecondsPerIteration() const;
-    double CheckInterval() const;
-    double MinimumInterval() const;
+    float SecondsPerIteration() const;
+    float CheckInterval() const;
+    float MinimumInterval() const;
     std::array<Sample, 4> samples_{};
     std::size_t size_ = 0;
 };

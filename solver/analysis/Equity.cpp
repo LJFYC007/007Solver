@@ -15,8 +15,8 @@ struct RankedHand
 
 struct Mass
 {
-    double total = 0.0;
-    std::array<double, 52> cards{};
+    float total = 0.0f;
+    std::array<float, 52> cards{};
 
     void Add(const HandEquity& hand)
     {
@@ -25,7 +25,7 @@ struct Mass
             cards[card.Index()] += hand.ownReachWeight;
     }
 
-    double Without(core::HoleCards hand) const { return total - cards[hand.CardAt(0).Index()] - cards[hand.CardAt(1).Index()]; }
+    float Without(core::HoleCards hand) const { return total - cards[hand.CardAt(0).Index()] - cards[hand.CardAt(1).Index()]; }
 };
 } // namespace
 
@@ -47,7 +47,7 @@ EquityReport AnalysisSession::QueryEquity(game::NodeId nodeId)
     if (reach.jointReachMasses.empty())
         return report;
 
-    std::array<std::vector<double>, 2> wins, masses;
+    std::array<std::vector<float>, 2> wins, masses;
     for (std::size_t player = 0; player < 2; ++player)
     {
         wins[player].resize(report.players[player].hands.size());
@@ -90,15 +90,15 @@ EquityReport AnalysisSession::QueryEquity(game::NodeId nodeId)
                     const auto hand = report.players[player].hands[index].cards;
                     const auto same = indices[1 - player].find(hand);
                     // An identical opponent hand was subtracted once for each shared card.
-                    const double identical = same == indices[1 - player].end() ? 0.0 : opponents[same->second].ownReachWeight;
-                    const auto compatible = [&](const Mass& source, std::size_t begin, std::size_t endIndex, double matching)
+                    const float identical = same == indices[1 - player].end() ? 0.0f : opponents[same->second].ownReachWeight;
+                    const auto compatible = [&](const Mass& source, std::size_t begin, std::size_t endIndex, float matching)
                     {
-                        double value = source.Without(hand) + matching;
+                        float value = source.Without(hand) + matching;
                         // Subtracting a dominant blocker can erase a small but positive
                         // compatible range. Match the traversal kernel's direct fallback.
-                        if (value <= source.total * 1e-6)
+                        if (value <= source.total * 1e-4f)
                         {
-                            value = 0.0;
+                            value = 0.0f;
                             for (std::size_t other = begin; other < endIndex; ++other)
                             {
                                 const auto& opponent = opponents[opponentRanks[other].index];
@@ -108,10 +108,10 @@ EquityReport AnalysisSession::QueryEquity(game::NodeId nodeId)
                         }
                         return value;
                     };
-                    const double mass = compatible(totals[1 - player], 0, opponentRanks.size(), identical);
-                    const double tieMass = compatible(tied, cursor, end, identical);
+                    const float mass = compatible(totals[1 - player], 0, opponentRanks.size(), identical);
+                    const float tieMass = compatible(tied, cursor, end, identical);
                     masses[player][index] += mass;
-                    wins[player][index] += compatible(lower, 0, cursor, 0.0) + 0.5 * tieMass;
+                    wins[player][index] += compatible(lower, 0, cursor, 0.0f) + 0.5f * tieMass;
                 } while (first < ranks[player].size() && ranks[player][first].rank == rank);
             }
         }
@@ -137,17 +137,17 @@ EquityReport AnalysisSession::QueryEquity(game::NodeId nodeId)
 
     for (std::size_t player = 0; player < 2; ++player)
     {
-        double totalWins = 0.0, totalMass = 0.0;
+        float totalWins = 0.0f, totalMass = 0.0f;
         for (std::size_t index = 0; index < report.players[player].hands.size(); ++index)
         {
             auto& hand = report.players[player].hands[index];
-            if (masses[player][index] > 0.0)
-                hand.equity = std::clamp(wins[player][index] / masses[player][index], 0.0, 1.0);
+            if (masses[player][index] > 0.0f)
+                hand.equity = std::clamp(wins[player][index] / masses[player][index], 0.0f, 1.0f);
             totalWins += hand.ownReachWeight * wins[player][index];
             totalMass += hand.ownReachWeight * masses[player][index];
         }
-        if (totalMass > 0.0)
-            report.players[player].equity = std::clamp(totalWins / totalMass, 0.0, 1.0);
+        if (totalMass > 0.0f)
+            report.players[player].equity = std::clamp(totalWins / totalMass, 0.0f, 1.0f);
     }
     return report;
 }

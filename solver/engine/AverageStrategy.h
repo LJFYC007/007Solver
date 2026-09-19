@@ -14,10 +14,10 @@ inline void NormalizeAverageStrategy(
     std::size_t outputStride
 )
 {
-    double total = 0.0;
+    float total = 0.0f;
     for (std::size_t action = 0; action < actionCount; ++action)
         total += sums[action * stride];
     for (std::size_t action = 0; action < actionCount; ++action)
-        output[action * outputStride] = total > 0.0 ? static_cast<float>(sums[action * stride] / total) : 1.0f / actionCount;
+        output[action * outputStride] = total > 0.0f ? sums[action * stride] / total : 1.0f / actionCount;
 }
 } // namespace solver::engine

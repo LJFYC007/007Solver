@@ -6,7 +6,7 @@ namespace
 {
 float ToChipUnits(core::Chips chips)
 {
-    return static_cast<float>(chips.Raw()) / static_cast<float>(core::Chips::kUnitsPerChip);
+    return static_cast<float>(chips.Raw()) / core::Chips::kUnitsPerChip;
 }
 } // namespace
 

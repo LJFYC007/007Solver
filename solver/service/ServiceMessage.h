@@ -37,10 +37,10 @@ enum class StopReason : std::uint8_t
 struct SolveProgress
 {
     SolvePhase phase = SolvePhase::Training;
-    double elapsedSeconds = 0.0;
-    std::optional<double> estimatedRemainingSeconds;
-    std::optional<double> accuracyPercent;
-    double targetAccuracyPercent = 0.01;
+    float elapsedSeconds = 0.0f;
+    std::optional<float> estimatedRemainingSeconds;
+    std::optional<float> accuracyPercent;
+    float targetAccuracyPercent = 0.01f;
 };
 
 struct ServiceMessage

@@ -24,23 +24,22 @@ public:
     // Final export consumes training state; this session must not be run again.
     StrategySnapshot ExportStrategy() &&;
     int CompletedIterations() const { return completedIterations_; }
-    double TrainingTimeSeconds() const { return trainingTimeSeconds_; }
+    float TrainingTimeSeconds() const { return trainingTimeSeconds_; }
     // Configured workspace/team limit; the OpenMP runtime may use fewer threads.
     int WorkerCount() const { return workerCount_; }
 
 private:
     std::shared_ptr<const SolveProblem> problem_;
     const HandTraversal traversal_;
-    std::array<std::vector<double>, 2> divisors_;
+    std::array<std::vector<float>, 2> divisors_;
     // Action-major rows, with a fixed root-hand stride for the acting player.
     std::vector<float> regrets_;
     std::vector<float> strategySums_;
     HandTraversal::Workspace workspace_;
     std::vector<HandTraversal::Workspace> workers_;
     std::vector<float> rootValues_;
-    std::size_t infoSetCount_ = 0;
     int workerCount_;
     int completedIterations_ = 0;
-    double trainingTimeSeconds_ = 0.0;
+    float trainingTimeSeconds_ = 0.0f;
 };
 } // namespace solver::engine

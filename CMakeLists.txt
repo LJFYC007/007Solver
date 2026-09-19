@@ -50,3 +50,13 @@ target_compile_definitions(
 if(MSVC)
     target_compile_options(007SolverBenchmark PRIVATE /utf-8)
 endif()
+
+foreach(SOLVER_BENCHMARK_DEVICE IN ITEMS cpu gpu)
+    add_custom_target(benchmark_${SOLVER_BENCHMARK_DEVICE}
+        COMMAND $<TARGET_FILE:007SolverBenchmark> --device=${SOLVER_BENCHMARK_DEVICE}
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+        DEPENDS 007SolverBenchmark
+        USES_TERMINAL
+        VERBATIM
+    )
+endforeach()

@@ -11,11 +11,11 @@ namespace solver::service
 {
 namespace
 {
-using Json = nlohmann::json;
+using Json = nlohmann::basic_json<std::map, std::vector, std::string, bool, std::int64_t, std::uint64_t, float>;
 
-double ToChipUnits(core::Chips chips)
+float ToChipUnits(core::Chips chips)
 {
-    return static_cast<double>(chips.Raw()) / static_cast<double>(core::Chips::kUnitsPerChip);
+    return static_cast<float>(chips.Raw()) / core::Chips::kUnitsPerChip;
 }
 
 std::string PlayerCode(core::PlayerId player)

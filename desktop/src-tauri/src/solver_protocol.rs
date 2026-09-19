@@ -32,10 +32,10 @@ enum StopReason {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SolveProgress {
     phase: SolvePhase,
-    elapsed_seconds: f64,
-    estimated_remaining_seconds: Option<f64>,
-    accuracy_percent: Option<f64>,
-    target_accuracy_percent: f64,
+    elapsed_seconds: f32,
+    estimated_remaining_seconds: Option<f32>,
+    accuracy_percent: Option<f32>,
+    target_accuracy_percent: f32,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

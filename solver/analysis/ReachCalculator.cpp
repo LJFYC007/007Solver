@@ -69,7 +69,7 @@ ReachCalculator::JointReachMasses ReachCalculator::BuildInitialJointReachMasses(
 ) const
 {
     JointReachMasses jointReachMasses;
-    double totalWeight = 0.0;
+    float totalWeight = 0.0f;
     for (const auto& [player0Hand, player0Weight] : ranges.For(core::PlayerId::Player0()).Entries())
     {
         if (player0Weight <= 0.0f || core::Overlaps(player0Hand, board))
@@ -81,17 +81,17 @@ ReachCalculator::JointReachMasses ReachCalculator::BuildInitialJointReachMasses(
                 continue;
 
             jointReachMasses.push_back({player0Hand, player1Hand, 0.0f});
-            totalWeight += static_cast<double>(player0Weight) * player1Weight;
+            totalWeight += player0Weight * player1Weight;
         }
     }
-    if (totalWeight <= 0.0)
+    if (totalWeight <= 0.0f)
         throw std::runtime_error("No valid private hand pairs for reach calculation");
 
     for (JointReach& jointReach : jointReachMasses)
     {
-        const double jointWeight = static_cast<double>(ranges.For(core::PlayerId::Player0()).GetWeight(jointReach.player0Hand)) *
-                                   ranges.For(core::PlayerId::Player1()).GetWeight(jointReach.player1Hand);
-        jointReach.jointReachMass = static_cast<float>(jointWeight / totalWeight);
+        const float jointWeight = ranges.For(core::PlayerId::Player0()).GetWeight(jointReach.player0Hand) *
+                                  ranges.For(core::PlayerId::Player1()).GetWeight(jointReach.player1Hand);
+        jointReach.jointReachMass = jointWeight / totalWeight;
     }
     return jointReachMasses;
 }
@@ -161,7 +161,7 @@ ReachCalculator::JointReachMasses ReachCalculator::PropagateChanceReach(
         propagatedMasses.push_back({
             jointReach.player0Hand,
             jointReach.player1Hand,
-            jointReach.jointReachMass / static_cast<float>(legalOutcomeCount),
+            jointReach.jointReachMass / legalOutcomeCount,
         });
     }
     return propagatedMasses;

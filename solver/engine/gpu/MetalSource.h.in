@@ -1,0 +1,7 @@
+#pragma once
+static const char* kMetalSource = R"SOLVER_METAL(
+#include <metal_stdlib>
+using namespace metal;
+@GPU_TYPES@
+@GPU_KERNELS@
+)SOLVER_METAL";

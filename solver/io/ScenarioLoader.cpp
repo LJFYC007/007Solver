@@ -16,16 +16,16 @@ namespace solver::io
 {
 namespace
 {
-using Json = nlohmann::json;
+using Json = nlohmann::basic_json<std::map, std::vector, std::string, bool, std::int64_t, std::uint64_t, float>;
 
 core::Chips ParseChips(const Json& value, const std::string& field)
 {
-    const double chips = value.get<double>();
-    if (!std::isfinite(chips) || chips < 0.0)
+    const float chips = value.get<float>();
+    if (!std::isfinite(chips) || chips < 0.0f)
         throw std::runtime_error(field + " must be a finite non-negative number");
 
-    const double raw = chips * static_cast<double>(core::Chips::kUnitsPerChip);
-    if (raw > static_cast<double>(std::numeric_limits<std::int32_t>::max()))
+    const float raw = chips * core::Chips::kUnitsPerChip;
+    if (raw >= static_cast<float>(std::numeric_limits<std::int32_t>::max()))
         throw std::runtime_error(field + " is too large");
     return core::Chips::FromRaw(static_cast<std::int32_t>(std::llround(raw)));
 }
@@ -54,12 +54,15 @@ std::vector<std::int64_t> ParsePercentages(const Json& values, const std::string
     {
         if (!value.is_number())
             throw std::runtime_error(field + " must contain numbers");
-        const double percent = value.get<double>();
-        const double scaled = percent * 100.0;
-        if (!std::isfinite(percent) || scaled < 1.0 || scaled > std::numeric_limits<std::int32_t>::max() ||
-            std::abs(scaled - std::round(scaled)) > 1e-6)
+        const float percent = value.get<float>();
+        const float scaled = percent * 100.0f;
+        const float whole = std::floor(percent);
+        const float hundredths = std::round((percent - whole) * 100.0f);
+        // Round the fractional part before adding it to the integer percentage.
+        if (!std::isfinite(percent) || scaled < 1.0f || scaled >= static_cast<float>(std::numeric_limits<std::int32_t>::max()) ||
+            percent != whole + hundredths / 100.0f)
             throw std::runtime_error(field + " must contain positive percentages with at most two decimal places");
-        percentages.push_back(static_cast<std::int64_t>(std::llround(scaled)));
+        percentages.push_back(static_cast<std::int64_t>(whole) * 100 + static_cast<std::int64_t>(hundredths));
     }
     return percentages;
 }
@@ -87,9 +90,9 @@ game::BettingAbstraction ParseBettingTree(const Json& json)
     if (!maxRaises.is_number_unsigned() || maxRaises.get<std::uint64_t>() > 2)
         throw std::runtime_error("bettingTree.maxRaises must be 0, 1 or 2 (excluding the opening bet)");
     const auto& allInSpr = tree.at("allInSpr");
-    if (!allInSpr.is_number() || !std::isfinite(allInSpr.get<double>()) || allInSpr.get<double>() < 0.0)
+    if (!allInSpr.is_number() || !std::isfinite(allInSpr.get<float>()) || allInSpr.get<float>() < 0.0f)
         throw std::runtime_error("bettingTree.allInSpr must be a finite non-negative number");
-    return {std::move(streets), maxRaises.get<std::uint32_t>(), allInSpr.get<double>()};
+    return {std::move(streets), maxRaises.get<std::uint32_t>(), allInSpr.get<float>()};
 }
 } // namespace
 
@@ -112,8 +115,8 @@ Scenario ReadScenario(std::istream& input)
         iterationCount.get<std::uint64_t>() > std::numeric_limits<int>::max())
         throw std::runtime_error("Solve iterations must be an integer between 1 and INT_MAX");
     const int iterations = iterationCount.get<int>();
-    const double accuracyPercent = json.value("accuracyPercent", 0.01);
-    if (!std::isfinite(accuracyPercent) || accuracyPercent <= 0.0)
+    const float accuracyPercent = json.value("accuracyPercent", 0.01f);
+    if (!std::isfinite(accuracyPercent) || accuracyPercent <= 0.0f)
         throw std::runtime_error("Accuracy must be a finite positive percentage of the initial pot");
     if (json.value("algorithm", std::string("dcfr")) != "dcfr")
         throw std::runtime_error("Solve algorithm must be dcfr");

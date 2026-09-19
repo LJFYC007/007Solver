@@ -48,7 +48,7 @@ struct StreetBettingSizes
 
 struct BettingAbstraction
 {
-    BettingAbstraction(std::array<StreetBettingSizes, 3> streetSizes, std::uint32_t maximumRaises, double allInThreshold)
+    BettingAbstraction(std::array<StreetBettingSizes, 3> streetSizes, std::uint32_t maximumRaises, float allInThreshold)
         : streets(std::move(streetSizes)), maxRaises(maximumRaises), allInSpr(allInThreshold)
     {}
 
@@ -57,7 +57,7 @@ struct BettingAbstraction
     // The opening bet does not count. At the cap, only passive actions remain.
     std::uint32_t maxRaises;
     // Replace a configured size when the effective SPR after a call is at most this value.
-    double allInSpr;
+    float allInSpr;
 
     std::vector<BettingAction> SelectActions(const PublicState& state, const LegalActionSet& legalActions) const;
 };

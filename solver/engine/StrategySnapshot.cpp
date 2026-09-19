@@ -85,7 +85,7 @@ void StrategySnapshot::Validate() const
                 throw std::invalid_argument("Strategy entry hand overlaps the public board");
             if (hand > 0 && !(hands_[handOffset + hand - 1] < cards))
                 throw std::invalid_argument("Packed strategy hands must be sorted and unique");
-            double totalProbability = 0.0;
+            float totalProbability = 0.0f;
             for (std::size_t action = 0; action < block.actionCount; ++action)
             {
                 const float probability = probabilities_[probabilityOffset++];
@@ -93,8 +93,8 @@ void StrategySnapshot::Validate() const
                     throw std::invalid_argument("Strategy probabilities must be finite and non-negative");
                 totalProbability += probability;
             }
-            constexpr double normalizationTolerance = 1e-5;
-            if (std::abs(totalProbability - 1.0) > normalizationTolerance)
+            constexpr float normalizationTolerance = 1e-5f;
+            if (std::abs(totalProbability - 1.0f) > normalizationTolerance)
                 throw std::invalid_argument("Strategy probabilities must sum to one");
         }
         handOffset += block.handCount;
@@ -134,7 +134,7 @@ const float* StrategySnapshot::FindStrategy(const game::InfoSetKey& infoSet) con
 float StrategySnapshot::ActionProbability(const game::InfoSetKey& infoSet, std::size_t action) const
 {
     const float* strategy = FindStrategy(infoSet);
-    return strategy ? strategy[action] : 1.0f / static_cast<float>(game_->GetNode(infoSet.node).BettingEdgeCount());
+    return strategy ? strategy[action] : 1.0f / (game_->GetNode(infoSet.node).BettingEdgeCount());
 }
 
 std::vector<float> StrategySnapshot::StrategyOrUniform(const game::InfoSetKey& infoSet) const
@@ -143,6 +143,6 @@ std::vector<float> StrategySnapshot::StrategyOrUniform(const game::InfoSetKey& i
     const std::size_t actionCount = game_->GetNode(infoSet.node).BettingEdgeCount();
     if (strategy)
         return std::vector<float>(strategy, strategy + actionCount);
-    return std::vector<float>(actionCount, 1.0f / static_cast<float>(actionCount));
+    return std::vector<float>(actionCount, 1.0f / actionCount);
 }
 } // namespace solver::engine

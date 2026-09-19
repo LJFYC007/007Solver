@@ -6,15 +6,21 @@ This document records semantics shared across modules. Implementation details li
 
 The calculation layers are `analysis -> engine -> game -> core`. The `io` adapter parses scenarios; `service` composes the solve and query lifecycle. JSON and presentation concerns stay outside core, game and engine.
 
-Each service process owns one solve. It checks exploitability on the current average strategy without consuming training state, stopping at the target or update limit. It then exports one strategy snapshot, releases training state, and retains the result for queries. The service owns progress and final metrics; `SolveResult` owns only the problem and snapshot. The final metrics belong to that same strategy; checkpoint normalization must match snapshot export. A result and its snapshot must refer to the same compiled game. Sparse solver snapshots use uniform play for omitted exact-hand entries. Node views and borrowed strategy data must not outlive their owners.
+Each service process owns one solve, stopping at the accuracy target or update limit. Checkpoints do not consume training state; export releases it. Final metrics must describe the exported strategy, using the same normalization. A result and its snapshot must refer to the same compiled game. Sparse snapshots use uniform play for omitted exact-hand entries. Node views and borrowed strategy data must not outlive their owners.
 
-Each CPU training iteration updates one player, alternating across successive `Run` calls. Reach propagation, value backup and strategy accumulation use the policy at entry to each decision node. Training may batch disjoint chance subtrees within an update: ancestor regrets remain unchanged while workers replay their entry paths and solve those subtrees. Workers own separate scratch buffers and result rows; after they finish, ancestor updates consume the results in the original tree/action order. Scheduling must not change reach propagation, floating-point backup order, or the alternating-player iteration boundary.
+Each training iteration updates one player, alternating across successive `Run` calls. Reach propagation, value backup and strategy accumulation use the policy at entry to each decision node. Parallel subtree updates must retain ancestor entry policies, use separate scratch, and preserve tree/action backup order and the alternating-player boundary.
 
-The desktop scopes requests and caches to a solution generation. [App](../desktop/src/App.tsx) owns solve replacement and cancellation; [useStudyWorkspace](../desktop/src/hooks/useStudyWorkspace.ts) routes line and board edits through that invalidation before applying local changes. Solver settings are drafts for the next solve; editing them preserves the current result and its submitted scenario. Navigation is suspended before invalidation. Replacing or cancelling a solve invalidates pending requests and cached reports; responses from an old generation must not update the current view.
+[HandTraversalData](engine/HandTraversalData.h) shares immutable traversal tables across backends; mutable training state belongs to each session. Rank tables may share an unordered turn/river pair, but strategy state remains distinct for every ordered history. Both backends share snapshot normalization and compaction.
+
+The [GPU plan](engine/gpu/GpuPlan.h) may reuse descendant scratch only after backup, retaining live ancestor reaches and child-root values. Its batching target is not a hard memory limit: individual street regions and retained ancestors can exceed it, and the whole tree's regrets and cumulative strategies remain resident.
+
+CPU and GPU use float arithmetic; their accumulation and traversal orders can produce different results. CUDA and Metal share kernel arithmetic. GPU checkpoints are provisional: before stopping at the accuracy target or reporting final metrics, the CPU evaluator independently evaluates the cumulative strategy with the same normalization as snapshot export.
+
+Desktop requests and caches belong to a solution generation. Replacing or cancelling a solve invalidates pending requests and cached reports; old responses must not update the current view. Line and board edits must invalidate before applying changes. Solver settings are drafts for the next solve and preserve the current result and submitted scenario.
 
 Service stdout is one protocol JSON message per line; diagnostics go to stderr. Protocol changes must agree across the [C++ serializer](service/JsonAdapter.cpp), [Rust envelope](../desktop/src-tauri/src/solver_protocol.rs) and [TypeScript types](../desktop/src/solver/types.ts). Rust passes node and equity payloads through.
 
-The service accuracy target is exploitability as a percentage of the initial pot (`0.01` means `0.01%`). Ready reports actual completed updates and whether accuracy or the iteration limit stopped training. Elapsed time includes preparation, checks and export. Remaining seconds require a measured decreasing convergence trend and include future checks; an insufficient or unstable trend has no estimate. The iteration limit alone is not a convergence forecast. The UI interpolates time between samples and reserves completion for Ready.
+The service accuracy target is exploitability as a percentage of the initial pot (`0.01` means `0.01%`). Ready reports actual completed updates and the stop reason. Elapsed time includes preparation, checks and export. Remaining time requires a measured decreasing convergence trend and includes future checks; an unstable or insufficient trend has no estimate. Only Ready marks completion.
 
 ## Identity and amounts
 
@@ -48,11 +54,11 @@ Each chance outcome has probability `1 / (52 - boardCardCount - 4)` for a compat
 
 ## Betting tree
 
-Every scenario supplies a complete `bettingTree` that configures `flop`, `turn` and `river` independently. Each street requires `bet` and `raise` arrays of positive percentages (up to two decimal places); an empty array disables that aggression. `maxRaises` and `allInSpr` are also required. Both players use the same settings. The desktop initializes bets and raises to `[50]`, `maxRaises` to `2` and `allInSpr` to `0.15`. See [the correctness fixture](../tests/fixtures/weighted-flop.json).
+Each scenario supplies all three streets of `bettingTree`; both players use the same settings. Empty `bet` or `raise` arrays disable that aggression. See [the input fixture](../tests/fixtures/weighted-flop.json) and [parser](io/ScenarioLoader.cpp) for required fields and validation.
 
 Bet percentages use the current pot. Raise percentages specify the additional raise above a call, as a fraction of the pot after calling. Amounts round half up to tenths of a chip, then clamp to the legal minimum and effective-stack maximum.
 
-`maxRaises` accepts 0–2 and counts raises per street, excluding the opening bet. At the cap only call/fold remain; reaching the cap never forces a shove. `allInSpr` replaces a configured bet/raise with the effective-stack maximum when the remaining effective stack divided by the pot **after the opponent calls** is at most the threshold. Zero disables this replacement. Equal resulting sizes are deduplicated. No separate all-in size is added. The application, correctness fixtures and benchmark use the same scenario settings and build rules.
+`maxRaises` counts raises per street, excluding the opening bet. At the cap only call/fold remain; reaching the cap never forces a shove. `allInSpr` replaces a configured bet/raise with the effective-stack maximum when the remaining effective stack divided by the pot **after the opponent calls** is at most the threshold. Zero disables this replacement. Equal resulting sizes are deduplicated; no separate all-in size is added.
 
 All-in remains a property of a bet, raise or call, not a separate action kind. Covering the opponent's stack does not necessarily set `isAllIn` for the acting player.
 

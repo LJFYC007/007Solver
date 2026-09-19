@@ -18,7 +18,7 @@ ExploitabilityMetrics EvaluateBestResponses(const HandTraversal& traversal, cons
     std::array<float, 2> bestResponses{};
     for (std::size_t player = 0; player < 2; ++player)
     {
-        std::vector<double> reach;
+        std::vector<float> reach;
         if (strategy)
             reach = traversal.OpponentReachAtRoot(*strategy, 1 - player);
         else
@@ -28,15 +28,14 @@ ExploitabilityMetrics EvaluateBestResponses(const HandTraversal& traversal, cons
         const auto values = strategy
                                 ? traversal.EvaluateSnapshot(*strategy, player, reach, divisors, HandTraversal::Evaluation::BestResponse)
                                 : traversal.EvaluateAverageBestResponse(strategySums, player, reach, divisors);
-        double totalValue = 0.0;
-        double totalMass = 0.0;
+        float totalValue = 0.0f, totalMass = 0.0f;
         for (std::size_t hand = 0; hand < values.size(); ++hand)
         {
-            const double mass = traversal.hands[player][hand].weight * divisors[hand];
+            const float mass = traversal.hands[player][hand].weight * divisors[hand];
             totalValue += mass * values[hand];
             totalMass += mass;
         }
-        bestResponses[player] = static_cast<float>(totalValue / totalMass);
+        bestResponses[player] = totalValue / totalMass;
     }
     return {bestResponses[0], bestResponses[1], (bestResponses[0] + bestResponses[1]) / 2.0f};
 }
@@ -68,7 +67,7 @@ std::map<core::HoleCards, float> EvaluateNodeStrategyEvs(
     std::map<core::HoleCards, float> evs;
     for (std::size_t hand = 0; hand < values.size(); ++hand)
     {
-        if (divisors[hand] > 0.0)
+        if (divisors[hand] > 0.0f)
         {
             // Undo the subtree's zero-sum shift for either player: the pot at the
             // queried node is dead money; this restores net payoff from that node.

@@ -1,11 +1,12 @@
 #include "analysis/AnalysisSession.h"
-#include "engine/CpuDcfrSession.h"
+#include "engine/DcfrSession.h"
 #include "engine/StrategyEvaluator.h"
 #include "game/GameCompiler.h"
 #include "io/ScenarioLoader.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -39,40 +40,42 @@ std::shared_ptr<const engine::SolveProblem> Problem(const std::string& name)
     return std::make_shared<const engine::SolveProblem>(engine::SolveProblem{game::CompileGame(scenario.game), std::move(scenario.ranges)});
 }
 
-void CheckSolve(const std::string& name)
+void CheckSolve(const std::string& name, engine::ComputeDevice requestedDevice, int workers)
 {
     const auto problem = Problem(name);
     const int iterations = Fixture(name).at("iterations").get<int>();
-    for (const int workers : {1, 4})
+    SCOPED_TRACE("dcfr workers=" + std::to_string(workers));
+    engine::ExploitabilityMetrics checkpoint;
+    // The service checks accuracy before consuming the training state.
+    const auto strategy = [&]
     {
-        SCOPED_TRACE("dcfr workers=" + std::to_string(workers));
-        engine::ExploitabilityMetrics checkpoint;
-        // The service checks accuracy before consuming the training state.
-        const auto strategy = [&]
-        {
-            engine::CpuDcfrSession session(problem, workers);
-            // An odd split exercises player alternation across continued runs.
-            session.Run(101);
-            session.Run(iterations - 101);
-            EXPECT_EQ(session.CompletedIterations(), iterations);
-            checkpoint = session.EvaluateExploitability();
-            return std::move(session).ExportStrategy();
-        }();
-        const auto actual = engine::EvaluateExploitability(*problem, strategy);
-        EXPECT_NEAR(checkpoint.player0BestResponseEv, actual.player0BestResponseEv, 1e-6f);
-        EXPECT_NEAR(checkpoint.player1BestResponseEv, actual.player1BestResponseEv, 1e-6f);
-        const auto& expected = References().at(name).at("solved");
-        ASSERT_TRUE(std::isfinite(actual.player0BestResponseEv));
-        ASSERT_TRUE(std::isfinite(actual.player1BestResponseEv));
-        ASSERT_TRUE(std::isfinite(actual.exploitability));
-        // [-villain BR, hero BR] must intersect the external value interval.
-        constexpr float roundingTolerance = 1e-5f;
-        EXPECT_GE(actual.player0BestResponseEv, -expected.at("villainBestResponseEv").get<float>() - roundingTolerance);
-        EXPECT_GE(actual.player1BestResponseEv, -expected.at("heroBestResponseEv").get<float>() - roundingTolerance);
-        EXPECT_NEAR(actual.exploitability, (actual.player0BestResponseEv + actual.player1BestResponseEv) / 2.0f, roundingTolerance);
-        EXPECT_LE(actual.exploitability, 0.01f); // 0.5% of the fixtures' initial pot.
-        ASSERT_FALSE(testing::Test::HasFailure());
-    }
+        engine::DcfrSession session(problem, requestedDevice, workers);
+        if (requestedDevice == engine::ComputeDevice::Auto)
+            EXPECT_EQ(session.Device(), engine::ComputeDevice::Gpu);
+        testing::Test::RecordProperty("device", session.DeviceName());
+        testing::Test::RecordProperty("cpuWorkers", std::to_string(session.WorkerCount()));
+        std::cout << name << ": Device: " << session.DeviceName() << "; CPU workers: " << session.WorkerCount() << std::endl;
+        // An odd split exercises player alternation across continued runs.
+        session.Run(101);
+        session.Run(iterations - 101);
+        EXPECT_EQ(session.CompletedIterations(), iterations);
+        checkpoint = session.EvaluateExploitability();
+        return std::move(session).ExportStrategy();
+    }();
+    const auto actual = engine::EvaluateExploitability(*problem, strategy);
+    EXPECT_NEAR(checkpoint.player0BestResponseEv, actual.player0BestResponseEv, 1e-6f);
+    EXPECT_NEAR(checkpoint.player1BestResponseEv, actual.player1BestResponseEv, 1e-6f);
+    const auto& expected = References().at(name).at("solved");
+    ASSERT_TRUE(std::isfinite(actual.player0BestResponseEv));
+    ASSERT_TRUE(std::isfinite(actual.player1BestResponseEv));
+    ASSERT_TRUE(std::isfinite(actual.exploitability));
+    // [-villain BR, hero BR] must intersect the external value interval.
+    constexpr float roundingTolerance = 1e-5f;
+    EXPECT_GE(actual.player0BestResponseEv, -expected.at("villainBestResponseEv").get<float>() - roundingTolerance);
+    EXPECT_GE(actual.player1BestResponseEv, -expected.at("heroBestResponseEv").get<float>() - roundingTolerance);
+    EXPECT_NEAR(actual.exploitability, (actual.player0BestResponseEv + actual.player1BestResponseEv) / 2.0f, roundingTolerance);
+    EXPECT_LE(actual.exploitability, 0.01f); // 0.5% of the fixtures' initial pot.
+    ASSERT_FALSE(testing::Test::HasFailure());
 }
 
 engine::StrategySnapshot FixedStrategy(const engine::SolveProblem& problem, const Json& policy)
@@ -105,14 +108,38 @@ TEST(StrategyEvaluatorTest, UniformPolicyMatchesIndependentBestResponses)
     EXPECT_NEAR(actual.exploitability, expected.at("exploitability").get<float>(), 1e-5f);
 }
 
-TEST(SolverReferenceTest, WeightedFlopConvergesToExternalValue)
+TEST(SolverReferenceTest, WeightedFlopCpuOneWorker)
 {
-    CheckSolve("weighted-flop");
+    CheckSolve("weighted-flop", engine::ComputeDevice::Cpu, 1);
 }
 
-TEST(SolverReferenceTest, RaiseFlopConvergesToExternalValue)
+TEST(SolverReferenceTest, WeightedFlopCpuFourWorkers)
 {
-    CheckSolve("raise-flop");
+    CheckSolve("weighted-flop", engine::ComputeDevice::Cpu, 4);
+}
+
+TEST(SolverReferenceTest, WeightedFlopGpu)
+{
+    if (!engine::GpuDcfrSession::Available())
+        GTEST_SKIP() << "No supported CUDA or Metal GPU is available";
+    CheckSolve("weighted-flop", engine::ComputeDevice::Auto, 0);
+}
+
+TEST(SolverReferenceTest, RaiseFlopCpuOneWorker)
+{
+    CheckSolve("raise-flop", engine::ComputeDevice::Cpu, 1);
+}
+
+TEST(SolverReferenceTest, RaiseFlopCpuFourWorkers)
+{
+    CheckSolve("raise-flop", engine::ComputeDevice::Cpu, 4);
+}
+
+TEST(SolverReferenceTest, RaiseFlopGpu)
+{
+    if (!engine::GpuDcfrSession::Available())
+        GTEST_SKIP() << "No supported CUDA or Metal GPU is available";
+    CheckSolve("raise-flop", engine::ComputeDevice::Auto, 0);
 }
 
 TEST(AnalysisSessionTest, FixedPoliciesMatchIndependentNodeValuesAndReach)

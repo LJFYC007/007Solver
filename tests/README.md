@@ -6,33 +6,35 @@ Run commands from the repository root. Use Terminal on macOS or Developer PowerS
 
 Use the [build and test commands](../README.md#checks). CTest writes `build/release/solver-test-results.json`; routine tests use checked-in references and run offline.
 
-Coverage and assertions live in [domain_tests.cpp](domain_tests.cpp) and [tests.cpp](tests.cpp). Scenario inputs and independent expected answers live in [fixtures/](fixtures/); each input's `rangeSource` records its source and reductions.
+Coverage lives in [domain_tests.cpp](domain_tests.cpp) and [tests.cpp](tests.cpp); inputs and independent answers live in [fixtures/](fixtures/). GPU cases skip when no supported device is available. Check the recorded device and skipped cases in the JSON report or `ctest -V`; passing CUDA checks does not validate Metal.
 
 ## Benchmark
 
-The benchmark is separate from the default build and CTest:
+The CPU and GPU benchmarks are separate opt-in commands. Each builds the same executable and writes its own timestamped report under `build/benchmark-results/`:
 
 ```sh
 cmake --preset Release
-cmake --build --preset Release --target 007SolverBenchmark
-./build/release/007SolverBenchmark
+cmake --build --preset Release --target benchmark_cpu
+cmake --build --preset Release --target benchmark_gpu
 ```
 
-For Visual Studio CPU sampling that can name functions, use RelWithDebInfo instead. It matches Release's `/O2 /Ob2` and the Windows solver's `/arch:AVX2`, and writes a PDB next to the executable; do not reuse the Release tree:
+The GPU command selects CUDA or Metal on a supported machine and fails if no GPU backend is available.
+
+For Visual Studio CPU sampling with symbols, use the separate RelWithDebInfo build:
 
 ```sh
 cmake --preset RelWithDebInfo
 cmake --build --preset RelWithDebInfo --target 007SolverBenchmark
-./build/relwithdebinfo/007SolverBenchmark
+./build/relwithdebinfo/007SolverBenchmark --device=cpu
 ```
 
-Optional flags are `--report=<new-json-path>`, `--iterations=<count>` and `--workers=<count>`. The default workload is [utg-bb-wide.json](fixtures/utg-bb-wide.json); checks and report fields are defined in [benchmark.cpp](benchmark.cpp).
+Direct invocation accepts `--report=<new-json-path>`, `--iterations=<count>`, `--workers=<count>` and `--device=cpu|gpu|auto`; it defaults to CPU, and `--workers` affects only CPU training. Workload and report definitions are in [benchmark.cpp](benchmark.cpp).
 
-Add `--convergence` to record exploitability every 200 updates while preserving the fixed budget. `--stop-at-accuracy` also stops when the benchmark's accuracy requirement is reached. Both record checkpoint wall time separately from pure training time; use the same checkpoint mode when comparing discount schedules. The final exported snapshot is evaluated independently of the checkpoints.
+`--convergence` records periodic checkpoints; `--stop-at-accuracy` also permits early stopping. GPU stopping and final checkpoints receive CPU certification, and the exported snapshot is independently evaluated. Checkpoint time is separate from pure training time.
 
-Reports are local artifacts under `build/benchmark-results/` by default. Existing report paths are not overwritten. Read timings, memory and accuracy directly from a completed report; `status: running` is incomplete. Builds and CTest do not refresh benchmark results.
+Reports do not overwrite existing paths. Read results under [build/benchmark-results/](../build/benchmark-results/) only after completion; `status: running` is incomplete. Builds and CTest do not refresh them.
 
-For comparisons, rebuild the changed source, run without competing builds/solves, and hold inputs, references, iteration budget and worker count constant. Check achieved exploitability alongside timing. Identify the Git revision and any uncommitted changes in the report filename or comparison notes; the report does not record them. Windows and macOS memory metrics have different meanings.
+Compare runs without competing builds/solves, holding inputs, references, update budget, checkpoint mode and CPU workers constant. Compare achieved exploitability alongside time, and record the Git revision and uncommitted changes externally. Process memory metrics differ across platforms and exclude dedicated GPU allocations; the solver estimate covers combined host/device allocations.
 
 ## Updating inputs and references
 

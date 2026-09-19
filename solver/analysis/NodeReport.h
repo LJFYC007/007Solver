@@ -17,7 +17,7 @@ struct NodeStateReport
     core::Board board;
     core::Chips pot;
     std::array<core::Chips, 2> stacks;
-    std::array<double, 2> rangeCombos{};
+    std::array<float, 2> rangeCombos{};
 };
 
 struct HandReport

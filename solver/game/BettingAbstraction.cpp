@@ -75,7 +75,7 @@ std::vector<BettingAction> BettingAbstraction::SelectActions(const PublicState& 
         const std::int64_t potAfterCall = static_cast<std::int64_t>(state.pot.Raw()) + 2LL * amountTo.Raw() -
                                           state.Contribution(state.playerToAct).Raw() - state.Contribution(state.playerToAct.Other()).Raw();
         const auto remaining = range.maximumAmountTo.Raw() - amountTo.Raw();
-        if (allInSpr > 0.0 && static_cast<double>(remaining) / static_cast<double>(potAfterCall) <= allInSpr)
+        if (allInSpr > 0.0f && static_cast<float>(remaining) / potAfterCall <= allInSpr)
             amountTo = range.maximumAmountTo;
 
         const bool duplicate =

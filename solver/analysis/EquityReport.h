@@ -11,13 +11,13 @@ namespace solver::analysis
 struct HandEquity
 {
     core::HoleCards cards;
-    double ownReachWeight;
-    std::optional<double> equity;
+    float ownReachWeight;
+    std::optional<float> equity;
 };
 
 struct PlayerEquity
 {
-    std::optional<double> equity;
+    std::optional<float> equity;
     std::vector<HandEquity> hands;
 };
 

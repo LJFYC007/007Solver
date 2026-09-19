@@ -1,5 +1,5 @@
 #include "analysis/AnalysisSession.h"
-#include "engine/CpuDcfrSession.h"
+#include "engine/DcfrSession.h"
 #include "engine/StrategyEvaluator.h"
 #include "engine/MemoryEstimate.h"
 #include "game/GameCompiler.h"
@@ -38,6 +38,7 @@ std::filesystem::path reportPath;
 Clock::time_point stageStart;
 int iterationBudget = 0;
 int workers = 0;
+engine::ComputeDevice computeDevice = engine::ComputeDevice::Cpu;
 bool checkConvergence = false;
 bool stopAtAccuracy = false;
 
@@ -199,8 +200,12 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
     StartStage("session_initialization");
     auto strategy = [&]
     {
-        auto session = std::make_unique<engine::CpuDcfrSession>(problem, workers);
+        auto session = std::make_unique<engine::DcfrSession>(problem, computeDevice, workers);
         report["workers"] = session->WorkerCount();
+        report["device"] = session->DeviceName();
+        std::cout << "Device: " << session->DeviceName() << std::endl;
+        report["tree_estimate"]["peak_bytes"] = session->Memory().peakBytes;
+        report["tree_estimate"]["workers"] = session->WorkerCount();
         FinishStage("session_initialization");
         StartStage("training");
         int lastProgress = 0;
@@ -221,7 +226,11 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
             );
             if (checkConvergence)
             {
-                const auto metrics = session->EvaluateExploitability();
+                auto metrics =
+                    session->CompletedIterations() == iterations ? session->CertifyExploitability() : session->EvaluateExploitability();
+                if (session->Device() == engine::ComputeDevice::Gpu && session->CompletedIterations() != iterations && stopAtAccuracy &&
+                    metrics.exploitability <= kMaxExploitability)
+                    metrics = session->CertifyExploitability();
                 CheckMetrics(metrics);
                 report["checkpoint"] = Metrics(metrics);
                 report["convergence"].push_back({
@@ -235,7 +244,6 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
                     break;
             }
         }
-        report["workers"] = session->WorkerCount();
         report["training_loop_seconds"] = session->TrainingTimeSeconds();
         report["completed_iterations"] = session->CompletedIterations();
         FinishStage("training");
@@ -330,6 +338,12 @@ int main(int argc, char** argv)
                 iterationBudget = PositiveInteger(arg.substr(13));
             else if (arg.rfind("--workers=", 0) == 0)
                 workers = PositiveInteger(arg.substr(10));
+            else if (arg == "--device=gpu")
+                computeDevice = engine::ComputeDevice::Gpu;
+            else if (arg == "--device=cpu")
+                computeDevice = engine::ComputeDevice::Cpu;
+            else if (arg == "--device=auto")
+                computeDevice = engine::ComputeDevice::Auto;
             else if (arg == "--convergence")
                 checkConvergence = true;
             else if (arg == "--stop-at-accuracy")
