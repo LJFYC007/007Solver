@@ -97,6 +97,22 @@ HandTraversalData::HandTraversalData(const SolveProblem& problem, game::NodeId r
                 order.masks.push_back(source.mask);
             }
         }
+        for (std::size_t player = 0; player < 2; ++player)
+        {
+            auto& order = rankRows.back()[player];
+            const auto& opponent = rankRows.back()[1 - player].ranks;
+            order.lowerBounds.reserve(order.ranks.size());
+            order.upperBounds.reserve(order.ranks.size());
+            for (const auto rank : order.ranks)
+            {
+                order.lowerBounds.push_back(
+                    static_cast<std::uint16_t>(std::lower_bound(opponent.begin(), opponent.end(), rank) - opponent.begin())
+                );
+                order.upperBounds.push_back(
+                    static_cast<std::uint16_t>(std::upper_bound(opponent.begin(), opponent.end(), rank) - opponent.begin())
+                );
+            }
+        }
     };
     if (rootState.board.CardCount() == 5)
         addRanks(rootState.board);

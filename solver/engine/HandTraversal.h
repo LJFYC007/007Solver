@@ -125,7 +125,7 @@ private:
         bool useRunoutCache = false;
     };
     std::vector<float> EvaluateHands(const WalkContext& context, const std::vector<float>& opponentReach) const;
-    // All paths retain the entry policy in a row per depth. Training supplies a
+    // Required entry policies stay in a row per depth. Training supplies a
     // cursor only when consuming completed chance tasks in preorder.
     void Walk(
         std::uint32_t node,

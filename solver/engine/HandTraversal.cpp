@@ -221,12 +221,12 @@ void HandTraversal::EvaluateTerminal(
     const auto& opponentRanks = rankRows[node.rankRow][1 - updatingPlayer];
     const float winDelta = (updatingPlayer == 0 ? node.utilities[0] : -node.utilities[2]) - tie;
     const float lossDelta = (updatingPlayer == 0 ? node.utilities[2] : -node.utilities[0]) - tie;
-    const std::uint16_t* myRankValues = myRanks.ranks.data();
+    const std::uint16_t* lowerBounds = myRanks.lowerBounds.data();
+    const std::uint16_t* upperBounds = myRanks.upperBounds.data();
     const std::uint16_t* myHands = myRanks.hands.data();
     const std::uint8_t* myCard0 = myRanks.card0.data();
     const std::uint8_t* myCard1 = myRanks.card1.data();
     const std::uint64_t* myRankMasks = myRanks.masks.data();
-    const std::uint16_t* oppRankValues = opponentRanks.ranks.data();
     const std::uint16_t* oppHands = opponentRanks.hands.data();
     const std::uint8_t* oppCard0 = opponentRanks.card0.data();
     const std::uint8_t* oppCard1 = opponentRanks.card1.data();
@@ -239,7 +239,7 @@ void HandTraversal::EvaluateTerminal(
     std::size_t cursor = 0;
     for (std::size_t ranked = 0; ranked < myCount; ++ranked)
     {
-        while (cursor < oppCount && oppRankValues[cursor] < myRankValues[ranked])
+        while (cursor < lowerBounds[ranked])
         {
             const float weight = opponentReach[oppHands[cursor]];
             total += weight;
@@ -266,7 +266,7 @@ void HandTraversal::EvaluateTerminal(
     for (std::size_t ranked = myCount; ranked > 0;)
     {
         --ranked;
-        while (cursor > 0 && oppRankValues[cursor - 1] > myRankValues[ranked])
+        while (cursor > upperBounds[ranked])
         {
             --cursor;
             const float weight = opponentReach[oppHands[cursor]];
@@ -372,7 +372,7 @@ HandTraversal::StorageEstimate HandTraversal::EstimateStorage(const game::Compil
         }
     );
     const std::uint64_t layout = size.traversalNodes * (sizeof(Node) + sizeof(std::uint32_t) + sizeof(std::uint64_t));
-    const std::uint64_t rankBytes = 2 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t) + sizeof(std::uint64_t);
+    const std::uint64_t rankBytes = 4 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t) + sizeof(std::uint64_t);
     const std::uint64_t undealt = 52 - board.CardCount();
     const std::uint64_t runouts = board.CardCount() == 3 ? undealt * (undealt - 1) / 2 : board.CardCount() == 4 ? undealt : 1;
     const std::uint64_t ranks =
@@ -565,7 +565,8 @@ void HandTraversal::Walk(
         return;
     }
     const float* nodeStrategy = nullptr;
-    if (node.kind == game::NodeKind::Decision)
+    // Best response maximizes own action values and propagates only opponent reach.
+    if (node.kind == game::NodeKind::Decision && !(bestResponse && node.actor == player))
     {
         const auto actorCount = hands[node.actor].size();
         float* current = workspace.strategies.data() + depth * maxActions * stride;

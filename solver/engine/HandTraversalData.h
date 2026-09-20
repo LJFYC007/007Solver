@@ -41,6 +41,9 @@ struct HandTraversalData
     {
         std::vector<std::uint16_t> ranks;
         std::vector<std::uint16_t> hands;
+        // Opponent rank positions delimiting strictly weaker and stronger hands.
+        std::vector<std::uint16_t> lowerBounds;
+        std::vector<std::uint16_t> upperBounds;
         std::vector<std::uint8_t> card0;
         std::vector<std::uint8_t> card1;
         std::vector<std::uint64_t> masks;

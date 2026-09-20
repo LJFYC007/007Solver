@@ -59,6 +59,9 @@ GPU_ENTRY(Reach)(GPU_ARGUMENTS)
     {
         if (h >= state.hands[p])
             continue;
+        // Own reach is consumed only by training updates at nonterminal nodes.
+        if (p == state.player && (state.evaluation || n.kind >= 2))
+            continue;
         const U32 base = p ? state.hands[0] : 0;
         const Hand hand = hands[base + h];
         float value;
@@ -100,7 +103,7 @@ GPU_ENTRY(Prefix)(GPU_ARGUMENTS)
         prefix[0] = sum;
         return;
     }
-    GPU_DEVICE const U32* sorted = order + U64(n.rankRow) * total + base;
+    GPU_DEVICE const U32* sorted = order + U64(n.rankRow) * 2 * total + base;
     for (U32 i = 0; i < n.rankCounts[p]; ++i)
     {
         sum += reach[sorted[i]];
@@ -154,30 +157,13 @@ GPU_ENTRY(Terminal)(GPU_ARGUMENTS)
     }
     const U32 rank = n.kind == 3 ? ranks[U64(n.rankRow) * total + mineBase + h] : 0;
     const U32 legal = n.kind == 3 ? n.rankCounts[opponent] : state.hands[opponent];
-    GPU_DEVICE const U32* sorted = order + (n.kind == 3 ? U64(n.rankRow) * total + oppBase : 0);
     if (n.kind == 3)
     {
-        U32 lo = 0, hi = legal;
-        while (lo < hi)
-        {
-            const U32 mid = lo + (hi - lo) / 2;
-            if (ranks[U64(n.rankRow) * total + oppBase + sorted[mid]] < rank)
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
-        wins = lo ? prefix[lo - 1] : 0.0f;
-        lo = 0;
-        hi = legal;
-        while (lo < hi)
-        {
-            const U32 mid = lo + (hi - lo) / 2;
-            if (ranks[U64(n.rankRow) * total + oppBase + sorted[mid]] <= rank)
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
-        losses = lo < legal ? prefix[state.stride + lo] : 0.0f;
+        // Rank boundaries depend only on the board and ranges, not terminal reach.
+        const U32 bounds = order[U64(n.rankRow) * 2 * total + total + mineBase + h];
+        const U32 lower = bounds & 0xffffu, upper = bounds >> 16;
+        wins = lower ? prefix[lower - 1] : 0.0f;
+        losses = upper < legal ? prefix[state.stride + upper] : 0.0f;
     }
     const float totalMass = n.kind == 2 ? prefix[0] : legal ? prefix[legal - 1] : 0.0f;
     mass = totalMass;
@@ -247,25 +233,32 @@ GPU_ENTRY(Backup)(GPU_ARGUMENTS)
         return;
     const Node n = nodes[work[pass.offset + item]];
     const bool acting = n.kind == 0 && n.actor == state.player;
+    // Reuse the entry-policy denominator for value backup and strategy sums.
+    float positive = 0.0f;
+    if (acting && !state.evaluation)
+        for (U32 a = 0; a < n.count; ++a)
+        {
+            const float r = regrets[n.strategy + U64(a) * state.hands[n.actor] + h];
+            positive += r > 0.0f ? r : 0.0f;
+        }
     float value = 0.0f;
     for (U32 a = 0; a < n.count; ++a)
     {
         const float child = values[U64(nodes[edges[n.edge + a]].slot) * 3 * state.stride + h];
         if (acting && state.evaluation)
             value = a == 0 || child > value ? child : value;
+        else if (acting)
+        {
+            const float r = regrets[n.strategy + U64(a) * state.hands[n.actor] + h];
+            const float probability = positive > 0.0f ? (r > 0.0f ? r : 0.0f) / positive : 1.0f / float(n.count);
+            value += child * probability;
+        }
         else
-            value += acting ? child * Policy(n, h, a, state.hands[n.actor], false, regrets, sums) : child;
+            value += child;
     }
     values[U64(n.slot) * 3 * state.stride + h] = value;
     if (acting && !state.evaluation)
     {
-        // Compute the entry-policy denominator once, before any regret is updated.
-        float positive = 0.0f;
-        for (U32 a = 0; a < n.count; ++a)
-        {
-            const float r = regrets[n.strategy + U64(a) * state.hands[n.actor] + h];
-            positive += r > 0.0f ? r : 0.0f;
-        }
         const U32 total = state.hands[0] + state.hands[1], base = state.player ? state.hands[0] : 0;
         const float own = scratch[U64(n.slot) * total + base + h];
         for (U32 a = 0; a < n.count; ++a)

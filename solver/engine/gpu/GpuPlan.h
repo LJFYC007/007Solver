@@ -14,6 +14,7 @@ struct Plan
     std::vector<U32> edges;
     std::vector<Hand> hands;
     std::vector<unsigned short> ranks;
+    // Each rank row stores sorted hands, then packed lower/upper bounds by hand.
     std::vector<U32> order;
     std::vector<int> runouts;
     std::vector<U32> cards;

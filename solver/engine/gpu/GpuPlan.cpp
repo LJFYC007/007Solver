@@ -24,16 +24,18 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
     const U32 total = state.hands[0] + state.hands[1];
     runouts.assign(data.rowsByRunout.begin(), data.rowsByRunout.end());
     ranks.resize(data.rankRows.size() * total, 0xffff);
-    order.resize(data.rankRows.size() * total, kNoParent);
+    order.resize(data.rankRows.size() * 2 * total, kNoParent);
     for (std::size_t row = 0; row < data.rankRows.size(); ++row)
         for (U32 p = 0; p < 2; ++p)
         {
             const auto& source = data.rankRows[row][p];
             const auto base = row * total + (p ? state.hands[0] : 0);
+            const auto orderBase = row * 2 * total + (p ? state.hands[0] : 0);
             for (std::size_t i = 0; i < source.hands.size(); ++i)
             {
                 ranks[base + source.hands[i]] = source.ranks[i];
-                order[base + i] = source.hands[i];
+                order[orderBase + i] = source.hands[i];
+                order[orderBase + total + source.hands[i]] = U32(source.lowerBounds[i]) | (U32(source.upperBounds[i]) << 16);
             }
         }
     cards.resize(106);
