@@ -19,7 +19,7 @@ On macOS, install Xcode Command Line Tools (`xcode-select --install`) and `brew 
 
 On Windows, use **Developer PowerShell for Visual Studio** with Visual Studio 2022+ and **Desktop development with C++** installed. Run `chcp 65001` before building so Ninja can parse localized MSVC dependencies. Running the app requires an AVX2-capable CPU, WebView2 and the Microsoft Visual C++ x64 runtime, including OpenMP (`VCOMP140.DLL`).
 
-GPU support is enabled by default. Apple Silicon uses Metal; Intel Macs use CPU. Windows builds use CUDA when CMake finds a CUDA Toolkit compatible with the native MSVC compiler. CUDA requires compute capability 8.9 or newer and a compatible NVIDIA driver; without a CUDA compiler, the build uses CPU. Pass `-DSOLVER_ENABLE_GPU=OFF` for a CPU-only build, or `-DCMAKE_CUDA_COMPILER=<path-to-nvcc>` if the toolkit is outside the compiler search path.
+GPU support is enabled by default; Intel Macs use CPU. Windows builds use CUDA when CMake finds a Toolkit compatible with MSVC; otherwise they use CPU. CUDA requires compute capability 8.9+ and a compatible NVIDIA driver. Use `-DSOLVER_ENABLE_GPU=OFF` for CPU-only builds or `-DCMAKE_CUDA_COMPILER=<path-to-nvcc>` for a toolkit outside the compiler search path.
 
 ## Setup and development
 
@@ -31,12 +31,7 @@ npm --prefix desktop ci
 npm --prefix desktop run dev
 ```
 
-Development builds and stages the C++ service automatically. Restart the development command after C++ changes; React edits reload through Vite.
-
-| Command | Purpose |
-|---|---|
-| `npm --prefix desktop run build` | Build and package the desktop app |
-| `npm --prefix desktop run build:solver` | Build and stage only the C++ service |
+Restart `dev` after C++ changes; React edits reload automatically. Use `npm --prefix desktop run build` to package the app. Both commands build and stage the C++ service; `npm --prefix desktop run build:solver` does only that step.
 
 Packages appear under `desktop/src-tauri/target/release/bundle/`: `macos/` and `dmg/` on macOS, or `nsis/` on Windows.
 
@@ -48,13 +43,11 @@ For a small CLI solve after building the service:
 ./build/release/solver/solver_service tests/fixtures/weighted-flop.json
 ```
 
-On Windows, append `.exe`. Use `--stdin` instead of the file path to send a scenario as the first JSON line, followed by query lines. `iterations` limits player updates; `accuracyPercent` is a percentage of the initial pot (`0.01` means `0.01%`). See [the input fixture](tests/fixtures/weighted-flop.json) and [parser](solver/io/ScenarioLoader.cpp) for the schema and defaults.
+On Windows, append `.exe`. `--stdin` accepts a scenario as the first JSON line, followed by queries. `iterations` limits player updates; `accuracyPercent` is exploitability as a percentage of the initial pot (`0.01` means `0.01%`). See the [fixture](tests/fixtures/weighted-flop.json) and [parser](solver/io/ScenarioLoader.cpp) for input fields and defaults.
 
-The service and desktop select an available GPU automatically. Append `--device=cpu`, `--device=gpu` or `--device=auto` to select explicitly; stderr reports the backend. An unavailable requested GPU or insufficient device memory is an error. The displayed memory estimate covers combined host/device allocations and does not impose a limit. CPU and GPU use float arithmetic; the CPU evaluator independently certifies GPU stopping and final metrics with the exported strategy's normalization.
+The service and desktop select an available GPU automatically. Append `--device=cpu`, `--device=gpu` or `--device=auto` to override; stderr reports the backend. An unavailable requested GPU or insufficient device memory is an error. The displayed memory estimate covers combined host/device allocations and does not impose a limit. GPU stopping and final metrics are [CPU-certified](solver/ARCHITECTURE.md#training-and-memory).
 
 ## Checks
-
-Build and run the offline C++ correctness suite:
 
 ```sh
 cmake --preset Release
@@ -76,6 +69,6 @@ pre-commit run --files <changed-paths>
 git diff --check
 ```
 
-Hooks may fix formatting. Use `pre-commit run --all-files` when a whole-repository check is needed; it only includes tracked files. Benchmark commands and independent reference generation are in [tests/README.md](tests/README.md).
+Hooks may fix formatting. `pre-commit run --all-files` checks only tracked files. See [tests/README.md](tests/README.md) for benchmarks and independent reference generation.
 
 Shared semantics and ownership are in [solver/ARCHITECTURE.md](solver/ARCHITECTURE.md); contribution rules are in [AGENTS.md](AGENTS.md).

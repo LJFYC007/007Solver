@@ -34,7 +34,7 @@ GpuDcfrSession::GpuDcfrSession(std::shared_ptr<const SolveProblem> problem) : pr
     // Download releases other device buffers first; compaction reuses the host sums.
     const auto exportDownload = 2 * sumsBytes + staging;
     const auto exportSnapshot = snapshot + data_->maxActions * maxHands * sizeof(float);
-    const auto peak = host + std::max({initialization, checkpointDownload, certification, exportDownload, exportSnapshot});
+    const auto peak = host + std::max<std::uint64_t>({initialization, checkpointDownload, certification, exportDownload, exportSnapshot});
     memory_ = {size.logicalNodes, size.topologyNodes, size.traversalNodes, counts.strategyEntries, peak + peak / 8 + 64 * 1024 * 1024, 0};
     executor_ = gpu::MakeExecutor(plan);
 }
