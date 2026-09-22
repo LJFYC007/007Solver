@@ -59,7 +59,7 @@ void CheckSolve(const std::string& name, engine::ComputeDevice requestedDevice, 
         session.Run(101);
         session.Run(iterations - 101);
         EXPECT_EQ(session.CompletedIterations(), iterations);
-        checkpoint = session.EvaluateExploitability();
+        checkpoint = session.EvaluateCheckpoint(false);
         return std::move(session).ExportStrategy();
     }();
     const auto actual = engine::EvaluateExploitability(*problem, strategy);

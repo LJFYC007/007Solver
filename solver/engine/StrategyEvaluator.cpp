@@ -52,18 +52,26 @@ ExploitabilityMetrics EvaluateAverageStrategy(const HandTraversal& traversal, co
     return EvaluateBestResponses(traversal, nullptr, strategySums);
 }
 
-std::map<core::HoleCards, float> EvaluateNodeStrategyEvs(
-    const SolveProblem& problem,
-    const StrategySnapshot& strategy,
-    game::NodeId node,
-    core::PlayerId player
-)
+NodeStrategyEvaluator::NodeStrategyEvaluator(const SolveProblem& problem, const StrategySnapshot& strategy)
+    : problem_(problem), strategy_(strategy)
 {
-    CheckProblem(problem, strategy);
-    const HandTraversal traversal(problem, node);
-    const auto reach = traversal.OpponentReachAtRoot(strategy, player.Other().Index());
+    CheckProblem(problem_, strategy_);
+}
+
+std::map<core::HoleCards, float> NodeStrategyEvaluator::Evaluate(game::NodeId node, core::PlayerId player)
+{
+    const auto board = problem_.game->GetNode(node).State().board;
+    auto& tables = boards_[board.CardCount() - 3];
+    if (!tables || tables->board != board)
+    {
+        // Release the previous board before constructing its replacement.
+        tables.reset();
+        tables = std::make_shared<const HandBoardData>(problem_, node);
+    }
+    const HandTraversal traversal(std::make_shared<const HandTraversalData>(tables, node));
+    const auto reach = traversal.OpponentReachAtRoot(strategy_, player.Other().Index());
     const auto divisors = traversal.CompatibleMasses(player.Index(), reach.data());
-    const auto values = traversal.EvaluateSnapshot(strategy, player.Index(), reach, divisors, HandTraversal::Evaluation::StrategyValue);
+    const auto values = traversal.EvaluateSnapshot(strategy_, player.Index(), reach, divisors, HandTraversal::Evaluation::StrategyValue);
     std::map<core::HoleCards, float> evs;
     for (std::size_t hand = 0; hand < values.size(); ++hand)
     {

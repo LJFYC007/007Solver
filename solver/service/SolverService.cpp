@@ -162,14 +162,7 @@ int SolverService::Run(const std::string& scenarioPath, engine::ComputeDevice de
                 const int completed = session.CompletedIterations();
                 progress(completed, SolvePhase::Checking);
                 const auto checkStart = Clock::now();
-                if (completed == scenario.iterations)
-                    metrics = session.CertifyExploitability();
-                else
-                {
-                    metrics = session.EvaluateExploitability();
-                    if (session.Device() == engine::ComputeDevice::Gpu && metrics.exploitability <= target)
-                        metrics = session.CertifyExploitability();
-                }
+                metrics = session.EvaluateCheckpoint(completed == scenario.iterations, target);
                 const float evaluationSeconds = std::chrono::duration<float>(Clock::now() - checkStart).count();
                 convergence.Observe(completed, metrics.exploitability, session.TrainingTimeSeconds(), evaluationSeconds);
                 if (initialPot > 0.0f)

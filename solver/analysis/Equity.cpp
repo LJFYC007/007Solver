@@ -91,27 +91,10 @@ EquityReport AnalysisSession::QueryEquity(game::NodeId nodeId)
                     const auto same = indices[1 - player].find(hand);
                     // An identical opponent hand was subtracted once for each shared card.
                     const float identical = same == indices[1 - player].end() ? 0.0f : opponents[same->second].ownReachWeight;
-                    const auto compatible = [&](const Mass& source, std::size_t begin, std::size_t endIndex, float matching)
-                    {
-                        float value = source.Without(hand) + matching;
-                        // Subtracting a dominant blocker can erase a small but positive
-                        // compatible range. Match the traversal kernel's direct fallback.
-                        if (value <= source.total * 1e-4f)
-                        {
-                            value = 0.0f;
-                            for (std::size_t other = begin; other < endIndex; ++other)
-                            {
-                                const auto& opponent = opponents[opponentRanks[other].index];
-                                if (!core::Overlaps(hand, opponent.cards))
-                                    value += opponent.ownReachWeight;
-                            }
-                        }
-                        return value;
-                    };
-                    const float mass = compatible(totals[1 - player], 0, opponentRanks.size(), identical);
-                    const float tieMass = compatible(tied, cursor, end, identical);
+                    const float mass = totals[1 - player].Without(hand) + identical;
+                    const float tieMass = tied.Without(hand) + identical;
                     masses[player][index] += mass;
-                    wins[player][index] += compatible(lower, 0, cursor, 0.0f) + 0.5f * tieMass;
+                    wins[player][index] += lower.Without(hand) + 0.5f * tieMass;
                 } while (first < ranks[player].size() && ranks[player][first].rank == rank);
             }
         }

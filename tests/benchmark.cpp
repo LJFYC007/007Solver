@@ -21,6 +21,7 @@
 #include <iostream>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <utility>
 #include <gtest/gtest.h>
@@ -226,11 +227,9 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
             );
             if (checkConvergence)
             {
-                auto metrics =
-                    session->CompletedIterations() == iterations ? session->CertifyExploitability() : session->EvaluateExploitability();
-                if (session->Device() == engine::ComputeDevice::Gpu && session->CompletedIterations() != iterations && stopAtAccuracy &&
-                    metrics.exploitability <= kMaxExploitability)
-                    metrics = session->CertifyExploitability();
+                const auto metrics = session->EvaluateCheckpoint(
+                    session->CompletedIterations() == iterations, stopAtAccuracy ? std::optional<double>(kMaxExploitability) : std::nullopt
+                );
                 CheckMetrics(metrics);
                 report["checkpoint"] = Metrics(metrics);
                 report["convergence"].push_back({

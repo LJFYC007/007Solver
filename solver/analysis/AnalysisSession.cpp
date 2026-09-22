@@ -8,7 +8,9 @@
 
 namespace solver::analysis
 {
-AnalysisSession::AnalysisSession(engine::SolveResult result) : result_(std::move(result)), reachCalculator_(result_) {}
+AnalysisSession::AnalysisSession(engine::SolveResult result)
+    : result_(std::move(result)), reachCalculator_(result_), nodeEvaluator_(result_.Problem(), result_.Strategy())
+{}
 
 NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
 {
@@ -66,13 +68,13 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
 
     const core::PlayerId player = node.State().playerToAct;
     report.actor = player;
-    const ReachCalculator::NodeReach& reach = reachCalculator_.ReachFor(nodeId);
-    const ReachCalculator::HandWeights marginalReachMasses = reachCalculator_.BuildMarginalReachMasses(reach.jointReachMasses, player);
+    const ReachCalculator::HandWeights marginalReachMasses =
+        reachCalculator_.BuildMarginalReachMasses(currentReach.jointReachMasses, player);
     report.hands = BuildHandReports(
         nodeId,
         result_.Problem().ranges.For(player),
         marginalReachMasses,
-        player == core::PlayerId::Player0() ? reach.ownReachWeights.player0 : reach.ownReachWeights.player1,
+        player == core::PlayerId::Player0() ? currentReach.ownReachWeights.player0 : currentReach.ownReachWeights.player1,
         player
     );
 
@@ -96,7 +98,7 @@ NodeReport AnalysisSession::EvaluateNodeEvs(NodeReport report) const
         return report;
     if (std::any_of(report.hands.begin(), report.hands.end(), [](const auto& hand) { return hand.marginalReachMass > 0.0f; }))
     {
-        const auto evs = engine::EvaluateNodeStrategyEvs(result_.Problem(), result_.Strategy(), report.nodeId, *report.actor);
+        const auto evs = nodeEvaluator_.Evaluate(report.nodeId, *report.actor);
         for (auto& hand : report.hands)
             if (hand.marginalReachMass > 0.0f)
                 hand.nodeStrategyEv = evs.at(hand.cards);

@@ -37,7 +37,7 @@ public:
                                                            options:options
                                                              error:&error];
             Check(library, error, "Cannot compile DCFR Metal kernels");
-            const char* names[] = {"Reach", "Prefix", "Terminal", "Backup", "Outcomes"};
+            const char* names[] = {"Reach", "Terminal", "Backup", "Outcomes"};
             for (std::size_t i = 0; i < pipelines_.size(); ++i)
             {
                 id<MTLFunction> function = [library newFunctionWithName:[NSString stringWithUTF8String:names[i]]];
@@ -45,31 +45,20 @@ public:
                 pipelines_[i] = [device_ newComputePipelineStateWithFunction:function error:&error];
                 Check(pipelines_[i], error, "Cannot create DCFR Metal pipeline");
             }
-            Upload(0, plan.nodes);
-            Upload(1, plan.edges);
-            Upload(2, plan.hands);
-            Upload(3, plan.ranks);
-            Upload(4, plan.runouts);
-            Upload(5, plan.order);
-            Upload(6, plan.cards);
-            Upload(7, plan.work);
-            Allocate(8, plan.outcomeEntries * sizeof(U32));
-            Allocate(9, entries_ * sizeof(float));
-            Allocate(10, entries_ * sizeof(float));
-            Allocate(11, plan.slots * (shape_.hands[0] + shape_.hands[1]) * sizeof(float));
-            Allocate(12, plan.slots * 3 * shape_.stride * sizeof(float));
+            const auto sources = plan.Buffers();
+            for (std::size_t i = 0; i < buffers_.size(); ++i)
+                Upload(i, sources[i]);
             id<MTLCommandBuffer> command = [queue_ commandBuffer];
             id<MTLBlitCommandEncoder> blit = [command blitCommandEncoder];
-            [blit fillBuffer:buffers_[9] range:NSMakeRange(0, buffers_[9].length) value:0];
-            [blit fillBuffer:buffers_[10] range:NSMakeRange(0, buffers_[10].length) value:0];
+            [blit fillBuffer:buffers_[RegretsBuffer] range:NSMakeRange(0, buffers_[RegretsBuffer].length) value:0];
+            [blit fillBuffer:buffers_[SumsBuffer] range:NSMakeRange(0, buffers_[SumsBuffer].length) value:0];
             [blit endEncoding];
-            if (shape_.outcomeRows)
+            if (!plan.initialization.empty())
             {
                 id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
                 Bind(encoder, shape_);
-                Encode(encoder, {Kernel::Outcomes, 0, static_cast<U32>(plan.outcomeEntries)});
-                if (shape_.outcomeRows > 1)
-                    Encode(encoder, {Kernel::Outcomes, 1, shape_.hands[0] * shape_.hands[1]});
+                for (const auto& pass : plan.initialization)
+                    Encode(encoder, pass);
                 [encoder endEncoding];
             }
             Finish(command);
@@ -92,60 +81,64 @@ public:
     std::vector<float> RootValues(const State& state) override
     {
         Update(state);
-        return Read(buffers_[12], state.hands[state.player]);
+        return Read(buffers_[ValuesBuffer], state.hands[state.player]);
     }
     std::vector<float> DownloadSums(bool releaseTraining) override
     {
         if (releaseTraining)
             for (std::size_t i = 0; i < buffers_.size(); ++i)
-                if (i != 10)
+                if (i != SumsBuffer)
                     buffers_[i] = nil;
-        auto result = Read(buffers_[10], entries_);
+        auto result = Read(buffers_[SumsBuffer], entries_);
         if (releaseTraining)
-            buffers_[10] = nil;
+            buffers_[SumsBuffer] = nil;
         return result;
     }
 
 private:
     id<MTLDevice> device_;
     id<MTLCommandQueue> queue_;
-    std::array<id<MTLBuffer>, 13> buffers_{};
-    std::array<id<MTLComputePipelineState>, 5> pipelines_{};
+    std::array<id<MTLBuffer>, kDataBufferCount> buffers_{};
+    std::array<id<MTLComputePipelineState>, 4> pipelines_{};
     std::vector<Pass> passes_;
     State shape_;
     std::size_t entries_;
-    void Allocate(std::size_t i, std::size_t bytes)
+    void Upload(std::size_t i, const BufferData& source)
     {
+        const auto bytes = source.AllocationBytes();
         if (bytes > device_.maxBufferLength)
             throw std::runtime_error("A DCFR buffer exceeds Metal maxBufferLength");
-        buffers_[i] = [device_ newBufferWithLength:std::max<std::size_t>(bytes, 4) options:MTLResourceStorageModePrivate];
+        const bool upload = source.data && source.bytes;
+        const auto options = upload ? MTLResourceStorageModeShared : MTLResourceStorageModePrivate;
+        buffers_[i] = [device_ newBufferWithLength:bytes options:options];
         Check(buffers_[i], nil, "Cannot allocate DCFR Metal buffer");
-    }
-    template<typename T>
-    void Upload(std::size_t i, const std::vector<T>& data)
-    {
-        if (data.empty())
-        {
-            Allocate(i, 4);
-            return;
-        }
-        buffers_[i] = [device_ newBufferWithBytes:data.data() length:data.size() * sizeof(T) options:MTLResourceStorageModeShared];
-        Check(buffers_[i], nil, "Cannot allocate DCFR Metal table");
+        if (upload)
+            std::memcpy(buffers_[i].contents, source.data, source.bytes);
     }
     void Bind(id<MTLComputeCommandEncoder> encoder, const State& state)
     {
         for (std::size_t i = 0; i < buffers_.size(); ++i)
             [encoder setBuffer:buffers_[i] offset:0 atIndex:i];
-        [encoder setBytes:&state length:sizeof(state) atIndex:13];
+        [encoder setBytes:&state length:sizeof(state) atIndex:StateBuffer];
     }
     void Encode(id<MTLComputeCommandEncoder> encoder, Pass pass)
     {
         id<MTLComputePipelineState> pipeline = pipelines_[static_cast<std::size_t>(pass.operation)];
         [encoder setComputePipelineState:pipeline];
-        [encoder setBytes:&pass length:sizeof(pass) atIndex:14];
-        const auto threads = pass.count * (pass.operation == Kernel::Prefix || pass.operation == Kernel::Outcomes ? 1 : shape_.stride);
-        [encoder dispatchThreads:MTLSizeMake(threads, 1, 1)
-            threadsPerThreadgroup:MTLSizeMake(std::min<NSUInteger>(256, pipeline.maxTotalThreadsPerThreadgroup), 1, 1)];
+        [encoder setBytes:&pass length:sizeof(pass) atIndex:PassBuffer];
+        const auto width = pipeline.threadExecutionWidth;
+        const auto target = pass.operation == Kernel::Terminal ? 128 : 256;
+        const auto group = std::min<NSUInteger>(target, pipeline.maxTotalThreadsPerThreadgroup) / width * width;
+        if (pass.operation == Kernel::Terminal)
+        {
+            [encoder setThreadgroupMemoryLength:(TerminalSharedBytes(shape_) + 15) / 16 * 16 atIndex:0];
+            [encoder dispatchThreadgroups:MTLSizeMake(pass.count, 1, 1) threadsPerThreadgroup:MTLSizeMake(group, 1, 1)];
+        }
+        else
+        {
+            const auto threads = pass.count * (pass.operation == Kernel::Outcomes ? 1 : shape_.stride);
+            [encoder dispatchThreads:MTLSizeMake(threads, 1, 1) threadsPerThreadgroup:MTLSizeMake(group, 1, 1)];
+        }
         [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
     }
     void Finish(id<MTLCommandBuffer> command)
@@ -163,7 +156,7 @@ private:
         @autoreleasepool
         {
             // Bounded staging avoids duplicating the full strategy buffer in unified memory.
-            const auto capacity = std::min<std::size_t>(count * sizeof(float), 16 * 1024 * 1024);
+            const auto capacity = std::min<std::size_t>(count * sizeof(float), kReadbackBytes);
             id<MTLBuffer> staging = [device_ newBufferWithLength:capacity options:MTLResourceStorageModeShared];
             Check(staging, nil, "Cannot allocate Metal readback buffer");
             for (std::size_t offset = 0; offset < count * sizeof(float); offset += capacity)

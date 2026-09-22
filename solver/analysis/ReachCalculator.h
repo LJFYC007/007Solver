@@ -36,12 +36,18 @@ public:
 
     explicit ReachCalculator(const engine::SolveResult& result);
 
+    // Borrows the current path's reach; a later query may invalidate the reference.
     const NodeReach& ReachFor(game::NodeId nodeId);
     HandWeights BuildMarginalReachMasses(const JointReachMasses& jointReachMasses, core::PlayerId player) const;
 
 private:
     const engine::SolveResult& result_;
-    std::map<game::NodeId, NodeReach> reachByNode_;
+    struct CachedReach
+    {
+        game::NodeId node;
+        NodeReach reach;
+    };
+    std::vector<CachedReach> path_;
 
     JointReachMasses BuildInitialJointReachMasses(const core::RangeSet& ranges, const core::Board& board) const;
     JointReachMasses PropagateActionReach(game::NodeId nodeId, std::size_t childIndex, const JointReachMasses& jointReachMasses) const;

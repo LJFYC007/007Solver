@@ -1,5 +1,6 @@
 #include "analysis/ReachCalculator.h"
 #include "game/CompiledGame.h"
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 
@@ -14,39 +15,55 @@ constexpr int kHeadsUpHoleCardCount = 4;
 ReachCalculator::ReachCalculator(const engine::SolveResult& result) : result_(result)
 {
     const engine::SolveProblem& problem = result_.Problem();
-    reachByNode_.emplace(
-        problem.game->Root(),
-        NodeReach{
-            BuildInitialJointReachMasses(problem.ranges, problem.game->Spec().initialBoard),
-            {problem.ranges.For(core::PlayerId::Player0()).Entries(), problem.ranges.For(core::PlayerId::Player1()).Entries()},
-        }
+    path_.push_back(
+        {problem.game->Root(),
+         NodeReach{
+             BuildInitialJointReachMasses(problem.ranges, problem.game->Spec().initialBoard),
+             {problem.ranges.For(core::PlayerId::Player0()).Entries(), problem.ranges.For(core::PlayerId::Player1()).Entries()},
+         }}
     );
 }
 
 const ReachCalculator::NodeReach& ReachCalculator::ReachFor(game::NodeId nodeId)
 {
-    const auto cached = reachByNode_.find(nodeId);
-    if (cached != reachByNode_.end())
-        return cached->second;
+    if (path_.back().node == nodeId)
+        return path_.back().reach;
 
     const game::CompiledGame& game = *result_.Problem().game;
-    const auto parentEdge = *game.GetNode(nodeId).Parent();
-    const NodeReach& parentReach = ReachFor(parentEdge.node);
-    const game::GameNode& parent = game.GetNode(parentEdge.node);
-    NodeReach reach;
-    if (parent.Kind() == game::NodeKind::Chance)
+    std::vector<game::GameNode> nodes;
+    for (auto node = game.GetNode(nodeId);; node = game.GetNode(node.Parent()->node))
     {
-        const core::Card dealtCard = parent.GetChanceOutcome(parentEdge.edgeIndex).DealtCard();
-        const int legalOutcomeCount = 52 - parent.State().board.CardCount() - kHeadsUpHoleCardCount;
-        reach.jointReachMasses = PropagateChanceReach(parentReach.jointReachMasses, dealtCard, legalOutcomeCount);
-        reach.ownReachWeights = parentReach.ownReachWeights;
+        nodes.push_back(node);
+        if (!node.Parent())
+            break;
     }
-    else
+    std::reverse(nodes.begin(), nodes.end());
+    std::size_t shared = 0;
+    while (shared < path_.size() && shared < nodes.size() && path_[shared].node == nodes[shared].Id())
+        ++shared;
+    // Release abandoned branches before allocating the new path's reach tables.
+    path_.erase(path_.begin() + shared, path_.end());
+    for (std::size_t depth = shared; depth < nodes.size(); ++depth)
     {
-        reach.jointReachMasses = PropagateActionReach(parentEdge.node, parentEdge.edgeIndex, parentReach.jointReachMasses);
-        reach.ownReachWeights = PropagateOwnReach(parentEdge.node, parentEdge.edgeIndex, parentReach.ownReachWeights);
+        const auto& parent = nodes[depth - 1];
+        const auto edge = nodes[depth].Parent()->edgeIndex;
+        const auto& parentReach = path_.back().reach;
+        NodeReach reach;
+        if (parent.Kind() == game::NodeKind::Chance)
+        {
+            const core::Card dealtCard = parent.GetChanceOutcome(edge).DealtCard();
+            const int legalOutcomeCount = 52 - parent.State().board.CardCount() - kHeadsUpHoleCardCount;
+            reach.jointReachMasses = PropagateChanceReach(parentReach.jointReachMasses, dealtCard, legalOutcomeCount);
+            reach.ownReachWeights = parentReach.ownReachWeights;
+        }
+        else
+        {
+            reach.jointReachMasses = PropagateActionReach(parent.Id(), edge, parentReach.jointReachMasses);
+            reach.ownReachWeights = PropagateOwnReach(parent.Id(), edge, parentReach.ownReachWeights);
+        }
+        path_.push_back({nodes[depth].Id(), std::move(reach)});
     }
-    return reachByNode_.emplace(nodeId, std::move(reach)).first->second;
+    return path_.back().reach;
 }
 
 ReachCalculator::HandWeights ReachCalculator::BuildMarginalReachMasses(

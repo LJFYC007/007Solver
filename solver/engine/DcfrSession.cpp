@@ -1,4 +1,7 @@
 #include "engine/DcfrSession.h"
+#include <chrono>
+#include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -21,30 +24,55 @@ DcfrSession::DcfrSession(std::shared_ptr<const SolveProblem> problem, ComputeDev
 }
 void DcfrSession::Run(int iterations, const std::function<void(int)>& callback)
 {
-    if (gpu_)
-        gpu_->Run(iterations, callback);
-    else
-        cpu_->Run(iterations, callback);
+    CheckActive();
+    if (iterations <= 0 || iterations > std::numeric_limits<int>::max() - completedIterations_)
+        throw std::invalid_argument("DCFR iterations must be positive and fit the completed iteration counter");
+    const auto start = std::chrono::steady_clock::now();
+    auto lastProgress = start;
+    for (int iteration = 0; iteration < iterations; ++iteration)
+    {
+        const auto player = static_cast<std::size_t>(completedIterations_ % 2);
+        const float t = completedIterations_ / 2 + 1.0f;
+        const float power = t * std::sqrt(t);
+        const float positiveDiscount = power / (power + 1.0f);
+        const float averageDiscount = (t / (t + 1.0f)) * (t / (t + 1.0f));
+        if (gpu_)
+            gpu_->Update(player, positiveDiscount, averageDiscount);
+        else
+            cpu_->Update(player, positiveDiscount, averageDiscount);
+        ++completedIterations_;
+        if (callback)
+        {
+            const auto now = std::chrono::steady_clock::now();
+            if (iteration + 1 == iterations || now - lastProgress >= std::chrono::milliseconds(250))
+            {
+                callback(completedIterations_);
+                lastProgress = now;
+            }
+        }
+    }
+    trainingTimeSeconds_ += std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count();
 }
-ExploitabilityMetrics DcfrSession::EvaluateExploitability() const
+ExploitabilityMetrics DcfrSession::EvaluateCheckpoint(bool final, std::optional<double> stoppingTarget) const
 {
-    return gpu_ ? gpu_->EvaluateExploitability() : cpu_->EvaluateExploitability();
-}
-ExploitabilityMetrics DcfrSession::CertifyExploitability() const
-{
-    return gpu_ ? gpu_->EvaluateExploitabilityOnCpu() : cpu_->EvaluateExploitability();
+    CheckActive();
+    if (!gpu_)
+        return cpu_->EvaluateExploitability();
+    if (final)
+        return gpu_->EvaluateExploitabilityOnCpu();
+    const auto metrics = gpu_->EvaluateExploitability();
+    return stoppingTarget && metrics.exploitability <= *stoppingTarget ? gpu_->EvaluateExploitabilityOnCpu() : metrics;
 }
 StrategySnapshot DcfrSession::ExportStrategy() &&
 {
+    CheckActive();
+    exported_ = true;
     return gpu_ ? std::move(*gpu_).ExportStrategy() : std::move(*cpu_).ExportStrategy();
 }
-int DcfrSession::CompletedIterations() const
+void DcfrSession::CheckActive() const
 {
-    return gpu_ ? gpu_->CompletedIterations() : cpu_->CompletedIterations();
-}
-float DcfrSession::TrainingTimeSeconds() const
-{
-    return gpu_ ? gpu_->TrainingTimeSeconds() : cpu_->TrainingTimeSeconds();
+    if (exported_)
+        throw std::logic_error("DCFR training state has been exported");
 }
 int DcfrSession::WorkerCount() const
 {

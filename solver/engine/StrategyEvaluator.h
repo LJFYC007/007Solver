@@ -2,7 +2,9 @@
 
 #include "engine/SolveProblem.h"
 #include "engine/StrategySnapshot.h"
+#include <array>
 #include <map>
+#include <memory>
 
 namespace solver::engine
 {
@@ -14,15 +16,25 @@ struct ExploitabilityMetrics
 };
 
 struct HandTraversal;
+struct HandBoardData;
 ExploitabilityMetrics EvaluateExploitability(const SolveProblem& problem, const StrategySnapshot& strategy);
 // Borrows action-major cumulative strategies for the duration of this call.
 ExploitabilityMetrics EvaluateAverageStrategy(const HandTraversal& traversal, const float* strategySums);
-// Fixed-policy net EV from the queried node, for all board-compatible hands with
-// positive compatible opponent reach. Caller decides eligibility from joint reach.
-std::map<core::HoleCards, float> EvaluateNodeStrategyEvs(
-    const SolveProblem& problem,
-    const StrategySnapshot& strategy,
-    game::NodeId node,
-    core::PlayerId player
-);
+
+// Borrows one immutable result. A single EV worker reuses at most one board per
+// street; traversal nodes, utility baselines and workspaces stay query-local.
+class NodeStrategyEvaluator
+{
+public:
+    NodeStrategyEvaluator(const SolveProblem& problem, const StrategySnapshot& strategy);
+    // Fixed-policy net EV for board-compatible hands with positive opponent reach.
+    // Caller decides eligibility from joint reach.
+    std::map<core::HoleCards, float> Evaluate(game::NodeId node, core::PlayerId player);
+
+private:
+    const SolveProblem& problem_;
+    const StrategySnapshot& strategy_;
+    std::array<std::shared_ptr<const HandBoardData>, 3> boards_;
+};
+
 } // namespace solver::engine

@@ -5,8 +5,20 @@ using namespace solver::engine::gpu;
 #define GPU_DEVICE device
 #define GPU_BUFFER(type, name, index) device type* name [[buffer(index)]]
 #define GPU_ENTRY(name) kernel void name
-#define GPU_TAIL constant State &state [[buffer(13)]], constant Pass &pass [[buffer(14)]], uint gid [[thread_position_in_grid]]
+#define GPU_TAIL                                                                                                                     \
+    constant State &state [[buffer(StateBuffer)]], constant Pass &pass [[buffer(PassBuffer)]], uint gid [[thread_position_in_grid]], \
+        uint simdWidth [[threads_per_simdgroup]]
 #define GPU_INDEX gid
+#define GPU_WIDTH simdWidth
+#define GPU_SHARED threadgroup
+#define GPU_GROUP_TAIL                                                                                    \
+    , threadgroup float *groupMemory [[threadgroup(0)]], uint localIndex [[thread_index_in_threadgroup]], \
+        uint3 groupIndex [[threadgroup_position_in_grid]], uint3 groupSize [[threads_per_threadgroup]]
+#define GPU_GROUP_MEMORY
+#define GPU_GROUP_INDEX groupIndex.x
+#define GPU_LOCAL_INDEX localIndex
+#define GPU_GROUP_SIZE groupSize.x
+#define GPU_GROUP_BARRIER() threadgroup_barrier(mem_flags::mem_threadgroup)
 #else
 #define GPU_INLINE __device__ __forceinline__
 #define GPU_DEVICE
@@ -14,12 +26,22 @@ using namespace solver::engine::gpu;
 #define GPU_ENTRY(name) __global__ void name
 #define GPU_TAIL const State *statePointer, Pass pass
 #define GPU_INDEX (blockIdx.x * blockDim.x + threadIdx.x)
+#define GPU_WIDTH 32u
+#define GPU_SHARED
+#define GPU_GROUP_TAIL
+#define GPU_GROUP_MEMORY extern __shared__ float groupMemory[];
+#define GPU_GROUP_INDEX blockIdx.x
+#define GPU_LOCAL_INDEX threadIdx.x
+#define GPU_GROUP_SIZE blockDim.x
+#define GPU_GROUP_BARRIER() __syncthreads()
 #endif
-#define GPU_ARGUMENTS                                                                                                                 \
-    GPU_BUFFER(const Node, nodes, 0), GPU_BUFFER(const U32, edges, 1), GPU_BUFFER(const Hand, hands, 2),                              \
-        GPU_BUFFER(const unsigned short, ranks, 3), GPU_BUFFER(const int, runouts, 4), GPU_BUFFER(const U32, order, 5),               \
-        GPU_BUFFER(const U32, cards, 6), GPU_BUFFER(const U32, work, 7), GPU_BUFFER(U32, outcomes, 8), GPU_BUFFER(float, regrets, 9), \
-        GPU_BUFFER(float, sums, 10), GPU_BUFFER(float, scratch, 11), GPU_BUFFER(float, values, 12), GPU_TAIL
+#define GPU_ARGUMENTS                                                                                                                  \
+    GPU_BUFFER(const Node, nodes, NodesBuffer), GPU_BUFFER(const U32, childSlots, ChildSlotsBuffer),                                   \
+        GPU_BUFFER(const Hand, hands, HandsBuffer), GPU_BUFFER(const unsigned short, ranks, RanksBuffer),                              \
+        GPU_BUFFER(const int, runouts, RunoutsBuffer), GPU_BUFFER(const U32, order, OrderBuffer),                                      \
+        GPU_BUFFER(const U32, cards, CardsBuffer), GPU_BUFFER(const U32, work, WorkBuffer), GPU_BUFFER(U32, outcomes, OutcomesBuffer), \
+        GPU_BUFFER(float, regrets, RegretsBuffer), GPU_BUFFER(float, sums, SumsBuffer), GPU_BUFFER(float, scratch, ScratchBuffer),     \
+        GPU_BUFFER(float, values, ValuesBuffer), GPU_TAIL
 #ifdef __METAL_VERSION__
 #define GPU_STATE
 #else
@@ -60,7 +82,7 @@ GPU_ENTRY(Reach)(GPU_ARGUMENTS)
         if (h >= state.hands[p])
             continue;
         // Own reach is consumed only by training updates at nonterminal nodes.
-        if (p == state.player && (state.evaluation || n.kind >= 2))
+        if (p == state.player && (state.evaluation || (n.kind != NodeKind::Decision && n.kind != NodeKind::Chance)))
             continue;
         const U32 base = p ? state.hands[0] : 0;
         const Hand hand = hands[base + h];
@@ -71,7 +93,7 @@ GPU_ENTRY(Reach)(GPU_ARGUMENTS)
         {
             const Node parent = nodes[n.parent];
             value = scratch[U64(parent.slot) * total + base + h];
-            if (parent.kind == 1)
+            if (parent.kind == NodeKind::Chance)
                 value = hand.mask & (U64(1) << n.dealtCard) ? 0.0f : value * (p == state.player ? 1.0f : 1.0f / float(parent.count - 4));
             else if (parent.actor == p)
                 value *= Policy(parent, h, n.action, state.hands[p], state.evaluation != 0, regrets, sums);
@@ -80,193 +102,208 @@ GPU_ENTRY(Reach)(GPU_ARGUMENTS)
     }
 }
 
-// One independent ordered sweep per terminal. Prefix and suffix are accumulated
-// separately; loss mass never subtracts two nearly equal cumulative totals.
-GPU_ENTRY(Prefix)(GPU_ARGUMENTS)
+// All lanes of a complete SIMD group participate, including zero-padded tails.
+GPU_INLINE float GroupScan(float value, U32 lane, U32 width)
 {
-    GPU_STATE
-    const U32 item = GPU_INDEX;
-    if (item >= pass.count)
-        return;
-    const Node n = nodes[work[pass.offset + item]];
-    if (n.kind == 4)
-        return;
-    const U32 p = 1 - state.player, count = state.hands[p];
-    const U32 total = state.hands[0] + state.hands[1], base = p ? state.hands[0] : 0;
-    GPU_DEVICE const float* reach = scratch + U64(n.slot) * total + base;
-    GPU_DEVICE float* prefix = values + U64(n.slot) * 3 * state.stride + state.stride;
-    float sum = 0.0f;
-    if (n.kind == 2)
+    for (U32 offset = 1; offset < width; offset *= 2)
     {
-        for (U32 h = 0; h < count; ++h)
+#ifdef __METAL_VERSION__
+        const float previous = simd_shuffle_up(value, offset);
+#else
+        const float previous = __shfl_up_sync(0xffffffffu, value, offset);
+#endif
+        if (lane >= offset)
+            value += previous;
+    }
+    return value;
+}
+
+GPU_INLINE float GroupLast(float value, U32 width)
+{
+#ifdef __METAL_VERSION__
+    return simd_shuffle(value, width - 1);
+#else
+    return __shfl_sync(0xffffffffu, value, width - 1);
+#endif
+}
+
+// Separate SIMD groups scan forward/reverse reach concurrently. Independent
+// sums avoid subtracting nearly equal cumulative totals for loss mass.
+GPU_INLINE void TerminalPrefix(
+    Node n,
+    State state,
+    U32 lane,
+    U32 width,
+    bool reverse,
+    GPU_DEVICE const U32* order,
+    GPU_SHARED const float* reach,
+    GPU_SHARED float* prefix
+)
+{
+    if (n.kind == NodeKind::ForcedRunout)
+        return;
+    const U32 p = 1 - state.player, count = p ? state.hands[1] : state.hands[0];
+    const U32 rankCount = p ? n.rankCounts[1] : n.rankCounts[0];
+    const U32 total = state.hands[0] + state.hands[1], base = p ? state.hands[0] : 0;
+    float sum = 0.0f;
+    if (n.kind == NodeKind::Fold)
+    {
+        if (reverse)
+            return;
+        for (U32 h = lane; h < count; h += width)
             sum += reach[h];
-        prefix[0] = sum;
+        sum = GroupScan(sum, lane, width);
+        if (lane == width - 1)
+            prefix[0] = sum;
         return;
     }
     GPU_DEVICE const U32* sorted = order + U64(n.rankRow) * 2 * total + base;
-    for (U32 i = 0; i < n.rankCounts[p]; ++i)
+    for (U32 begin = 0; begin < rankCount; begin += width)
     {
-        sum += reach[sorted[i]];
-        prefix[i] = sum;
-    }
-    sum = 0.0f;
-    for (U32 i = n.rankCounts[p]; i-- > 0;)
-    {
-        sum += reach[sorted[i]];
-        prefix[state.stride + i] = sum;
+        const U32 offset = begin + lane, i = reverse ? rankCount - 1 - offset : offset;
+        const float value = offset < rankCount ? reach[sorted[i]] : 0.0f;
+        const float partial = sum + GroupScan(value, lane, width);
+        if (offset < rankCount)
+            prefix[(reverse ? state.stride : 0) + i] = partial;
+        sum = GroupLast(partial, width);
     }
 }
 
-GPU_ENTRY(Terminal)(GPU_ARGUMENTS)
+GPU_ENTRY(Terminal)(GPU_ARGUMENTS GPU_GROUP_TAIL)
 {
     GPU_STATE
-    const U32 index = GPU_INDEX, item = index / state.stride, h = index % state.stride;
+    GPU_GROUP_MEMORY
+    const U32 item = GPU_GROUP_INDEX, local = GPU_LOCAL_INDEX, groupWidth = GPU_GROUP_SIZE;
     const U32 p = state.player, opponent = 1 - p;
-    if (item >= pass.count || h >= state.hands[p])
+    // Fixed indices keep the small State/Node arrays in registers on CUDA.
+    const U32 count = p ? state.hands[1] : state.hands[0], opponentCount = p ? state.hands[0] : state.hands[1];
+    if (item >= pass.count)
         return;
     const Node n = nodes[work[pass.offset + item]];
     const U32 total = state.hands[0] + state.hands[1], mineBase = p ? state.hands[0] : 0, oppBase = p ? 0 : state.hands[0];
-    const Hand mine = hands[mineBase + h];
-    GPU_DEVICE const float* reach = scratch + U64(n.slot) * total + oppBase;
-    GPU_DEVICE float* output = values + U64(n.slot) * 3 * state.stride;
-    GPU_DEVICE const float* prefix = output + state.stride;
-    if ((mine.mask & n.board) || mine.divisor <= 0.0f)
+    GPU_SHARED float* reach = groupMemory;
+    GPU_SHARED float* prefix = groupMemory + state.stride;
+    for (U32 other = local; other < opponentCount; other += groupWidth)
+        reach[other] = scratch[U64(n.slot) * total + oppBase + other];
+    GPU_GROUP_BARRIER();
+    for (U32 direction = local / GPU_WIDTH; direction < 2; direction += groupWidth / GPU_WIDTH)
+        TerminalPrefix(n, state, local % GPU_WIDTH, GPU_WIDTH, direction != 0, order, reach, prefix);
+    GPU_GROUP_BARRIER();
+    GPU_DEVICE float* output = values + U64(n.slot) * state.stride;
+    for (U32 h = local; h < count; h += groupWidth)
     {
-        output[h] = 0.0f;
-        return;
-    }
-    const float win = p == 0 ? n.utility[0] : -n.utility[2];
-    const float tie = p == 0 ? n.utility[1] : -n.utility[1];
-    const float loss = p == 0 ? n.utility[2] : -n.utility[0];
-    float mass = 0.0f, wins = 0.0f, losses = 0.0f;
-    if (n.kind == 4)
-    {
-        for (U32 other = 0; other < state.hands[opponent]; ++other)
+        const Hand mine = hands[mineBase + h];
+        if ((mine.mask & n.board) || mine.divisor <= 0.0f)
         {
-            if (mine.mask & hands[oppBase + other].mask)
-                continue;
-            const U64 pair = p == 0 ? U64(h) * state.hands[1] + other : U64(other) * state.hands[1] + h;
-            const U32 counts = outcomes[U64(n.outcomeRow) * state.hands[0] * state.hands[1] + pair];
-            mass += reach[other];
-            wins += reach[other] * float(p == 0 ? counts & 0xffffu : counts >> 16);
-            losses += reach[other] * float(p == 0 ? counts >> 16 : counts & 0xffffu);
+            output[h] = 0.0f;
+            continue;
         }
-        const float divisor = n.outcomeRow == 0 ? 990.0f : 44.0f;
-        output[h] = (tie * mass + (win - tie) * (wins / divisor) + (loss - tie) * (losses / divisor)) / mine.divisor;
-        return;
-    }
-    const U32 rank = n.kind == 3 ? ranks[U64(n.rankRow) * total + mineBase + h] : 0;
-    const U32 legal = n.kind == 3 ? n.rankCounts[opponent] : state.hands[opponent];
-    if (n.kind == 3)
-    {
-        // Rank boundaries depend only on the board and ranges, not terminal reach.
-        const U32 bounds = order[U64(n.rankRow) * 2 * total + total + mineBase + h];
-        const U32 lower = bounds & 0xffffu, upper = bounds >> 16;
-        wins = lower ? prefix[lower - 1] : 0.0f;
-        losses = upper < legal ? prefix[state.stride + upper] : 0.0f;
-    }
-    const float totalMass = n.kind == 2 ? prefix[0] : legal ? prefix[legal - 1] : 0.0f;
-    mass = totalMass;
-    const float winTotal = wins, lossTotal = losses;
-    float blocked = 0.0f, blockedWins = 0.0f, blockedLosses = 0.0f;
-    for (U32 c = 0; c < 2; ++c)
-    {
-        const U32 card = c == 0 ? mine.card0 : mine.card1;
-        for (U32 entry = cards[opponent * 53 + card]; entry < cards[opponent * 53 + card + 1]; ++entry)
+        const float win = p == 0 ? n.utility[0] : -n.utility[2];
+        const float tie = p == 0 ? n.utility[1] : -n.utility[1];
+        const float loss = p == 0 ? n.utility[2] : -n.utility[0];
+        float mass = 0.0f, wins = 0.0f, losses = 0.0f;
+        if (n.kind == NodeKind::ForcedRunout)
         {
-            const U32 other = cards[entry];
-            const float r = reach[other];
-            blocked += r;
-            if (n.kind == 3)
+            for (U32 other = 0; other < opponentCount; ++other)
             {
-                const U32 otherRank = ranks[U64(n.rankRow) * total + oppBase + other];
-                if (otherRank < rank)
-                    blockedWins += r;
-                if (otherRank > rank)
-                    blockedLosses += r;
+                if (mine.mask & hands[oppBase + other].mask)
+                    continue;
+                const U64 pair = p == 0 ? U64(h) * state.hands[1] + other : U64(other) * state.hands[1] + h;
+                const U32 counts = outcomes[U64(n.outcomeRow) * state.hands[0] * state.hands[1] + pair];
+                mass += reach[other];
+                wins += reach[other] * float(p == 0 ? counts & 0xffffu : counts >> 16);
+                losses += reach[other] * float(p == 0 ? counts >> 16 : counts & 0xffffu);
+            }
+            const float divisor = n.outcomeRow == 0 ? 990.0f : 44.0f;
+            output[h] = (tie * mass + (win - tie) * (wins / divisor) + (loss - tie) * (losses / divisor)) / mine.divisor;
+            continue;
+        }
+        const U32 rank = n.kind == NodeKind::Showdown ? ranks[U64(n.rankRow) * total + mineBase + h] : 0;
+        const U32 legal = n.kind == NodeKind::Showdown ? (p ? n.rankCounts[0] : n.rankCounts[1]) : opponentCount;
+        if (n.kind == NodeKind::Showdown)
+        {
+            // Rank boundaries depend only on the board and ranges, not terminal reach.
+            const U32 bounds = order[U64(n.rankRow) * 2 * total + total + mineBase + h];
+            const U32 lower = bounds & 0xffffu, upper = bounds >> 16;
+            wins = lower ? prefix[lower - 1] : 0.0f;
+            losses = upper < legal ? prefix[state.stride + upper] : 0.0f;
+        }
+        // As in the CPU evaluator, zero-tie showdowns need only win/loss masses.
+        const bool needMass = n.kind == NodeKind::Fold || tie != 0.0f;
+        mass = needMass ? (n.kind == NodeKind::Fold ? prefix[0] : legal ? prefix[legal - 1] : 0.0f) : 0.0f;
+        float blocked = 0.0f, blockedWins = 0.0f, blockedLosses = 0.0f;
+        for (U32 c = 0; c < 2; ++c)
+        {
+            const U32 card = c == 0 ? mine.card0 : mine.card1;
+            for (U32 entry = cards[opponent * 53 + card]; entry < cards[opponent * 53 + card + 1]; ++entry)
+            {
+                const U32 other = cards[entry];
+                const float r = reach[other];
+                if (needMass)
+                    blocked += r;
+                if (n.kind == NodeKind::Showdown)
+                {
+                    const U32 otherRank = ranks[U64(n.rankRow) * total + oppBase + other];
+                    if (otherRank < rank)
+                        blockedWins += r;
+                    if (otherRank > rank)
+                        blockedLosses += r;
+                }
             }
         }
+        mass -= blocked;
+        if (needMass && mine.matching >= 0)
+            mass += reach[mine.matching];
+        wins -= blockedWins;
+        losses -= blockedLosses;
+        output[h] = n.kind == NodeKind::Fold ? (mass / mine.divisor) * (p == 0 ? n.utility[0] : -n.utility[0])
+                                             : (tie * mass + (win - tie) * wins + (loss - tie) * losses) / mine.divisor;
     }
-    mass -= blocked;
-    if (mine.matching >= 0)
-        mass += reach[mine.matching];
-    wins -= blockedWins;
-    losses -= blockedLosses;
-    // Recompute tiny compatible masses directly, including on FP32 hardware.
-    const bool repairMass = mass < 0.0001f * totalMass;
-    const bool repairWins = wins < 0.0001f * winTotal;
-    const bool repairLosses = losses < 0.0001f * lossTotal;
-    if (repairMass || repairWins || repairLosses)
-    {
-        float m = 0.0f, w = 0.0f, l = 0.0f;
-        for (U32 other = 0; other < state.hands[opponent]; ++other)
-        {
-            if (mine.mask & hands[oppBase + other].mask)
-                continue;
-            const float r = reach[other];
-            m += r;
-            if (n.kind == 3)
-            {
-                const U32 otherRank = ranks[U64(n.rankRow) * total + oppBase + other];
-                if (otherRank < rank)
-                    w += r;
-                if (otherRank > rank)
-                    l += r;
-            }
-        }
-        if (repairMass)
-            mass = m;
-        if (repairWins)
-            wins = w;
-        if (repairLosses)
-            losses = l;
-    }
-    output[h] = n.kind == 2 ? (mass / mine.divisor) * (p == 0 ? n.utility[0] : -n.utility[0])
-                            : (tie * mass + (win - tie) * wins + (loss - tie) * losses) / mine.divisor;
 }
 
 GPU_ENTRY(Backup)(GPU_ARGUMENTS)
 {
     GPU_STATE
     const U32 index = GPU_INDEX, item = index / state.stride, h = index % state.stride;
-    if (item >= pass.count || h >= state.hands[state.player])
+    const U32 count = state.player ? state.hands[1] : state.hands[0];
+    if (item >= pass.count || h >= count)
         return;
     const Node n = nodes[work[pass.offset + item]];
-    const bool acting = n.kind == 0 && n.actor == state.player;
+    const bool acting = n.kind == NodeKind::Decision && n.actor == state.player;
     // Reuse the entry-policy denominator for value backup and strategy sums.
     float positive = 0.0f;
     if (acting && !state.evaluation)
         for (U32 a = 0; a < n.count; ++a)
         {
-            const float r = regrets[n.strategy + U64(a) * state.hands[n.actor] + h];
+            const float r = regrets[n.strategy + U64(a) * count + h];
             positive += r > 0.0f ? r : 0.0f;
         }
     float value = 0.0f;
     for (U32 a = 0; a < n.count; ++a)
     {
-        const float child = values[U64(nodes[edges[n.edge + a]].slot) * 3 * state.stride + h];
+        const float child = values[U64(childSlots[n.edge + a]) * state.stride + h];
         if (acting && state.evaluation)
             value = a == 0 || child > value ? child : value;
         else if (acting)
         {
-            const float r = regrets[n.strategy + U64(a) * state.hands[n.actor] + h];
+            const float r = regrets[n.strategy + U64(a) * count + h];
             const float probability = positive > 0.0f ? (r > 0.0f ? r : 0.0f) / positive : 1.0f / float(n.count);
             value += child * probability;
         }
         else
             value += child;
     }
-    values[U64(n.slot) * 3 * state.stride + h] = value;
+    values[U64(n.slot) * state.stride + h] = value;
     if (acting && !state.evaluation)
     {
         const U32 total = state.hands[0] + state.hands[1], base = state.player ? state.hands[0] : 0;
         const float own = scratch[U64(n.slot) * total + base + h];
         for (U32 a = 0; a < n.count; ++a)
         {
-            const U64 entry = n.strategy + U64(a) * state.hands[n.actor] + h;
+            const U64 entry = n.strategy + U64(a) * count + h;
             const float old = regrets[entry];
             const float probability = positive > 0.0f ? (old > 0.0f ? old : 0.0f) / positive : 1.0f / float(n.count);
-            const float child = values[U64(nodes[edges[n.edge + a]].slot) * 3 * state.stride + h];
+            const float child = values[U64(childSlots[n.edge + a]) * state.stride + h];
             const float r = old + (child - value);
             regrets[entry] = r * (r > 0.0f ? state.positiveDiscount : 0.5f);
             sums[entry] = state.averageDiscount * (sums[entry] + own * probability);
@@ -278,7 +315,7 @@ GPU_ENTRY(Outcomes)(GPU_ARGUMENTS)
 {
     GPU_STATE
     const U64 index = GPU_INDEX, pairs = U64(state.hands[0]) * state.hands[1];
-    if (index >= pairs * (pass.offset ? 1 : state.outcomeRows))
+    if (index >= pass.count)
         return;
     const U32 row = U32(index / pairs), h0 = U32(index % pairs / state.hands[1]), h1 = U32(index % state.hands[1]);
     const U64 mask0 = hands[h0].mask, mask1 = hands[state.hands[0] + h1].mask;
@@ -286,7 +323,7 @@ GPU_ENTRY(Outcomes)(GPU_ARGUMENTS)
     U32 wins = 0, losses = 0;
     if (!(mask0 & mask1))
     {
-        if (pass.offset)
+        if (pass.outcomeStage == OutcomeStage::SumTurns)
         {
             for (U32 r = 1; r < state.outcomeRows; ++r)
             {

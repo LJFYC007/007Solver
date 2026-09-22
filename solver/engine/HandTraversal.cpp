@@ -43,16 +43,16 @@ HandTraversal::HandTraversal(const SolveProblem& problem, game::NodeId root, boo
 
 HandTraversal::HandTraversal(std::shared_ptr<const HandTraversalData> data)
     : data_(std::move(data))
-    , hands(data_->hands)
+    , hands(data_->tables->hands)
     , nodes(data_->nodes)
     , strategySize(data_->strategySize)
     , maxActions(data_->maxActions)
     , rootHalfPot(data_->rootHalfPot)
-    , handMasks(data_->handMasks)
+    , handMasks(data_->tables->handMasks)
     , children(data_->children)
     , dealtCardMasks(data_->dealtCardMasks)
-    , rankRows(data_->rankRows)
-    , rowsByRunout(data_->rowsByRunout)
+    , rankRows(data_->tables->rankRows)
+    , rowsByRunout(data_->tables->rowsByRunout)
     , maxDepth(data_->maxDepth)
     , chanceGroups_(data_->chanceGroups_)
     , chanceTasks_(data_->chanceTasks_)
@@ -184,7 +184,6 @@ void HandTraversal::EvaluateTerminal(
         std::fill_n(values, mine.size(), 0.0f);
     else
     {
-        const std::uint64_t* opponentMasks = handMasks[1 - updatingPlayer].data();
         const std::uint64_t* myMasks = handMasks[updatingPlayer].data();
         for (std::size_t hand = 0; hand < opponent.size(); ++hand)
         {
@@ -200,16 +199,7 @@ void HandTraversal::EvaluateTerminal(
             if ((myMasks[index] & node.boardMask) || divisors[index] == 0.0f)
                 continue;
             const float identical = hand.matchingOpponent < 0 ? 0.0f : opponentReach[hand.matchingOpponent];
-            float mass = total - cardMass[hand.cardIndices[0]] - cardMass[hand.cardIndices[1]] + identical;
-            // Recompute nearly cancelled blocker subtraction directly in FP32.
-            if (total > 0.0f && mass < 1e-4f * total)
-            {
-                mass = 0.0f;
-                const std::uint64_t mask = myMasks[index];
-                for (std::size_t other = 0; other < opponent.size(); ++other)
-                    if (!(mask & opponentMasks[other]))
-                        mass += opponentReach[other];
-            }
+            const float mass = total - cardMass[hand.cardIndices[0]] - cardMass[hand.cardIndices[1]] + identical;
             // This fixed per-hand scale preserves regret matching and avoids tiny root-pair masses.
             values[index] = (mass / divisors[index]) * (node.rankRow < 0 ? fold : tie);
         }
@@ -226,11 +216,9 @@ void HandTraversal::EvaluateTerminal(
     const std::uint16_t* myHands = myRanks.hands.data();
     const std::uint8_t* myCard0 = myRanks.card0.data();
     const std::uint8_t* myCard1 = myRanks.card1.data();
-    const std::uint64_t* myRankMasks = myRanks.masks.data();
     const std::uint16_t* oppHands = opponentRanks.hands.data();
     const std::uint8_t* oppCard0 = opponentRanks.card0.data();
     const std::uint8_t* oppCard1 = opponentRanks.card1.data();
-    const std::uint64_t* oppRankMasks = opponentRanks.masks.data();
     const std::size_t myCount = myRanks.hands.size();
     const std::size_t oppCount = opponentRanks.hands.size();
     // Strict rank comparisons exclude identical hands, so each blocked hand is subtracted once.
@@ -247,15 +235,7 @@ void HandTraversal::EvaluateTerminal(
             cardMass[oppCard1[cursor]] += weight;
             ++cursor;
         }
-        float mass = total - cardMass[myCard0[ranked]] - cardMass[myCard1[ranked]];
-        if (total > 0.0f && mass < 1e-4f * total)
-        {
-            mass = 0.0f;
-            const std::uint64_t mask = myRankMasks[ranked];
-            for (std::size_t other = 0; other < cursor; ++other)
-                if (!(mask & oppRankMasks[other]))
-                    mass += opponentReach[oppHands[other]];
-        }
+        const float mass = total - cardMass[myCard0[ranked]] - cardMass[myCard1[ranked]];
         const auto hand = myHands[ranked];
         if (divisors[hand] > 0.0f)
             values[hand] += (mass / divisors[hand]) * winDelta;
@@ -274,15 +254,7 @@ void HandTraversal::EvaluateTerminal(
             cardMass[oppCard0[cursor]] += weight;
             cardMass[oppCard1[cursor]] += weight;
         }
-        float mass = total - cardMass[myCard0[ranked]] - cardMass[myCard1[ranked]];
-        if (total > 0.0f && mass < 1e-4f * total)
-        {
-            mass = 0.0f;
-            const std::uint64_t mask = myRankMasks[ranked];
-            for (std::size_t other = cursor; other < oppCount; ++other)
-                if (!(mask & oppRankMasks[other]))
-                    mass += opponentReach[oppHands[other]];
-        }
+        const float mass = total - cardMass[myCard0[ranked]] - cardMass[myCard1[ranked]];
         const auto hand = myHands[ranked];
         if (divisors[hand] > 0.0f)
             values[hand] += (mass / divisors[hand]) * lossDelta;

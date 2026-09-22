@@ -9,26 +9,33 @@ namespace
 {
 constexpr U32 kNoParent = std::numeric_limits<U32>::max();
 constexpr std::size_t kBatchScratchBytes = 128 * 1024 * 1024;
+
+template<typename T>
+BufferData Table(const std::vector<T>& values)
+{
+    return {values.data(), values.size() * sizeof(T)};
+}
 } // namespace
 
 Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
 {
-    static_assert(sizeof(Node) == 80 && sizeof(Hand) == 32 && sizeof(State) == 32);
+    const auto& tables = *data.tables;
+    static_assert(sizeof(Node) == 80 && sizeof(Hand) == 32 && sizeof(State) == 32 && sizeof(Pass) == 16);
     for (U32 p = 0; p < 2; ++p)
     {
-        state.hands[p] = static_cast<U32>(data.hands[p].size());
-        for (const auto& h : data.hands[p])
+        state.hands[p] = static_cast<U32>(tables.hands[p].size());
+        for (const auto& h : tables.hands[p])
             hands.push_back({h.mask, h.weight, h.opponentMass, h.cardIndices[0], h.cardIndices[1], h.matchingOpponent, 0});
     }
     state.stride = std::max(state.hands[0], state.hands[1]);
     const U32 total = state.hands[0] + state.hands[1];
-    runouts.assign(data.rowsByRunout.begin(), data.rowsByRunout.end());
-    ranks.resize(data.rankRows.size() * total, 0xffff);
-    order.resize(data.rankRows.size() * 2 * total, kNoParent);
-    for (std::size_t row = 0; row < data.rankRows.size(); ++row)
+    runouts.assign(tables.rowsByRunout.begin(), tables.rowsByRunout.end());
+    ranks.resize(tables.rankRows.size() * total, 0xffff);
+    order.resize(tables.rankRows.size() * 2 * total, kNoParent);
+    for (std::size_t row = 0; row < tables.rankRows.size(); ++row)
         for (U32 p = 0; p < 2; ++p)
         {
-            const auto& source = data.rankRows[row][p];
+            const auto& source = tables.rankRows[row][p];
             const auto base = row * total + (p ? state.hands[0] : 0);
             const auto orderBase = row * 2 * total + (p ? state.hands[0] : 0);
             for (std::size_t i = 0; i < source.hands.size(); ++i)
@@ -45,13 +52,13 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         {
             cards[p * 53 + card] = static_cast<U32>(cards.size());
             for (U32 h = 0; h < state.hands[p]; ++h)
-                if (data.hands[p][h].mask & (U64{1} << card))
+                if (tables.hands[p][h].mask & (U64{1} << card))
                     cards.push_back(h);
         }
         cards[p * 53 + 52] = static_cast<U32>(cards.size());
     }
     nodes.resize(data.nodes.size());
-    edges = data.children;
+    const auto& edges = data.children;
     for (U32 i = 0; i < nodes.size(); ++i)
     {
         const auto& source = data.nodes[i];
@@ -62,15 +69,15 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         n.edge = static_cast<U32>(source.childOffset);
         n.count = static_cast<U32>(source.childCount);
         n.actor = static_cast<U32>(source.actor);
-        n.kind = source.forcedRunout                       ? 4
-                 : source.kind == game::NodeKind::Decision ? 0
-                 : source.kind == game::NodeKind::Chance   ? 1
-                 : source.rankRow < 0                      ? 2
-                                                           : 3;
+        n.kind = source.forcedRunout                       ? NodeKind::ForcedRunout
+                 : source.kind == game::NodeKind::Decision ? NodeKind::Decision
+                 : source.kind == game::NodeKind::Chance   ? NodeKind::Chance
+                 : source.rankRow < 0                      ? NodeKind::Fold
+                                                           : NodeKind::Showdown;
         n.rankRow = static_cast<U32>(source.rankRow);
         if (source.rankRow >= 0)
             for (U32 p = 0; p < 2; ++p)
-                n.rankCounts[p] = static_cast<U32>(data.rankRows[source.rankRow][p].hands.size());
+                n.rankCounts[p] = static_cast<U32>(tables.rankRows[source.rankRow][p].hands.size());
         std::copy(source.utilities.begin(), source.utilities.end(), n.utility);
         if (source.forcedRunout)
         {
@@ -84,10 +91,16 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             auto& child = nodes[edges[nodes[i].edge + a]];
             child.parent = i;
             child.action = a;
-            if (nodes[i].kind == 1)
+            if (nodes[i].kind == NodeKind::Chance)
                 child.dealtCard = data.nodes[edges[nodes[i].edge + a]].board.CardAt(data.nodes[i].board.CardCount()).Index();
         }
     outcomeEntries = std::size_t(state.outcomeRows) * state.hands[0] * state.hands[1];
+    if (state.outcomeRows)
+    {
+        initialization.push_back({Kernel::Outcomes, 0, static_cast<U32>(outcomeEntries), OutcomeStage::CountRunouts});
+        if (state.outcomeRows > 1)
+            initialization.push_back({Kernel::Outcomes, 0, state.hands[0] * state.hands[1], OutcomeStage::SumTurns});
+    }
 
     // A street region retains only its live ancestors and child-root results.
     // Descendant batches reuse the same slots after their root values are backed up.
@@ -95,7 +108,7 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
     for (std::size_t i = nodes.size(); i-- > 0;)
     {
         streetCost[i] = 1;
-        if (nodes[i].kind == 1)
+        if (nodes[i].kind == NodeKind::Chance)
             streetCost[i] += nodes[i].count;
         else
             for (U32 a = 0; a < nodes[i].count; ++a)
@@ -107,10 +120,10 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             return;
         if (work.size() + list.size() > std::numeric_limits<U32>::max())
             throw std::runtime_error("GPU schedule exceeds the supported index range");
-        passes.push_back({kernel, static_cast<U32>(work.size()), static_cast<U32>(list.size())});
+        passes.push_back({kernel, static_cast<U32>(work.size()), static_cast<U32>(list.size()), OutcomeStage::None});
         work.insert(work.end(), list.begin(), list.end());
     };
-    const auto bytesPerSlot = sizeof(float) * (total + 3 * state.stride);
+    const auto bytesPerSlot = sizeof(float) * (total + state.stride);
     const auto batchSlots = std::max<std::size_t>(1, kBatchScratchBytes / bytesPerSlot);
     nodes[0].slot = 0;
     const auto region = [&](const auto& self, const std::vector<U32>& roots, std::size_t next) -> void
@@ -123,7 +136,7 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
                 levels.resize(depth + 1);
             levels[depth].push_back(index);
             auto& n = nodes[index];
-            if (n.kind >= 2)
+            if (n.kind != NodeKind::Decision && n.kind != NodeKind::Chance)
                 terminals.push_back(index);
             for (U32 a = 0; a < n.count; ++a)
             {
@@ -131,7 +144,7 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
                 if (next >= std::numeric_limits<U32>::max())
                     throw std::runtime_error("GPU scratch exceeds the supported index range");
                 nodes[child].slot = static_cast<U32>(next++);
-                if (n.kind == 1)
+                if (n.kind == NodeKind::Chance)
                     boundary.push_back(child);
                 else
                     walk(walk, child, depth + 1);
@@ -142,7 +155,6 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         slots = std::max(slots, next);
         for (const auto& level : levels)
             emit(Kernel::Reach, level);
-        emit(Kernel::Prefix, terminals);
         emit(Kernel::Terminal, terminals);
         for (std::size_t begin = 0; begin < boundary.size();)
         {
@@ -159,18 +171,51 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         {
             std::vector<U32> decisions;
             for (U32 index : *level)
-                if (nodes[index].kind < 2)
+                if (nodes[index].kind == NodeKind::Decision || nodes[index].kind == NodeKind::Chance)
                     decisions.push_back(index);
             emit(Kernel::Backup, decisions);
         }
     };
     region(region, std::vector<U32>{0}, 1);
+    childSlots.reserve(edges.size());
+    for (U32 child : edges)
+        childSlots.push_back(nodes[child].slot);
+}
+
+std::array<BufferData, kBufferCount> Plan::Buffers() const
+{
+    std::array<BufferData, kBufferCount> buffers{};
+    buffers[NodesBuffer] = Table(nodes);
+    buffers[ChildSlotsBuffer] = Table(childSlots);
+    buffers[HandsBuffer] = Table(hands);
+    buffers[RanksBuffer] = Table(ranks);
+    buffers[RunoutsBuffer] = Table(runouts);
+    buffers[OrderBuffer] = Table(order);
+    buffers[CardsBuffer] = Table(cards);
+    buffers[WorkBuffer] = Table(work);
+    buffers[OutcomesBuffer] = {nullptr, outcomeEntries * sizeof(U32)};
+    buffers[RegretsBuffer] = {nullptr, entries * sizeof(float)};
+    buffers[SumsBuffer] = buffers[RegretsBuffer];
+    buffers[ScratchBuffer] = {nullptr, slots * (state.hands[0] + state.hands[1]) * sizeof(float)};
+    buffers[ValuesBuffer] = {nullptr, slots * state.stride * sizeof(float)};
+    buffers[StateBuffer] = {&state, sizeof(State)};
+    return buffers;
 }
 
 std::uint64_t Plan::DeviceBytes() const
 {
-    return nodes.size() * sizeof(Node) + edges.size() * sizeof(U32) + hands.size() * sizeof(Hand) + ranks.size() * sizeof(unsigned short) +
-           (order.size() + cards.size() + work.size()) * sizeof(U32) + runouts.size() * sizeof(int) + outcomeEntries * sizeof(U32) +
-           2 * entries * sizeof(float) + slots * (state.hands[0] + state.hands[1] + 3 * state.stride) * sizeof(float) + sizeof(State);
+    std::uint64_t bytes = 0;
+    for (const auto& buffer : Buffers())
+        bytes += buffer.AllocationBytes();
+    return bytes;
+}
+
+std::uint64_t Plan::HostBytes() const
+{
+    std::uint64_t bytes = (initialization.size() + passes.size()) * sizeof(Pass);
+    for (const auto& buffer : Buffers())
+        if (buffer.data)
+            bytes += buffer.bytes;
+    return bytes;
 }
 } // namespace solver::engine::gpu

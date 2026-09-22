@@ -1,6 +1,6 @@
 #pragma once
 
-#include "engine/SolveProblem.h"
+#include "engine/HandBoardData.h"
 #include "engine/StrategySnapshot.h"
 #include <array>
 #include <cstdint>
@@ -12,16 +12,9 @@ namespace solver::engine
 // Immutable, range-specific tables shared by recursive CPU and batched GPU execution.
 struct HandTraversalData
 {
-    static constexpr std::size_t kMaxHands = 52 * 51 / 2;
-    struct Hand
-    {
-        core::HoleCards cards;
-        float weight;
-        std::uint64_t mask;
-        std::array<std::uint8_t, 2> cardIndices;
-        int matchingOpponent = -1;
-        float opponentMass = 0.0f;
-    };
+    static constexpr std::size_t kMaxHands = HandBoardData::kMaxHands;
+    using Hand = HandBoardData::Hand;
+    using RankOrder = HandBoardData::RankOrder;
     struct Node
     {
         game::NodeId id;
@@ -36,29 +29,14 @@ struct HandTraversalData
         bool forcedRunout = false;
         std::array<float, 3> utilities{};
     };
-    // Rank-major showdown table: sequential sweeps never chase Hand rows.
-    struct RankOrder
-    {
-        std::vector<std::uint16_t> ranks;
-        std::vector<std::uint16_t> hands;
-        // Opponent rank positions delimiting strictly weaker and stronger hands.
-        std::vector<std::uint16_t> lowerBounds;
-        std::vector<std::uint16_t> upperBounds;
-        std::vector<std::uint8_t> card0;
-        std::vector<std::uint8_t> card1;
-        std::vector<std::uint64_t> masks;
-    };
-    std::array<std::vector<Hand>, 2> hands;
+    std::shared_ptr<const HandBoardData> tables;
     std::vector<Node> nodes;
     std::size_t strategySize = 0;
     std::size_t maxActions = 1;
     float rootHalfPot = 0.0f;
 
-    std::array<std::vector<std::uint64_t>, 2> handMasks;
     std::vector<std::uint32_t> children;
     std::vector<std::uint64_t> dealtCardMasks;
-    std::vector<std::array<RankOrder, 2>> rankRows;
-    std::array<int, kMaxHands> rowsByRunout;
     std::size_t maxDepth = 1;
 
     struct ChanceGroup
@@ -86,6 +64,7 @@ struct HandTraversalData
     std::size_t infoSetCount = 0;
 
     HandTraversalData(const SolveProblem& problem, game::NodeId root, bool prepareTraining = false);
+    HandTraversalData(std::shared_ptr<const HandBoardData> tables, game::NodeId root, bool prepareTraining = false);
     StrategySnapshot ExportStrategy(std::vector<float> sums) const;
 
 private:

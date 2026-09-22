@@ -13,6 +13,37 @@ using U64 = ulong;
 #else
 using U64 = unsigned long long;
 #endif
+// Binding order shared by host allocation and both kernel compilers.
+enum BufferIndex : U32
+{
+    NodesBuffer,
+    ChildSlotsBuffer,
+    HandsBuffer,
+    RanksBuffer,
+    RunoutsBuffer,
+    OrderBuffer,
+    CardsBuffer,
+    WorkBuffer,
+    OutcomesBuffer,
+    RegretsBuffer,
+    SumsBuffer,
+    ScratchBuffer,
+    ValuesBuffer,
+    StateBuffer,
+    PassBuffer,
+    kDataBufferCount = StateBuffer,
+    kBufferCount = PassBuffer,
+};
+
+enum class NodeKind : U32
+{
+    Decision,
+    Chance,
+    Fold,
+    Showdown,
+    ForcedRunout,
+};
+
 struct Node
 {
     U64 strategy;
@@ -23,7 +54,7 @@ struct Node
     U32 edge;
     U32 count;
     U32 actor;
-    U32 kind; // decision, chance, fold, showdown, forced runout
+    NodeKind kind;
     U32 rankRow;
     U32 rankCounts[2];
     U32 outcomeRow; // zero for flop, card index + 1 for turn
@@ -54,16 +85,22 @@ struct State
 enum class Kernel : U32
 {
     Reach,
-    Prefix,
     Terminal,
     Backup,
     Outcomes,
+};
+enum class OutcomeStage : U32
+{
+    None,
+    CountRunouts,
+    SumTurns,
 };
 struct Pass
 {
     Kernel operation;
     U32 offset;
     U32 count;
+    OutcomeStage outcomeStage;
 };
 } // namespace gpu
 } // namespace engine
