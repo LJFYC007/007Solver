@@ -13,11 +13,11 @@ using namespace solver::engine::gpu;
 #define GPU_SHARED threadgroup
 #define GPU_GROUP_TAIL                                                                                    \
     , threadgroup float *groupMemory [[threadgroup(0)]], uint localIndex [[thread_index_in_threadgroup]], \
-        uint3 groupIndex [[threadgroup_position_in_grid]], uint3 groupSize [[threads_per_threadgroup]]
+        uint groupIndex [[threadgroup_position_in_grid]], uint groupSize [[threads_per_threadgroup]]
 #define GPU_GROUP_MEMORY
-#define GPU_GROUP_INDEX groupIndex.x
+#define GPU_GROUP_INDEX groupIndex
 #define GPU_LOCAL_INDEX localIndex
-#define GPU_GROUP_SIZE groupSize.x
+#define GPU_GROUP_SIZE groupSize
 #define GPU_GROUP_BARRIER() threadgroup_barrier(mem_flags::mem_threadgroup)
 #else
 #define GPU_INLINE __device__ __forceinline__
