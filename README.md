@@ -55,6 +55,8 @@ cmake --build --preset Release --target 007SolverTests
 ctest --test-dir build/release --output-on-failure
 ```
 
+Release tests target roughly 10 seconds, excluding builds, and include real CLI end-to-end checks.
+
 For desktop changes, after installing dependencies and building/staging the service:
 
 ```sh

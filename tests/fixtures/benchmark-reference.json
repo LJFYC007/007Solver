@@ -1,17 +1,17 @@
 {
   "source": {
-    "chipScale": 500.0,
+    "chipScale": 10.0,
     "repository": "https://github.com/b-inary/postflop-solver",
     "revision": "9d1509fe5077d019825f833eed04b16d342dfda1"
   },
   "utg-bb-wide": {
     "scenario": {
       "bettingTree": {
-        "allInSpr": 0.15,
+        "allInSpr": 0.0,
         "flop": {
           "bet": [
-            50,
-            100
+            33,
+            125
           ],
           "raise": [
             50
@@ -20,8 +20,8 @@
         "maxRaises": 2,
         "river": {
           "bet": [
-            50,
-            100
+            33,
+            125
           ],
           "raise": [
             50
@@ -29,8 +29,8 @@
         },
         "turn": {
           "bet": [
-            50,
-            100
+            33,
+            125
           ],
           "raise": [
             50
@@ -40,9 +40,9 @@
       "board": "Ac Kh Qs",
       "heroActsFirst": false,
       "heroPosition": "UTG",
-      "heroStack": 15.0,
-      "initialPot": 5.0,
-      "iterations": 3500,
+      "heroStack": 87.0,
+      "initialPot": 26.5,
+      "iterations": 2000,
       "rangeSource": {
         "catalog": "resources/gtowizard-preflop",
         "history": [
@@ -83,7 +83,7 @@
             "actor": "UTG"
           }
         ],
-        "reduction": "Postflop pot/stacks are reduced for runtime; retained hand classes, when listed, are a test subset. Source weights are not rounded or rescaled.",
+        "reduction": "Full captured 8-max UTG raise 2.5 / BB raise 13 / UTG call ranges. 100bb starting stacks leave 87bb each; the 26.5bb pot includes the folded SB's 0.5bb. No range subsets or weight rescaling.",
         "retainedClasses": null,
         "sha256": "5f41502181c1777114f9ac5a72df24486e6ee8d6b22b8768f6a0d502bc83b741",
         "solution": "8max"
@@ -164,17 +164,12 @@
         }
       },
       "villainPosition": "BB",
-      "villainStack": 15.0
-    },
-    "solved": {
-      "exploitability": 9.94873062154511e-6,
-      "heroBestResponseEv": -0.18671075999736786,
-      "villainBestResponseEv": 0.18673065304756165
+      "villainStack": 87.0
     },
     "uniform": {
-      "exploitability": 4.1353936195373535,
-      "heroBestResponseEv": 3.4101994037628174,
-      "villainBestResponseEv": 4.8605875968933105
+      "exploitability": 30.724380493164062,
+      "heroBestResponseEv": 25.076250076293945,
+      "villainBestResponseEv": 36.37251281738281
     }
   }
 }

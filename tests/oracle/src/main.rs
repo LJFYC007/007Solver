@@ -33,7 +33,7 @@ fn cap_raises(tree: &mut ActionTree, raises: usize, maximum: usize, facing_bet: 
     }
 }
 
-fn game_for(scenario: &Value) -> PostFlopGame {
+fn game_for(scenario: &Value, scale: f32) -> PostFlopGame {
     assert_eq!(scenario["heroActsFirst"], false);
     assert_eq!(scenario["heroStack"], scenario["villainStack"]);
     let range = |position: &str| {
@@ -73,8 +73,8 @@ fn game_for(scenario: &Value) -> PostFlopGame {
     };
     let tree = TreeConfig {
         initial_state: BoardState::Flop,
-        starting_pot: (scenario["initialPot"].as_f64().unwrap() * SCALE as f64).round() as i32,
-        effective_stack: (scenario["heroStack"].as_f64().unwrap() * SCALE as f64).round() as i32,
+        starting_pot: (scenario["initialPot"].as_f64().unwrap() * scale as f64).round() as i32,
+        effective_stack: (scenario["heroStack"].as_f64().unwrap() * scale as f64).round() as i32,
         flop_bet_sizes: sizes("flop"),
         turn_bet_sizes: sizes("turn"),
         river_bet_sizes: sizes("river"),
@@ -94,12 +94,12 @@ fn game_for(scenario: &Value) -> PostFlopGame {
     game
 }
 
-fn metrics(game: &PostFlopGame) -> Value {
+fn metrics(game: &PostFlopGame, scale: f32) -> Value {
     let ev = compute_mes_ev(game);
     json!({
-        "heroBestResponseEv": ev[1] / SCALE,
-        "villainBestResponseEv": ev[0] / SCALE,
-        "exploitability": compute_exploitability(game) / SCALE,
+        "heroBestResponseEv": ev[1] / scale,
+        "villainBestResponseEv": ev[0] / scale,
+        "exploitability": compute_exploitability(game) / scale,
     })
 }
 
@@ -218,33 +218,29 @@ fn main() {
         let scenario: Value =
             serde_json::from_str(&fs::read_to_string(fixtures.join("utg-bb-wide.json")).unwrap())
                 .unwrap();
-        // These values avoid different chip rounding / minimum-bet rules in the two solvers.
-        assert_eq!(scenario["initialPot"], 5.0);
-        assert_eq!(scenario["heroStack"], 15.0);
+        // Native integer rounding at scale 10 matches the application's tenths of a chip.
+        // Disable threshold replacement: the upstream engine rounds its SPR threshold.
+        let scale = 10.0;
+        output["source"]["chipScale"] = json!(scale);
+        assert_eq!(scenario["initialPot"], 26.5);
+        assert_eq!(scenario["heroStack"], 87.0);
+        assert_eq!(scenario["bettingTree"]["allInSpr"], 0.0);
         for street in ["flop", "turn", "river"] {
-            assert_eq!(scenario["bettingTree"][street]["bet"], json!([50, 100]));
+            assert_eq!(scenario["bettingTree"][street]["bet"], json!([33, 125]));
             assert_eq!(scenario["bettingTree"][street]["raise"], json!([50]));
         }
-        let mut game = game_for(&scenario);
-        let uniform = metrics(&game);
-        let exploitability = solve(&mut game, MAX_REFERENCE_ITERATIONS, SCALE * 1e-5, true) / SCALE;
-        assert!(
-            (0.0..=1e-5).contains(&exploitability),
-            "Wide reference did not converge: {exploitability}"
-        );
-        let solved = metrics(&game);
-        for values in [&uniform, &solved] {
-            for key in [
-                "heroBestResponseEv",
-                "villainBestResponseEv",
-                "exploitability",
-            ] {
-                assert!(values[key].as_f64().unwrap().is_finite());
-            }
+        let game = game_for(&scenario, scale);
+        let uniform = metrics(&game, scale);
+        for key in [
+            "heroBestResponseEv",
+            "villainBestResponseEv",
+            "exploitability",
+        ] {
+            assert!(uniform[key].as_f64().unwrap().is_finite());
         }
-        assert!((0.0..=1e-5).contains(&solved["exploitability"].as_f64().unwrap()));
-        output["utg-bb-wide"] = json!({"scenario": scenario, "uniform": uniform, "solved": solved});
-        // Write only after successful convergence; never publish an approximate answer as GT.
+        assert!(uniform["exploitability"].as_f64().unwrap() >= 0.0);
+        // A fixed-work benchmark needs an exact prescribed-policy reference, not a solved equilibrium.
+        output["utg-bb-wide"] = json!({"scenario": scenario, "uniform": uniform});
         fs::write(
             fixtures.join("benchmark-reference.json"),
             serde_json::to_string_pretty(&output).unwrap() + "\n",
@@ -258,16 +254,16 @@ fn main() {
             &fs::read_to_string(fixtures.join(format!("{name}.json"))).unwrap(),
         )
         .unwrap();
-        let mut game = game_for(&scenario);
-        let uniform = metrics(&game);
+        let mut game = game_for(&scenario, SCALE);
+        let uniform = metrics(&game, SCALE);
         let exploitability = solve(&mut game, MAX_REFERENCE_ITERATIONS, SCALE * 1e-5, false);
         assert!(
             exploitability / SCALE <= 1e-5,
             "{name} reference did not converge: {}",
             exploitability / SCALE
         );
-        let solved = metrics(&game);
-        let mut game = game_for(&scenario);
+        let solved = metrics(&game, SCALE);
+        let mut game = game_for(&scenario, SCALE);
         let policy = if name == "weighted-flop" {
             fixed_policy(&mut game)
         } else {

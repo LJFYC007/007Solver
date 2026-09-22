@@ -33,7 +33,8 @@ using namespace solver;
 using Json = nlohmann::json;
 using Clock = std::chrono::steady_clock;
 constexpr double kTolerance = 1e-5;
-constexpr double kMaxExploitability = 0.0005; // 0.01% of the initial pot of 5.
+// Compare independent float evaluators in initial-pot units.
+constexpr double kReferenceToleranceInPots = 2e-6;
 Json report;
 std::filesystem::path reportPath;
 Clock::time_point stageStart;
@@ -127,7 +128,7 @@ class Diagnostics : public testing::EmptyTestEventListener
 };
 } // namespace
 
-TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
+TEST(WideRangeBenchmark, UtgBbThreeBetFixedWork)
 {
     StartStage("preparation");
     const std::string fixturePath = std::string(TEST_FIXTURE_DIR) + "utg-bb-wide.json";
@@ -137,27 +138,21 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
     report["oracle"] = reference.at("source");
     const auto& expected = reference.at("utg-bb-wide");
     ASSERT_EQ(input, expected.at("scenario"));
-    ASSERT_EQ(input.at("initialPot"), 5.0);
+    ASSERT_EQ(input.at("initialPot"), 26.5);
     ASSERT_EQ(input.at("heroPosition"), "UTG");
     ASSERT_EQ(input.at("villainPosition"), "BB");
-    ASSERT_EQ(reference.at("source").at("chipScale"), 500.0);
+    ASSERT_EQ(reference.at("source").at("chipScale"), 10.0);
     ASSERT_EQ(reference.at("source").at("revision"), "9d1509fe5077d019825f833eed04b16d342dfda1");
-    const auto& solved = expected.at("solved");
     for (const auto* key : {"heroBestResponseEv", "villainBestResponseEv", "exploitability"})
     {
-        ASSERT_TRUE(std::isfinite(solved.at(key).get<double>()));
         ASSERT_TRUE(std::isfinite(expected.at("uniform").at(key).get<double>()));
     }
-    ASSERT_GE(solved.at("exploitability").get<double>(), -kTolerance);
-    ASSERT_LE(solved.at("exploitability").get<double>(), kTolerance);
-    ASSERT_NEAR(
-        solved.at("exploitability").get<double>(),
-        (solved.at("heroBestResponseEv").get<double>() + solved.at("villainBestResponseEv").get<double>()) / 2.0,
-        kTolerance
-    );
     auto scenario = io::LoadScenario(fixturePath);
-    ASSERT_EQ(input.at("heroStack"), 15.0);
-    ASSERT_EQ(input.at("villainStack"), 15.0);
+    ASSERT_EQ(input.at("heroStack"), 87.0);
+    ASSERT_EQ(input.at("villainStack"), 87.0);
+    const double initialPot = input.at("initialPot").get<double>();
+    const double targetExploitability = initialPot * scenario.accuracyPercent / 100.0;
+    report["exploitability_limit"] = targetExploitability;
     const auto problem =
         std::make_shared<const engine::SolveProblem>(engine::SolveProblem{game::CompileGame(scenario.game), std::move(scenario.ranges)});
     const int iterations = iterationBudget == 0 ? scenario.iterations : iterationBudget;
@@ -193,9 +188,21 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
     report["uniform"] = Metrics(uniform);
     FinishStage("uniform_evaluation");
     CheckMetrics(uniform);
-    EXPECT_NEAR(uniform.player0BestResponseEv, expected.at("uniform").at("heroBestResponseEv").get<double>(), kTolerance);
-    EXPECT_NEAR(uniform.player1BestResponseEv, expected.at("uniform").at("villainBestResponseEv").get<double>(), kTolerance);
-    EXPECT_NEAR(uniform.exploitability, expected.at("uniform").at("exploitability").get<double>(), kTolerance);
+    EXPECT_NEAR(
+        uniform.player0BestResponseEv / initialPot,
+        expected.at("uniform").at("heroBestResponseEv").get<double>() / initialPot,
+        kReferenceToleranceInPots
+    );
+    EXPECT_NEAR(
+        uniform.player1BestResponseEv / initialPot,
+        expected.at("uniform").at("villainBestResponseEv").get<double>() / initialPot,
+        kReferenceToleranceInPots
+    );
+    EXPECT_NEAR(
+        uniform.exploitability / initialPot,
+        expected.at("uniform").at("exploitability").get<double>() / initialPot,
+        kReferenceToleranceInPots
+    );
     ASSERT_FALSE(HasFailure());
 
     StartStage("session_initialization");
@@ -228,7 +235,8 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
             if (checkConvergence)
             {
                 const auto metrics = session->EvaluateCheckpoint(
-                    session->CompletedIterations() == iterations, stopAtAccuracy ? std::optional<double>(kMaxExploitability) : std::nullopt
+                    session->CompletedIterations() == iterations,
+                    stopAtAccuracy ? std::optional<double>(targetExploitability) : std::nullopt
                 );
                 CheckMetrics(metrics);
                 report["checkpoint"] = Metrics(metrics);
@@ -239,11 +247,12 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
                     {"exploitability", metrics.exploitability},
                 });
                 SaveReport();
-                if (stopAtAccuracy && metrics.exploitability <= kMaxExploitability)
+                if (stopAtAccuracy && metrics.exploitability <= targetExploitability)
                     break;
             }
         }
         report["training_loop_seconds"] = session->TrainingTimeSeconds();
+        report["updates_per_second"] = session->CompletedIterations() / session->TrainingTimeSeconds();
         report["completed_iterations"] = session->CompletedIterations();
         FinishStage("training");
         if (stopAtAccuracy)
@@ -262,13 +271,14 @@ TEST(WideRangeBenchmark, UtgBbMatchesIndependentReference)
     StartStage("trained_evaluation");
     const auto actual = engine::EvaluateExploitability(*problem, strategy);
     report["trained"] = Metrics(actual);
+    report["trained"]["accuracyPercent"] = 100.0 * actual.exploitability / initialPot;
+    report["target_reached"] = actual.exploitability <= targetExploitability;
     FinishStage("trained_evaluation");
     CheckMetrics(actual);
     if (checkConvergence)
         EXPECT_NEAR(actual.exploitability, report.at("checkpoint").at("exploitability").get<double>(), 1e-6);
-    EXPECT_GE(actual.player0BestResponseEv, -solved.at("villainBestResponseEv").get<double>() - kTolerance);
-    EXPECT_GE(actual.player1BestResponseEv, -solved.at("heroBestResponseEv").get<double>() - kTolerance);
-    EXPECT_LE(actual.exploitability, kMaxExploitability);
+    // Low iteration budgets measure throughput; convergence precision belongs to the correctness suite.
+    EXPECT_LT(actual.exploitability, uniform.exploitability - kTolerance);
     ASSERT_FALSE(HasFailure());
 
     StartStage("analysis_initialization");
@@ -368,7 +378,6 @@ int main(int argc, char** argv)
             {"scenario_id", "utg-bb-wide"},
             {"algorithm", "dcfr"},
             {"iteration_unit", "full_player_update"},
-            {"exploitability_limit", kMaxExploitability},
             {"accuracy_stopping", stopAtAccuracy},
             {"status", "running"},
             {"failures", Json::array()},

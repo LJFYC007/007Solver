@@ -87,9 +87,16 @@ def scenario(format_name, bet_level, selected, stack, board="Ks 9s 2d", pot=2.0,
 fixtures = ROOT / "tests/fixtures"
 weighted = scenario("8max", 4, {"UTG": ["AKs", "QQ"], "BB": ["KK", "A5s"]}, 4.0)
 raised = scenario("6max", 4, {"UTG": ["KJs"], "BB": ["AQs"]}, 8.0)
-wide = scenario("8max", 3, None, 15.0, "Ac Kh Qs", 5.0, 3500)
+wide = scenario("8max", 3, None, 87.0, "Ac Kh Qs", 26.5, 2000)
 for street in ("flop", "turn", "river"):
-    wide["bettingTree"][street]["bet"] = [50, 100]
+    wide["bettingTree"][street]["bet"] = [33, 125]
+# Keep small bets as distinct branches instead of replacing them with all-ins.
+wide["bettingTree"]["allInSpr"] = 0.0
+wide["rangeSource"]["reduction"] = (
+    "Full captured 8-max UTG raise 2.5 / BB raise 13 / UTG call ranges. "
+    "100bb starting stacks leave 87bb each; the 26.5bb pot includes the folded SB's 0.5bb. "
+    "No range subsets or weight rescaling."
+)
 for name, value in [("weighted-flop", weighted), ("raise-flop", raised), ("utg-bb-wide", wide)]:
-    (fixtures / f"{name}.json").write_text(json.dumps(value, indent=4) + "\n")
+    (fixtures / f"{name}.json").write_bytes((json.dumps(value, indent=4) + "\n").encode())
 print("Updated three input fixtures from GTO Wizard; regenerate independent references next.")

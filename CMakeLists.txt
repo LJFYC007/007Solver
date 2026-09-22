@@ -18,6 +18,7 @@ add_subdirectory(third_party/googletest EXCLUDE_FROM_ALL)
 add_subdirectory(solver)
 
 add_executable(007SolverTests tests/domain_tests.cpp tests/tests.cpp)
+add_dependencies(007SolverTests solver_service)
 target_link_libraries(007SolverTests PRIVATE solver_service_support GTest::gtest_main)
 target_include_directories(007SolverTests PRIVATE third_party/nlohmann_json/single_include)
 target_compile_definitions(
@@ -32,6 +33,9 @@ endif()
 enable_testing()
 add_test(NAME solver COMMAND 007SolverTests "--gtest_output=json:${CMAKE_CURRENT_BINARY_DIR}/solver-test-results.json")
 set_tests_properties(solver PROPERTIES TIMEOUT 60)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME solver_cli COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/cli_e2e.py" $<TARGET_FILE:solver_service>)
+set_tests_properties(solver_cli PROPERTIES TIMEOUT 30)
 
 # Deliberately opt-in: neither the default build nor CTest runs the wide benchmark.
 add_executable(007SolverBenchmark EXCLUDE_FROM_ALL tests/benchmark.cpp)

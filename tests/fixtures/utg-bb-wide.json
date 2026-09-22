@@ -3,15 +3,15 @@
     "heroPosition": "UTG",
     "villainPosition": "BB",
     "heroActsFirst": false,
-    "initialPot": 5.0,
-    "heroStack": 15.0,
-    "villainStack": 15.0,
-    "iterations": 3500,
+    "initialPot": 26.5,
+    "heroStack": 87.0,
+    "villainStack": 87.0,
+    "iterations": 2000,
     "bettingTree": {
         "flop": {
             "bet": [
-                50,
-                100
+                33,
+                125
             ],
             "raise": [
                 50
@@ -19,8 +19,8 @@
         },
         "turn": {
             "bet": [
-                50,
-                100
+                33,
+                125
             ],
             "raise": [
                 50
@@ -28,15 +28,15 @@
         },
         "river": {
             "bet": [
-                50,
-                100
+                33,
+                125
             ],
             "raise": [
                 50
             ]
         },
         "maxRaises": 2,
-        "allInSpr": 0.15
+        "allInSpr": 0.0
     },
     "ranges": {
         "UTG": {
@@ -156,6 +156,6 @@
             }
         ],
         "retainedClasses": null,
-        "reduction": "Postflop pot/stacks are reduced for runtime; retained hand classes, when listed, are a test subset. Source weights are not rounded or rescaled."
+        "reduction": "Full captured 8-max UTG raise 2.5 / BB raise 13 / UTG call ranges. 100bb starting stacks leave 87bb each; the 26.5bb pot includes the folded SB's 0.5bb. No range subsets or weight rescaling."
     }
 }
