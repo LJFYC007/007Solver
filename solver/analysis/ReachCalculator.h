@@ -4,6 +4,7 @@
 #include "engine/SolveResult.h"
 #include <cstddef>
 #include <map>
+#include <optional>
 #include <vector>
 
 namespace solver::analysis
@@ -13,35 +14,29 @@ class ReachCalculator
 public:
     using HandWeights = std::map<core::HoleCards, float>;
 
-    struct JointReach
-    {
-        core::HoleCards player0Hand;
-        core::HoleCards player1Hand;
-        float jointReachMass;
-    };
-
     struct PlayerOwnReachWeights
     {
         HandWeights player0;
         HandWeights player1;
     };
 
-    using JointReachMasses = std::vector<JointReach>;
-
     struct NodeReach
     {
-        JointReachMasses jointReachMasses;
         PlayerOwnReachWeights ownReachWeights;
+        float chanceProbability = 1.0f;
     };
 
     explicit ReachCalculator(const engine::SolveResult& result);
 
     // Borrows the current path's reach; a later query may invalidate the reference.
     const NodeReach& ReachFor(game::NodeId nodeId);
-    HandWeights BuildMarginalReachMasses(const JointReachMasses& jointReachMasses, core::PlayerId player) const;
+    HandWeights BuildMarginalReachMasses(const NodeReach& reach, const core::Board& board, core::PlayerId player) const;
+    // No value means no supported pair; zero means no card blocks every pair.
+    std::optional<std::uint64_t> CommonBlockers(const NodeReach& reach, const core::Board& board) const;
 
 private:
     const engine::SolveResult& result_;
+    float rootMass_ = 0.0f;
     struct CachedReach
     {
         game::NodeId node;
@@ -49,9 +44,6 @@ private:
     };
     std::vector<CachedReach> path_;
 
-    JointReachMasses BuildInitialJointReachMasses(const core::RangeSet& ranges, const core::Board& board) const;
-    JointReachMasses PropagateActionReach(game::NodeId nodeId, std::size_t childIndex, const JointReachMasses& jointReachMasses) const;
     PlayerOwnReachWeights PropagateOwnReach(game::NodeId nodeId, std::size_t childIndex, const PlayerOwnReachWeights& ownReach) const;
-    JointReachMasses PropagateChanceReach(const JointReachMasses& jointReachMasses, core::Card dealtCard, int legalOutcomeCount) const;
 };
 } // namespace solver::analysis

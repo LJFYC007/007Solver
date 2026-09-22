@@ -6,7 +6,6 @@
 #include "service/ConvergenceEstimate.h"
 #include "service/JsonAdapter.h"
 #include "service/ServiceMessage.h"
-#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -166,7 +165,7 @@ int SolverService::Run(const std::string& scenarioPath, engine::ComputeDevice de
                 const float evaluationSeconds = std::chrono::duration<float>(Clock::now() - checkStart).count();
                 convergence.Observe(completed, metrics.exploitability, session.TrainingTimeSeconds(), evaluationSeconds);
                 if (initialPot > 0.0f)
-                    solveProgress.accuracyPercent = 100.0f * std::max(0.0f, metrics.exploitability) / initialPot;
+                    solveProgress.accuracyPercent = 100.0f * metrics.exploitability / initialPot;
                 if (metrics.exploitability <= target)
                     break;
 

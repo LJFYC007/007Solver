@@ -39,26 +39,11 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
     {
         // A card is unavailable only if every supported private pair blocks it.
         // Inspect the current reach without populating caches for unvisited children.
-        std::uint64_t blockedByAll = (std::uint64_t{1} << 52) - 1;
-        bool hasJointReach = false;
-        for (const auto& jointReach : currentReach.jointReachMasses)
-        {
-            if (jointReach.jointReachMass <= 0.0f)
-                continue;
-            hasJointReach = true;
-            std::uint64_t blocked = 0;
-            for (core::Card card : jointReach.player0Hand.Cards())
-                blocked |= std::uint64_t{1} << card.Index();
-            for (core::Card card : jointReach.player1Hand.Cards())
-                blocked |= std::uint64_t{1} << card.Index();
-            blockedByAll &= blocked;
-            if (blockedByAll == 0)
-                break;
-        }
+        const auto blockedByAll = reachCalculator_.CommonBlockers(currentReach, node.State().board);
         for (std::size_t edgeIndex = 0; edgeIndex < node.ChanceOutcomeCount(); ++edgeIndex)
         {
             const game::ChanceOutcome& outcome = node.GetChanceOutcome(edgeIndex);
-            if (hasJointReach && (blockedByAll & (std::uint64_t{1} << outcome.DealtCard().Index())) != 0)
+            if (blockedByAll && (*blockedByAll & (std::uint64_t{1} << outcome.DealtCard().Index())) != 0)
                 continue;
 
             report.outcomes.push_back({outcome.DealtCard(), outcome.NextNode()});
@@ -69,7 +54,7 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
     const core::PlayerId player = node.State().playerToAct;
     report.actor = player;
     const ReachCalculator::HandWeights marginalReachMasses =
-        reachCalculator_.BuildMarginalReachMasses(currentReach.jointReachMasses, player);
+        reachCalculator_.BuildMarginalReachMasses(currentReach, node.State().board, player);
     report.hands = BuildHandReports(
         nodeId,
         result_.Problem().ranges.For(player),

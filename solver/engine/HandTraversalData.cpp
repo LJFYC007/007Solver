@@ -1,5 +1,6 @@
 #include "engine/HandTraversalData.h"
 #include "engine/AverageStrategy.h"
+#include "engine/ChanceGroups.h"
 #include "game/TerminalSettlement.h"
 #include <algorithm>
 #include <stdexcept>
@@ -91,28 +92,16 @@ HandTraversalData::HandTraversalData(std::shared_ptr<const HandBoardData> tables
 
 void HandTraversalData::PrepareChanceTasks()
 {
-    std::vector<std::uint32_t> path;
-    const auto visit = [&](const auto& self, std::uint32_t index) -> void
-    {
-        const Node& node = nodes[index];
-        if (node.forcedRunout || node.kind == game::NodeKind::Terminal)
-            return;
-        if (node.kind == game::NodeKind::Chance)
+    VisitChanceGroups(
+        game->GetNode(nodes.front().id),
+        [&](const game::GameNode& node, std::uint32_t index, const std::vector<std::uint32_t>& path)
         {
             const auto group = static_cast<std::uint32_t>(chanceGroups_.size());
             chanceGroups_.push_back({index, path});
-            for (std::uint32_t action = 0; action < node.childCount; ++action)
+            for (std::uint32_t action = 0; action < node.ChanceOutcomeCount(); ++action)
                 chanceTasks_.push_back({group, action});
-            return;
         }
-        for (std::uint32_t action = 0; action < node.childCount; ++action)
-        {
-            path.push_back(action);
-            self(self, children[node.childOffset + action]);
-            path.pop_back();
-        }
-    };
-    visit(visit, 0);
+    );
 }
 
 void HandTraversalData::PrepareFlopRunout()

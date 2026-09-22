@@ -48,7 +48,11 @@ public:
         std::uint64_t parallelValuesBytes;
         std::uint64_t flopOutcomesBytes;
     };
-    static StorageEstimate EstimateStorage(const game::CompiledGame& game, const std::array<std::size_t, 2>& handCounts);
+    static StorageEstimate EstimateStorage(
+        const game::CompiledGame& game,
+        const std::array<std::size_t, 2>& handCounts,
+        bool prepareTraining = false
+    );
 
     const std::array<std::vector<Hand>, 2>& hands;
     const std::vector<Node>& nodes;

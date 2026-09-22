@@ -15,6 +15,16 @@ struct MemoryEstimate
     int workers;
 };
 
+// Counts available before either backend allocates a traversal or strategy state.
+struct SolveSize
+{
+    game::GameTreeSize tree;
+    std::array<std::size_t, 2> hands{};
+    std::uint64_t strategyEntries = 0;
+    std::uint64_t infoSets = 0;
+};
+SolveSize MeasureSolveSize(const SolveProblem& problem);
+
 int CpuWorkerCount(int requested = 0);
 // Conservative solve/export/evaluation peak, before allocating the active layout or
 // strategy tables. Uses root-hand strides; includes headroom for allocator/runtime costs.

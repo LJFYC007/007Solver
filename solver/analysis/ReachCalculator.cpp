@@ -8,20 +8,43 @@ namespace solver::analysis
 {
 namespace
 {
-// Heads-up hold'em: each player holds two private cards that chance cannot deal.
-constexpr int kHeadsUpHoleCardCount = 4;
+// Pairs are visited only while deriving reports; the path retains own reach alone.
+// Returning false stops early once a support query has its answer.
+template<typename Visitor>
+void VisitPairs(const ReachCalculator::PlayerOwnReachWeights& own, const core::Board& board, Visitor visit)
+{
+    for (const auto& [first, firstWeight] : own.player0)
+    {
+        if (firstWeight <= 0.0f || core::Overlaps(first, board))
+            continue;
+        for (const auto& [second, secondWeight] : own.player1)
+        {
+            if (secondWeight <= 0.0f || core::Overlaps(second, board) || core::Overlaps(first, second))
+                continue;
+            const float weight = firstWeight * secondWeight;
+            if (weight > 0.0f && !visit(first, second, weight))
+                return;
+        }
+    }
+}
 } // namespace
 
 ReachCalculator::ReachCalculator(const engine::SolveResult& result) : result_(result)
 {
     const engine::SolveProblem& problem = result_.Problem();
-    path_.push_back(
-        {problem.game->Root(),
-         NodeReach{
-             BuildInitialJointReachMasses(problem.ranges, problem.game->Spec().initialBoard),
-             {problem.ranges.For(core::PlayerId::Player0()).Entries(), problem.ranges.For(core::PlayerId::Player1()).Entries()},
-         }}
+    NodeReach root{{problem.ranges.For(core::PlayerId::Player0()).Entries(), problem.ranges.For(core::PlayerId::Player1()).Entries()}};
+    VisitPairs(
+        root.ownReachWeights,
+        problem.game->Spec().initialBoard,
+        [&](core::HoleCards, core::HoleCards, float weight)
+        {
+            rootMass_ += weight;
+            return true;
+        }
     );
+    if (rootMass_ <= 0.0f)
+        throw std::runtime_error("No valid private hand pairs for reach calculation");
+    path_.push_back({problem.game->Root(), std::move(root)});
 }
 
 const ReachCalculator::NodeReach& ReachCalculator::ReachFor(game::NodeId nodeId)
@@ -49,16 +72,14 @@ const ReachCalculator::NodeReach& ReachCalculator::ReachFor(game::NodeId nodeId)
         const auto edge = nodes[depth].Parent()->edgeIndex;
         const auto& parentReach = path_.back().reach;
         NodeReach reach;
+        reach.chanceProbability = parentReach.chanceProbability;
         if (parent.Kind() == game::NodeKind::Chance)
         {
-            const core::Card dealtCard = parent.GetChanceOutcome(edge).DealtCard();
-            const int legalOutcomeCount = 52 - parent.State().board.CardCount() - kHeadsUpHoleCardCount;
-            reach.jointReachMasses = PropagateChanceReach(parentReach.jointReachMasses, dealtCard, legalOutcomeCount);
+            reach.chanceProbability /= 52 - parent.State().board.CardCount() - 4;
             reach.ownReachWeights = parentReach.ownReachWeights;
         }
         else
         {
-            reach.jointReachMasses = PropagateActionReach(parent.Id(), edge, parentReach.jointReachMasses);
             reach.ownReachWeights = PropagateOwnReach(parent.Id(), edge, parentReach.ownReachWeights);
         }
         path_.push_back({nodes[depth].Id(), std::move(reach)});
@@ -67,79 +88,43 @@ const ReachCalculator::NodeReach& ReachCalculator::ReachFor(game::NodeId nodeId)
 }
 
 ReachCalculator::HandWeights ReachCalculator::BuildMarginalReachMasses(
-    const JointReachMasses& jointReachMasses,
+    const NodeReach& reach,
+    const core::Board& board,
     core::PlayerId player
 ) const
 {
-    HandWeights marginalReachMasses;
-    for (const JointReach& jointReach : jointReachMasses)
-    {
-        marginalReachMasses[player == core::PlayerId::Player0() ? jointReach.player0Hand : jointReach.player1Hand] +=
-            jointReach.jointReachMass;
-    }
-    return marginalReachMasses;
+    HandWeights masses;
+    VisitPairs(
+        reach.ownReachWeights,
+        board,
+        [&](core::HoleCards first, core::HoleCards second, float weight)
+        {
+            masses[player == core::PlayerId::Player0() ? first : second] += (weight / rootMass_) * reach.chanceProbability;
+            return true;
+        }
+    );
+    return masses;
 }
 
-ReachCalculator::JointReachMasses ReachCalculator::BuildInitialJointReachMasses(
-    const core::RangeSet& ranges,
-    const core::Board& board
-) const
+std::optional<std::uint64_t> ReachCalculator::CommonBlockers(const NodeReach& reach, const core::Board& board) const
 {
-    JointReachMasses jointReachMasses;
-    float totalWeight = 0.0f;
-    for (const auto& [player0Hand, player0Weight] : ranges.For(core::PlayerId::Player0()).Entries())
-    {
-        if (player0Weight <= 0.0f || core::Overlaps(player0Hand, board))
-            continue;
-
-        for (const auto& [player1Hand, player1Weight] : ranges.For(core::PlayerId::Player1()).Entries())
+    std::optional<std::uint64_t> common;
+    VisitPairs(
+        reach.ownReachWeights,
+        board,
+        [&](core::HoleCards first, core::HoleCards second, float weight)
         {
-            if (player1Weight <= 0.0f || core::Overlaps(player0Hand, player1Hand) || core::Overlaps(player1Hand, board))
-                continue;
-
-            jointReachMasses.push_back({player0Hand, player1Hand, 0.0f});
-            totalWeight += player0Weight * player1Weight;
+            if ((weight / rootMass_) * reach.chanceProbability <= 0.0f)
+                return true;
+            std::uint64_t blocked = 0;
+            for (const auto hand : {first, second})
+                for (const auto card : hand.Cards())
+                    blocked |= std::uint64_t{1} << card.Index();
+            common = common ? *common & blocked : blocked;
+            return *common != 0;
         }
-    }
-    if (totalWeight <= 0.0f)
-        throw std::runtime_error("No valid private hand pairs for reach calculation");
-
-    for (JointReach& jointReach : jointReachMasses)
-    {
-        const float jointWeight = ranges.For(core::PlayerId::Player0()).GetWeight(jointReach.player0Hand) *
-                                  ranges.For(core::PlayerId::Player1()).GetWeight(jointReach.player1Hand);
-        jointReach.jointReachMass = jointWeight / totalWeight;
-    }
-    return jointReachMasses;
-}
-
-ReachCalculator::JointReachMasses ReachCalculator::PropagateActionReach(
-    game::NodeId nodeId,
-    std::size_t childIndex,
-    const JointReachMasses& jointReachMasses
-) const
-{
-    JointReachMasses propagatedMasses;
-    propagatedMasses.reserve(jointReachMasses.size());
-    HandWeights actionProbabilities;
-    const game::GameNode& node = result_.Problem().game->GetNode(nodeId);
-    const core::PlayerId player = node.State().playerToAct;
-
-    for (const JointReach& jointReach : jointReachMasses)
-    {
-        const core::HoleCards hand = player == core::PlayerId::Player0() ? jointReach.player0Hand : jointReach.player1Hand;
-        auto probabilityIt = actionProbabilities.find(hand);
-        if (probabilityIt == actionProbabilities.end())
-        {
-            const float probability = result_.Strategy().ActionProbability({nodeId, hand}, childIndex);
-            probabilityIt = actionProbabilities.emplace(hand, probability).first;
-        }
-
-        const float jointReachMass = jointReach.jointReachMass * probabilityIt->second;
-        if (jointReachMass > 0.0f)
-            propagatedMasses.push_back({jointReach.player0Hand, jointReach.player1Hand, jointReachMass});
-    }
-    return propagatedMasses;
+    );
+    return common;
 }
 
 ReachCalculator::PlayerOwnReachWeights ReachCalculator::PropagateOwnReach(
@@ -160,27 +145,4 @@ ReachCalculator::PlayerOwnReachWeights ReachCalculator::PropagateOwnReach(
     return propagatedReach;
 }
 
-ReachCalculator::JointReachMasses ReachCalculator::PropagateChanceReach(
-    const JointReachMasses& jointReachMasses,
-    core::Card dealtCard,
-    int legalOutcomeCount
-) const
-{
-    if (legalOutcomeCount <= 0)
-        throw std::runtime_error("Chance node has no legal outcomes");
-
-    JointReachMasses propagatedMasses;
-    propagatedMasses.reserve(jointReachMasses.size());
-    for (const JointReach& jointReach : jointReachMasses)
-    {
-        if (core::Contains(jointReach.player0Hand, dealtCard) || core::Contains(jointReach.player1Hand, dealtCard))
-            continue;
-        propagatedMasses.push_back({
-            jointReach.player0Hand,
-            jointReach.player1Hand,
-            jointReach.jointReachMass / legalOutcomeCount,
-        });
-    }
-    return propagatedMasses;
-}
 } // namespace solver::analysis

@@ -10,24 +10,32 @@ GpuDcfrSession::GpuDcfrSession(std::shared_ptr<const SolveProblem> problem) : pr
         throw std::invalid_argument("GPU DCFR session requires a solve problem");
     if (!Available())
         throw std::runtime_error("A supported CUDA or Apple Silicon GPU is unavailable");
-    memory_ = EstimateCpuMemory(*problem_, 1);
-    if (memory_.strategyEntries > gpu::DeviceMemoryBudget() / (2 * sizeof(float)))
+    const auto counts = MeasureSolveSize(*problem_);
+    const auto& size = counts.tree;
+    if (counts.strategyEntries > gpu::DeviceMemoryBudget() / (2 * sizeof(float)))
         throw std::runtime_error("Regret and cumulative strategy alone exceed GPU memory; reduce the tree or use CPU");
     data_ = std::make_shared<const HandTraversalData>(*problem_, problem_->game->Root());
     const gpu::Plan plan(*data_);
     state_ = plan.state;
-    memory_.workers = 0;
-    const auto fixed = HandTraversal::EstimateStorage(*problem_->game, {data_->tables->hands[0].size(), data_->tables->hands[1].size()});
+    const auto fixed = HandTraversal::EstimateStorage(*problem_->game, counts.hands);
     // Combined host/device allocation estimate, not a claim about available VRAM.
-    const auto host = problem_->game->Size().storageBytes + fixed.fixedBytes;
+    // Metal retains a copy of the update passes after the temporary upload plan dies.
+    const auto host = size.storageBytes + fixed.fixedBytes + plan.passes.size() * sizeof(gpu::Pass);
     const auto sumsBytes = plan.Buffers()[gpu::SumsBuffer].bytes;
-    const auto certification = sumsBytes + fixed.workspaceBytes;
-    const auto size = problem_->game->Size();
+    const auto staging = std::min(sumsBytes, gpu::kReadbackBytes);
+    const auto maxHands = std::max(counts.hands[0], counts.hands[1]);
+    const auto evaluationVectors = sizeof(float) * (counts.hands[0] + counts.hands[1] + maxHands);
+    const auto device = plan.DeviceBytes();
+    const auto initialization = device + plan.HostBytes();
+    const auto checkpointDownload = device + sumsBytes + staging;
+    const auto certification = device + sumsBytes + fixed.workspaceBytes + evaluationVectors;
     const auto snapshot =
         StrategySnapshot::EstimateStorageBytes(size.decisionNodes[0] + size.decisionNodes[1], data_->infoSetCount, plan.entries);
-    const auto exportPeak = host + sumsBytes + snapshot + gpu::kReadbackBytes;
-    const auto peak = std::max(host + plan.DeviceBytes() + std::max(plan.HostBytes(), certification), exportPeak);
-    memory_.peakBytes = peak + peak / 8 + 64 * 1024 * 1024;
+    // Download releases other device buffers first; compaction reuses the host sums.
+    const auto exportDownload = 2 * sumsBytes + staging;
+    const auto exportSnapshot = snapshot + data_->maxActions * maxHands * sizeof(float);
+    const auto peak = host + std::max({initialization, checkpointDownload, certification, exportDownload, exportSnapshot});
+    memory_ = {size.logicalNodes, size.topologyNodes, size.traversalNodes, counts.strategyEntries, peak + peak / 8 + 64 * 1024 * 1024, 0};
     executor_ = gpu::MakeExecutor(plan);
 }
 

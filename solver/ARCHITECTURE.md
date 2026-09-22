@@ -12,7 +12,11 @@ Each training iteration updates one player, alternating across successive `Run` 
 
 [HandBoardData](engine/HandBoardData.h) owns the range-specific hand indices and rank tables for one exact public board. [HandTraversalData](engine/HandTraversalData.h) adds the query or training root's nodes and utility baseline; mutable training state belongs to each session. Rank tables may share an unordered turn/river pair, but strategy state remains distinct for every ordered history. Both backends share snapshot normalization and compaction.
 
+CPU terminal values and showdown equity share [hand evaluation](engine/HandEvaluation.h). Equity uses query-local board tables, separate from the EV worker's cache.
+
 The [GPU plan](engine/gpu/GpuPlan.h) defines buffer upload sources, allocation sizes, initialization passes and player-update passes for both executors and the memory estimate; binding indices and pass stages are shared with the kernels in [GpuTypes.h](engine/gpu/GpuTypes.h). Initialization completes before player updates begin. Upload sources borrow the plan and must be copied before it is destroyed. The plan may reuse descendant scratch only after backup, retaining live ancestor reaches and child-root values. Its batching target is not a hard memory limit: individual street regions and retained ancestors can exceed it, and the whole tree's regrets and cumulative strategies remain resident.
+
+Allocation estimates share preallocation hand/tree counts across backends and the CPU chance-group enumeration with task construction. Peaks include checkpoint scratch while training allocations remain resident, GPU readback staging, and snapshot compaction reusing cumulative-strategy storage. GPU estimates exclude unconstructed CPU training caches.
 
 CPU and GPU use float arithmetic; their accumulation and traversal orders can produce different results. CUDA and Metal share kernel arithmetic. `DcfrSession::EvaluateCheckpoint` owns certification: final checkpoints always use CPU evaluation, and provisional GPU checkpoints reaching the supplied stopping target receive independent CPU evaluation before returning. Callers supply a stopping target whenever a checkpoint can end training. CPU evaluation uses the same cumulative-strategy normalization as snapshot export.
 
@@ -51,6 +55,8 @@ Reach fields in [NodeReport.h](analysis/NodeReport.h) are also distinct:
 | `marginalReachMass` | Marginal of legal joint hand-pair mass, including both players' actions, chance and blockers |
 
 Joint reach is normalized at the root, not at every node. A hand can have positive own reach and zero joint reach; its report then has no strategy and a null node EV. Conditional hand EV uses compatible opponent mass, not the hand's own reach.
+
+The navigation path caches only each player's own reach and the history's chance probability. Joint mass is derived from their product divided by the root's legal-pair mass, with private/public blockers applied at the queried board. Chance does not alter own reach. This factorization relies on independent input ranges and does not model folded-player card-removal correlations. A chance node without joint support still lists all public-board-compatible cards.
 
 Each chance outcome has probability `1 / (52 - boardCardCount - 4)` for a compatible private-hand pair. Called all-ins still include every legal remaining runout. Exploitability measures the chosen betting tree and does not account for omitted action sizes.
 
