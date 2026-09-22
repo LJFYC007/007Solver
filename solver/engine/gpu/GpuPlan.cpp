@@ -20,7 +20,7 @@ BufferData Table(const std::vector<T>& values)
 Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
 {
     const auto& tables = *data.tables;
-    static_assert(sizeof(Node) == 80 && sizeof(Hand) == 32 && sizeof(State) == 32 && sizeof(Pass) == 16);
+    static_assert(sizeof(Node) == 72 && sizeof(Hand) == 32 && sizeof(State) == 32 && sizeof(Pass) == 16);
     for (U32 p = 0; p < 2; ++p)
     {
         state.hands[p] = static_cast<U32>(tables.hands[p].size());
@@ -90,7 +90,6 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         {
             auto& child = nodes[edges[nodes[i].edge + a]];
             child.parent = i;
-            child.action = a;
             if (nodes[i].kind == NodeKind::Chance)
                 child.dealtCard = data.nodes[edges[nodes[i].edge + a]].board.CardAt(data.nodes[i].board.CardCount()).Index();
         }
@@ -154,7 +153,14 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             visit(visit, root, 0);
         slots = std::max(slots, next);
         for (const auto& level : levels)
-            emit(Kernel::Reach, level);
+        {
+            std::vector<U32> reach;
+            for (U32 index : level)
+                if (nodes[index].kind == NodeKind::Decision || nodes[index].parent == kNoParent ||
+                    nodes[nodes[index].parent].kind == NodeKind::Chance)
+                    reach.push_back(index);
+            emit(Kernel::Reach, reach);
+        }
         emit(Kernel::Terminal, terminals);
         for (std::size_t begin = 0; begin < boundary.size();)
         {

@@ -49,7 +49,6 @@ struct Node
     U64 strategy;
     U64 board;
     U32 parent;
-    U32 action;
     U32 slot;
     U32 edge;
     U32 count;
@@ -60,7 +59,6 @@ struct Node
     U32 outcomeRow; // zero for flop, card index + 1 for turn
     U32 dealtCard;
     float utility[3];
-    U32 padding;
 };
 struct Hand
 {

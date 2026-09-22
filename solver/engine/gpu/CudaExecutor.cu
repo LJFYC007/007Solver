@@ -33,13 +33,16 @@ public:
             Check(cudaMemsetAsync(buffers_[RegretsBuffer], 0, sources[RegretsBuffer].bytes, stream_));
             Check(cudaMemsetAsync(buffers_[SumsBuffer], 0, sources[SumsBuffer].bytes, stream_));
             for (const auto& pass : plan.initialization)
-                Launch(pass);
+                Launch(pass, 0);
             Check(cudaStreamSynchronize(stream_));
-            Check(cudaStreamBeginCapture(stream_, cudaStreamCaptureModeThreadLocal));
-            for (const auto& pass : plan.passes)
-                Launch(pass);
-            Check(cudaStreamEndCapture(stream_, &graph_));
-            Check(cudaGraphInstantiate(&executable_, graph_, nullptr, nullptr, 0));
+            for (U32 player = 0; player < 2; ++player)
+            {
+                Check(cudaStreamBeginCapture(stream_, cudaStreamCaptureModeThreadLocal));
+                for (const auto& pass : plan.passes)
+                    Launch(pass, player);
+                Check(cudaStreamEndCapture(stream_, &graphs_[player]));
+                Check(cudaGraphInstantiate(&executables_[player], graphs_[player], nullptr, nullptr, 0));
+            }
         }
         catch (...)
         {
@@ -52,7 +55,7 @@ public:
     void Update(const State& state) override
     {
         Check(cudaMemcpyAsync(buffers_[StateBuffer], &state, sizeof(State), cudaMemcpyHostToDevice, stream_));
-        Check(cudaGraphLaunch(executable_, stream_));
+        Check(cudaGraphLaunch(executables_[state.player], stream_));
         // One synchronization per player update, never per node or batch.
         Check(cudaStreamSynchronize(stream_));
     }
@@ -85,19 +88,23 @@ private:
     State shape_;
     std::size_t entries_;
     cudaStream_t stream_ = nullptr;
-    cudaGraph_t graph_ = nullptr;
-    cudaGraphExec_t executable_ = nullptr;
+    std::array<cudaGraph_t, 2> graphs_{};
+    std::array<cudaGraphExec_t, 2> executables_{};
     void Upload(std::size_t index, const BufferData& source)
     {
         Check(cudaMalloc(&buffers_[index], source.AllocationBytes()));
         if (source.data && source.bytes)
             Check(cudaMemcpy(buffers_[index], source.data, source.bytes, cudaMemcpyHostToDevice));
     }
-    void Launch(Pass pass)
+    void Launch(Pass pass, U32 player)
     {
-        const auto threads = pass.count * (pass.operation == Kernel::Outcomes ? 1 : shape_.stride);
-        const auto group = pass.operation == Kernel::Terminal ? 128 : 256;
-        const auto blocks = pass.operation == Kernel::Terminal ? pass.count : (threads + group - 1) / group;
+        // Backup tiles only the current player's hands; Reach still propagates both players.
+        const bool handTiles = pass.operation == Kernel::Backup;
+        const auto handCount = shape_.hands[player];
+        const auto group = pass.operation == Kernel::Terminal ? 64u : handTiles ? (std::min(handCount, 256u) + 31) / 32 * 32 : 256u;
+        const auto threads = pass.count * (pass.operation == Kernel::Reach ? shape_.stride : 1);
+        const dim3 blocks = handTiles ? dim3(pass.count, (handCount + group - 1) / group)
+                                      : dim3(pass.operation == Kernel::Terminal ? pass.count : (threads + group - 1) / group);
         const auto shared = pass.operation == Kernel::Terminal ? TerminalSharedBytes(shape_) : 0;
 #define LAUNCH(name)                                               \
     name<<<blocks, group, shared, stream_>>>(                      \
@@ -143,12 +150,15 @@ private:
     }
     void DestroyGraph()
     {
-        if (executable_)
-            cudaGraphExecDestroy(executable_);
-        if (graph_)
-            cudaGraphDestroy(graph_);
-        executable_ = nullptr;
-        graph_ = nullptr;
+        for (U32 player = 0; player < 2; ++player)
+        {
+            if (executables_[player])
+                cudaGraphExecDestroy(executables_[player]);
+            if (graphs_[player])
+                cudaGraphDestroy(graphs_[player]);
+            executables_[player] = nullptr;
+            graphs_[player] = nullptr;
+        }
     }
     void Release()
     {

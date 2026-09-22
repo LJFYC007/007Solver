@@ -12,7 +12,8 @@ namespace solver::engine::gpu
 constexpr std::size_t kReadbackBytes = 16 * 1024 * 1024;
 inline std::size_t TerminalSharedBytes(const State& state)
 {
-    return 3 * state.stride * sizeof(float);
+    // Fold stores one total and 52 card masses, even for small ranges.
+    return (state.stride + std::max(2 * state.stride, 53u)) * sizeof(float);
 }
 
 struct BufferData
@@ -27,7 +28,7 @@ struct Plan
 {
     explicit Plan(const HandTraversalData& data);
     std::vector<Node> nodes;
-    // Backup reads child values directly, without a dependent Node lookup.
+    // Reach writes and Backup reads child slots without a dependent Node lookup.
     std::vector<U32> childSlots;
     std::vector<Hand> hands;
     std::vector<unsigned short> ranks;

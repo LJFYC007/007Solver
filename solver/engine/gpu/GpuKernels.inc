@@ -9,6 +9,8 @@ using namespace solver::engine::gpu;
     constant State &state [[buffer(StateBuffer)]], constant Pass &pass [[buffer(PassBuffer)]], uint gid [[thread_position_in_grid]], \
         uint simdWidth [[threads_per_simdgroup]]
 #define GPU_INDEX gid
+#define GPU_ITEM_INDEX (gid / state.stride)
+#define GPU_HAND_INDEX (gid % state.stride)
 #define GPU_WIDTH simdWidth
 #define GPU_SHARED threadgroup
 #define GPU_GROUP_TAIL                                                                                    \
@@ -26,6 +28,8 @@ using namespace solver::engine::gpu;
 #define GPU_ENTRY(name) __global__ void name
 #define GPU_TAIL const State *statePointer, Pass pass
 #define GPU_INDEX (blockIdx.x * blockDim.x + threadIdx.x)
+#define GPU_ITEM_INDEX blockIdx.x
+#define GPU_HAND_INDEX (blockIdx.y * blockDim.x + threadIdx.x)
 #define GPU_WIDTH 32u
 #define GPU_SHARED
 #define GPU_GROUP_TAIL
@@ -48,31 +52,10 @@ using namespace solver::engine::gpu;
 #define GPU_STATE const State state = *statePointer;
 #endif
 
-GPU_INLINE float Policy(
-    Node n,
-    U32 hand,
-    U32 action,
-    U32 count,
-    bool average,
-    GPU_DEVICE const float* regrets,
-    GPU_DEVICE const float* sums
-)
-{
-    float total = 0.0f;
-    for (U32 a = 0; a < n.count; ++a)
-    {
-        const float x = average ? sums[n.strategy + U64(a) * count + hand] : regrets[n.strategy + U64(a) * count + hand];
-        total += x > 0.0f ? x : 0.0f;
-    }
-    const float x = average ? sums[n.strategy + U64(action) * count + hand] : regrets[n.strategy + U64(action) * count + hand];
-    return total > 0.0f ? (x > 0.0f ? x : 0.0f) / total : 1.0f / float(n.count);
-}
-
 GPU_ENTRY(Reach)(GPU_ARGUMENTS)
 {
     GPU_STATE
-    const U32 index = GPU_INDEX;
-    const U32 item = index / state.stride, h = index % state.stride;
+    const U32 index = GPU_INDEX, item = index / state.stride, h = index % state.stride;
     if (item >= pass.count)
         return;
     const Node n = nodes[work[pass.offset + item]];
@@ -85,20 +68,50 @@ GPU_ENTRY(Reach)(GPU_ARGUMENTS)
         if (p == state.player && (state.evaluation || (n.kind != NodeKind::Decision && n.kind != NodeKind::Chance)))
             continue;
         const U32 base = p ? state.hands[0] : 0;
-        const Hand hand = hands[base + h];
         float value;
         if (n.parent == 0xffffffffu)
-            value = p == state.player ? 1.0f : hand.weight;
+        {
+            value = p == state.player ? 1.0f : hands[base + h].weight;
+            scratch[U64(n.slot) * total + base + h] = value;
+        }
         else
         {
             const Node parent = nodes[n.parent];
-            value = scratch[U64(parent.slot) * total + base + h];
             if (parent.kind == NodeKind::Chance)
-                value = hand.mask & (U64(1) << n.dealtCard) ? 0.0f : value * (p == state.player ? 1.0f : 1.0f / float(parent.count - 4));
-            else if (parent.actor == p)
-                value *= Policy(parent, h, n.action, state.hands[p], state.evaluation != 0, regrets, sums);
+            {
+                value = scratch[U64(parent.slot) * total + base + h];
+                value = hands[base + h].mask & (U64(1) << n.dealtCard)
+                            ? 0.0f
+                            : value * (p == state.player ? 1.0f : 1.0f / float(parent.count - 4));
+                scratch[U64(n.slot) * total + base + h] = value;
+            }
+            else
+                value = scratch[U64(n.slot) * total + base + h];
         }
-        scratch[U64(n.slot) * total + base + h] = value;
+        if (n.kind != NodeKind::Decision)
+            continue;
+        // One parent/hand normalizes its entry policy once for all children.
+        const bool acting = n.actor == p && value != 0.0f;
+        float positive = 0.0f;
+        if (acting)
+            for (U32 a = 0; a < n.count; ++a)
+            {
+                const U64 entry = n.strategy + U64(a) * state.hands[p] + h;
+                const float x = state.evaluation ? sums[entry] : regrets[entry];
+                positive += x > 0.0f ? x : 0.0f;
+            }
+        for (U32 a = 0; a < n.count; ++a)
+        {
+            float child = value;
+            if (acting)
+            {
+                const U64 entry = n.strategy + U64(a) * state.hands[p] + h;
+                const float x = state.evaluation ? sums[entry] : regrets[entry];
+                const float probability = positive > 0.0f ? (x > 0.0f ? x : 0.0f) / positive : 1.0f / float(n.count);
+                child *= probability;
+            }
+            scratch[U64(childSlots[n.edge + a]) * total + base + h] = child;
+        }
     }
 }
 
@@ -183,11 +196,36 @@ GPU_ENTRY(Terminal)(GPU_ARGUMENTS GPU_GROUP_TAIL)
     const U32 total = state.hands[0] + state.hands[1], mineBase = p ? state.hands[0] : 0, oppBase = p ? 0 : state.hands[0];
     GPU_SHARED float* reach = groupMemory;
     GPU_SHARED float* prefix = groupMemory + state.stride;
+#ifdef __METAL_VERSION__
     for (U32 other = local; other < opponentCount; other += groupWidth)
         reach[other] = scratch[U64(n.slot) * total + oppBase + other];
     GPU_GROUP_BARRIER();
+#else
+    bool nonzero = false;
+    for (U32 other = local; other < opponentCount; other += groupWidth)
+    {
+        const float r = scratch[U64(n.slot) * total + oppBase + other];
+        reach[other] = r;
+        nonzero |= r != 0.0f;
+    }
+    // Every lane participates; zero values still flow through normal Backup.
+    if (!__syncthreads_or(nonzero))
+    {
+        for (U32 h = local; h < count; h += groupWidth)
+            values[U64(n.slot) * state.stride + h] = 0.0f;
+        return;
+    }
+#endif
     for (U32 direction = local / GPU_WIDTH; direction < 2; direction += groupWidth / GPU_WIDTH)
         TerminalPrefix(n, state, local % GPU_WIDTH, GPU_WIDTH, direction != 0, order, reach, prefix);
+    if (n.kind == NodeKind::Fold)
+        for (U32 card = local; card < 52; card += groupWidth)
+        {
+            float mass = 0.0f;
+            for (U32 entry = cards[opponent * 53 + card]; entry < cards[opponent * 53 + card + 1]; ++entry)
+                mass += reach[cards[entry]];
+            prefix[1 + card] = mass;
+        }
     GPU_GROUP_BARRIER();
     GPU_DEVICE float* output = values + U64(n.slot) * state.stride;
     for (U32 h = local; h < count; h += groupWidth)
@@ -196,6 +234,14 @@ GPU_ENTRY(Terminal)(GPU_ARGUMENTS GPU_GROUP_TAIL)
         if ((mine.mask & n.board) || mine.divisor <= 0.0f)
         {
             output[h] = 0.0f;
+            continue;
+        }
+        if (n.kind == NodeKind::Fold)
+        {
+            float mass = prefix[0] - prefix[1 + mine.card0] - prefix[1 + mine.card1];
+            if (mine.matching >= 0)
+                mass += reach[mine.matching];
+            output[h] = (mass / mine.divisor) * (p == 0 ? n.utility[0] : -n.utility[0]);
             continue;
         }
         const float win = p == 0 ? n.utility[0] : -n.utility[2];
@@ -218,19 +264,16 @@ GPU_ENTRY(Terminal)(GPU_ARGUMENTS GPU_GROUP_TAIL)
             output[h] = (tie * mass + (win - tie) * (wins / divisor) + (loss - tie) * (losses / divisor)) / mine.divisor;
             continue;
         }
-        const U32 rank = n.kind == NodeKind::Showdown ? ranks[U64(n.rankRow) * total + mineBase + h] : 0;
-        const U32 legal = n.kind == NodeKind::Showdown ? (p ? n.rankCounts[0] : n.rankCounts[1]) : opponentCount;
-        if (n.kind == NodeKind::Showdown)
-        {
-            // Rank boundaries depend only on the board and ranges, not terminal reach.
-            const U32 bounds = order[U64(n.rankRow) * 2 * total + total + mineBase + h];
-            const U32 lower = bounds & 0xffffu, upper = bounds >> 16;
-            wins = lower ? prefix[lower - 1] : 0.0f;
-            losses = upper < legal ? prefix[state.stride + upper] : 0.0f;
-        }
+        const U32 rank = ranks[U64(n.rankRow) * total + mineBase + h];
+        const U32 legal = p ? n.rankCounts[0] : n.rankCounts[1];
+        // Rank boundaries depend only on the board and ranges, not terminal reach.
+        const U32 bounds = order[U64(n.rankRow) * 2 * total + total + mineBase + h];
+        const U32 lower = bounds & 0xffffu, upper = bounds >> 16;
+        wins = lower ? prefix[lower - 1] : 0.0f;
+        losses = upper < legal ? prefix[state.stride + upper] : 0.0f;
         // As in the CPU evaluator, zero-tie showdowns need only win/loss masses.
-        const bool needMass = n.kind == NodeKind::Fold || tie != 0.0f;
-        mass = needMass ? (n.kind == NodeKind::Fold ? prefix[0] : legal ? prefix[legal - 1] : 0.0f) : 0.0f;
+        const bool needMass = tie != 0.0f;
+        mass = needMass && legal ? prefix[legal - 1] : 0.0f;
         float blocked = 0.0f, blockedWins = 0.0f, blockedLosses = 0.0f;
         for (U32 c = 0; c < 2; ++c)
         {
@@ -241,14 +284,11 @@ GPU_ENTRY(Terminal)(GPU_ARGUMENTS GPU_GROUP_TAIL)
                 const float r = reach[other];
                 if (needMass)
                     blocked += r;
-                if (n.kind == NodeKind::Showdown)
-                {
-                    const U32 otherRank = ranks[U64(n.rankRow) * total + oppBase + other];
-                    if (otherRank < rank)
-                        blockedWins += r;
-                    if (otherRank > rank)
-                        blockedLosses += r;
-                }
+                const U32 otherRank = ranks[U64(n.rankRow) * total + oppBase + other];
+                if (otherRank < rank)
+                    blockedWins += r;
+                if (otherRank > rank)
+                    blockedLosses += r;
             }
         }
         mass -= blocked;
@@ -256,38 +296,53 @@ GPU_ENTRY(Terminal)(GPU_ARGUMENTS GPU_GROUP_TAIL)
             mass += reach[mine.matching];
         wins -= blockedWins;
         losses -= blockedLosses;
-        output[h] = n.kind == NodeKind::Fold ? (mass / mine.divisor) * (p == 0 ? n.utility[0] : -n.utility[0])
-                                             : (tie * mass + (win - tie) * wins + (loss - tie) * losses) / mine.divisor;
+        output[h] = (tie * mass + (win - tie) * wins + (loss - tie) * losses) / mine.divisor;
     }
 }
 
-GPU_ENTRY(Backup)(GPU_ARGUMENTS)
+// A zero ActionCount keeps the general path; small decisions retain entry data.
+template<U32 ActionCount>
+GPU_INLINE void BackupNode(
+    Node n,
+    State state,
+    U32 h,
+    GPU_DEVICE const U32* childSlots,
+    GPU_DEVICE float* regrets,
+    GPU_DEVICE float* sums,
+    GPU_DEVICE float* scratch,
+    GPU_DEVICE float* values
+)
 {
-    GPU_STATE
-    const U32 index = GPU_INDEX, item = index / state.stride, h = index % state.stride;
     const U32 count = state.player ? state.hands[1] : state.hands[0];
-    if (item >= pass.count || h >= count)
-        return;
-    const Node n = nodes[work[pass.offset + item]];
+    const U32 actions = ActionCount ? ActionCount : n.count;
     const bool acting = n.kind == NodeKind::Decision && n.actor == state.player;
+    float entryRegrets[ActionCount ? ActionCount : 1];
+    float childValues[ActionCount ? ActionCount : 1];
+    float probabilities[ActionCount ? ActionCount : 1];
     // Reuse the entry-policy denominator for value backup and strategy sums.
     float positive = 0.0f;
     if (acting && !state.evaluation)
-        for (U32 a = 0; a < n.count; ++a)
+        for (U32 a = 0; a < actions; ++a)
         {
             const float r = regrets[n.strategy + U64(a) * count + h];
+            if (ActionCount)
+                entryRegrets[a] = r;
             positive += r > 0.0f ? r : 0.0f;
         }
     float value = 0.0f;
-    for (U32 a = 0; a < n.count; ++a)
+    for (U32 a = 0; a < actions; ++a)
     {
         const float child = values[U64(childSlots[n.edge + a]) * state.stride + h];
+        if (ActionCount)
+            childValues[a] = child;
         if (acting && state.evaluation)
             value = a == 0 || child > value ? child : value;
         else if (acting)
         {
-            const float r = regrets[n.strategy + U64(a) * count + h];
-            const float probability = positive > 0.0f ? (r > 0.0f ? r : 0.0f) / positive : 1.0f / float(n.count);
+            const float r = ActionCount ? entryRegrets[a] : regrets[n.strategy + U64(a) * count + h];
+            const float probability = positive > 0.0f ? (r > 0.0f ? r : 0.0f) / positive : 1.0f / float(actions);
+            if (ActionCount)
+                probabilities[a] = probability;
             value += child * probability;
         }
         else
@@ -298,17 +353,36 @@ GPU_ENTRY(Backup)(GPU_ARGUMENTS)
     {
         const U32 total = state.hands[0] + state.hands[1], base = state.player ? state.hands[0] : 0;
         const float own = scratch[U64(n.slot) * total + base + h];
-        for (U32 a = 0; a < n.count; ++a)
+        for (U32 a = 0; a < actions; ++a)
         {
             const U64 entry = n.strategy + U64(a) * count + h;
-            const float old = regrets[entry];
-            const float probability = positive > 0.0f ? (old > 0.0f ? old : 0.0f) / positive : 1.0f / float(n.count);
-            const float child = values[U64(childSlots[n.edge + a]) * state.stride + h];
+            const float old = ActionCount ? entryRegrets[a] : regrets[entry];
+            const float probability = ActionCount       ? probabilities[a]
+                                      : positive > 0.0f ? (old > 0.0f ? old : 0.0f) / positive
+                                                        : 1.0f / float(actions);
+            const float child = ActionCount ? childValues[a] : values[U64(childSlots[n.edge + a]) * state.stride + h];
             const float r = old + (child - value);
             regrets[entry] = r * (r > 0.0f ? state.positiveDiscount : 0.5f);
             sums[entry] = state.averageDiscount * (sums[entry] + own * probability);
         }
     }
+}
+
+GPU_ENTRY(Backup)(GPU_ARGUMENTS)
+{
+    GPU_STATE
+    const U32 item = GPU_ITEM_INDEX, h = GPU_HAND_INDEX;
+    const U32 count = state.player ? state.hands[1] : state.hands[0];
+    if (item >= pass.count || h >= count)
+        return;
+    const Node n = nodes[work[pass.offset + item]];
+    const bool training = n.kind == NodeKind::Decision && n.actor == state.player && !state.evaluation;
+    if (training && n.count == 2)
+        BackupNode<2>(n, state, h, childSlots, regrets, sums, scratch, values);
+    else if (training && n.count == 3)
+        BackupNode<3>(n, state, h, childSlots, regrets, sums, scratch, values);
+    else
+        BackupNode<0>(n, state, h, childSlots, regrets, sums, scratch, values);
 }
 
 GPU_ENTRY(Outcomes)(GPU_ARGUMENTS)
