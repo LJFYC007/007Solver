@@ -198,6 +198,7 @@ TEST(BackendParityTest, GpuUpdatesMatchCpuFromSharedState)
         const auto actual = gpu.ReadTrainingState();
         ExpectNodesNear(layout, expected.regrets, actual.regrets, "regrets");
         ExpectNodesNear(layout, expected.strategySums, actual.strategySums, "strategy sums");
+        EXPECT_EQ(actual.stamps, expected.stamps) << "node stamps";
         ASSERT_FALSE(HasFailure());
     }
 }

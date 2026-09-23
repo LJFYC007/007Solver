@@ -45,12 +45,14 @@ bool GpuDcfrSession::Available()
     return gpu::DeviceAvailable();
 }
 
-void GpuDcfrSession::Update(std::size_t player, float positiveDiscount, float averageDiscount)
+void GpuDcfrSession::Update(std::size_t player, const UpdateWeights& weights)
 {
     auto state = state_;
     state.player = static_cast<gpu::U32>(player);
-    state.positiveDiscount = positiveDiscount;
-    state.averageDiscount = averageDiscount;
+    state.update = weights.update;
+    state.positiveScale = weights.positiveScale;
+    state.positiveInverse = weights.positiveInverse;
+    state.averageWeight = weights.averageWeight;
     executor_->Update(state);
 }
 
@@ -75,7 +77,8 @@ ExploitabilityMetrics GpuDcfrSession::EvaluateExploitabilityOnCpu() const
 
 void GpuDcfrSession::WriteTrainingState(const TrainingState& state)
 {
-    if (state.regrets.size() != data_->strategySize || state.strategySums.size() != data_->strategySize)
+    if (state.regrets.size() != data_->strategySize || state.strategySums.size() != data_->strategySize ||
+        state.stamps.size() != data_->nodes.size())
         throw std::invalid_argument("Training state does not match the GPU strategy layout");
     executor_->UploadTraining(state);
 }

@@ -23,7 +23,7 @@ HandTraversalData::HandTraversalData(std::shared_ptr<const HandBoardData> tables
     rootHalfPot = core::ToChipUnits(rootState.pot) / 2.0f;
     nodes.reserve(rootNode.TraversalNodeCount());
     children.reserve(rootNode.TraversalNodeCount() - 1);
-    dealtCardMasks.reserve(rootNode.TraversalNodeCount() - 1);
+    dealtCards.reserve(rootNode.TraversalNodeCount() - 1);
     const auto visit = [&](const auto& self, const game::GameNode& source, std::size_t depth) -> std::uint32_t
     {
         const auto& state = source.State();
@@ -70,7 +70,7 @@ HandTraversalData::HandTraversalData(std::shared_ptr<const HandBoardData> tables
         const auto index = static_cast<std::uint32_t>(nodes.size());
         nodes.push_back(node);
         children.resize(children.size() + node.childCount);
-        dealtCardMasks.resize(dealtCardMasks.size() + node.childCount);
+        dealtCards.resize(dealtCards.size() + node.childCount);
         maxDepth = std::max(maxDepth, depth + 1);
         for (std::size_t action = 0; action < node.childCount; ++action)
         {
@@ -78,7 +78,8 @@ HandTraversalData::HandTraversalData(std::shared_ptr<const HandBoardData> tables
             const auto childIndex = self(self, child, depth + 1);
             children[node.childOffset + action] = childIndex;
             if (node.kind == Kind::Chance)
-                dealtCardMasks[node.childOffset + action] = std::uint64_t{1} << child.State().board.CardAt(state.board.CardCount()).Index();
+                dealtCards[node.childOffset + action] =
+                    static_cast<std::uint8_t>(child.State().board.CardAt(state.board.CardCount()).Index());
         }
         return index;
     };

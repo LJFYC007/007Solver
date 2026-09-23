@@ -23,11 +23,14 @@ public:
         {
             Check(cudaSetDevice(0));
             Check(cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking));
+            Check(cudaStreamCreateWithFlags(&lane_, cudaStreamNonBlocking));
+            Check(cudaEventCreateWithFlags(&fork_, cudaEventDisableTiming));
+            Check(cudaEventCreateWithFlags(&join_, cudaEventDisableTiming));
             const auto sources = plan.Buffers();
             for (std::size_t i = 0; i < buffers_.size(); ++i)
                 Upload(i, sources[i]);
-            Check(cudaMemsetAsync(buffers_[RegretsBuffer], 0, sources[RegretsBuffer].bytes, stream_));
-            Check(cudaMemsetAsync(buffers_[SumsBuffer], 0, sources[SumsBuffer].bytes, stream_));
+            for (const auto index : {RegretsBuffer, SumsBuffer, FlagsBuffer, StampsBuffer})
+                Check(cudaMemsetAsync(buffers_[index], 0, sources[index].bytes, stream_));
             for (const auto& pass : plan.initialization)
                 Launch(pass, 0);
             Check(cudaStreamSynchronize(stream_));
@@ -82,12 +85,22 @@ public:
         TrainingState state{std::vector<float>(entries_), std::vector<float>(entries_)};
         Copy(state.regrets.data(), buffers_[RegretsBuffer], entries_ * sizeof(float), cudaMemcpyDeviceToHost);
         Copy(state.strategySums.data(), buffers_[SumsBuffer], entries_ * sizeof(float), cudaMemcpyDeviceToHost);
+        std::vector<std::uint32_t> halves(2 * std::size_t(shape_.stampCount));
+        Copy(halves.data(), buffers_[StampsBuffer], halves.size() * sizeof(U32), cudaMemcpyDeviceToHost);
+        state.stamps = NewestStamps(halves);
         return state;
     }
     void UploadTraining(const TrainingState& state) override
     {
         Copy(buffers_[RegretsBuffer], state.regrets.data(), entries_ * sizeof(float), cudaMemcpyHostToDevice);
         Copy(buffers_[SumsBuffer], state.strategySums.data(), entries_ * sizeof(float), cudaMemcpyHostToDevice);
+        for (std::size_t half = 0; half < 2; ++half)
+            Copy(
+                static_cast<U32*>(buffers_[StampsBuffer]) + half * shape_.stampCount,
+                state.stamps.data(),
+                shape_.stampCount * sizeof(U32),
+                cudaMemcpyHostToDevice
+            );
     }
 
 private:
@@ -95,6 +108,10 @@ private:
     State shape_;
     std::size_t entries_;
     cudaStream_t stream_ = nullptr;
+    // Lane 1 of the captured graphs; fork/join events turn Pass::sync into graph edges.
+    cudaStream_t lane_ = nullptr;
+    cudaEvent_t fork_ = nullptr;
+    cudaEvent_t join_ = nullptr;
     std::array<cudaGraph_t, 2> graphs_{};
     std::array<cudaGraphExec_t, 2> executables_{};
     void Upload(std::size_t index, const BufferData& source)
@@ -114,6 +131,22 @@ private:
     }
     void Launch(Pass pass, U32 player)
     {
+        pass = LaunchPass(pass, shape_, player);
+        cudaStream_t stream = pass.lane ? lane_ : stream_;
+        if (pass.sync & kWaitFork)
+            Check(cudaStreamWaitEvent(lane_, fork_, 0));
+        if (pass.sync & kJoinBefore)
+        {
+            Check(cudaEventRecord(join_, lane_));
+            Check(cudaStreamWaitEvent(stream_, join_, 0));
+        }
+        if (pass.count)
+            Dispatch(pass, player, stream);
+        if (pass.sync & kForkAfter)
+            Check(cudaEventRecord(fork_, stream_));
+    }
+    void Dispatch(const Pass& pass, U32 player, cudaStream_t stream)
+    {
         // Backup tiles only the current player's hands; other passes are linear over pass.lanes.
         const bool handTiles = pass.operation == Kernel::Backup;
         const auto handCount = shape_.hands[player];
@@ -123,7 +156,7 @@ private:
                                       : dim3(pass.operation == Kernel::Terminal ? pass.count : (threads + group - 1) / group);
         const auto shared = pass.operation == Kernel::Terminal ? TerminalSharedBytes(shape_) : 0;
 #define LAUNCH(name)                                               \
-    name<<<blocks, group, shared, stream_>>>(                      \
+    name<<<blocks, group, shared, stream>>>(                       \
         static_cast<const Node*>(buffers_[NodesBuffer]),           \
         static_cast<const U32*>(buffers_[ChildSlotsBuffer]),       \
         static_cast<const Hand*>(buffers_[HandsBuffer]),           \
@@ -136,6 +169,8 @@ private:
         static_cast<float*>(buffers_[SumsBuffer]),                 \
         static_cast<float*>(buffers_[ScratchBuffer]),              \
         static_cast<float*>(buffers_[ValuesBuffer]),               \
+        static_cast<U32*>(buffers_[FlagsBuffer]),                  \
+        static_cast<U32*>(buffers_[StampsBuffer]),                 \
         static_cast<const State*>(buffers_[StateBuffer]),          \
         pass                                                       \
     )
@@ -182,7 +217,14 @@ private:
             Free(i);
         if (stream_)
             cudaStreamDestroy(stream_);
-        stream_ = nullptr;
+        if (lane_)
+            cudaStreamDestroy(lane_);
+        if (fork_)
+            cudaEventDestroy(fork_);
+        if (join_)
+            cudaEventDestroy(join_);
+        stream_ = lane_ = nullptr;
+        fork_ = join_ = nullptr;
     }
 };
 } // namespace

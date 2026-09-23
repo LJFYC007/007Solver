@@ -1,25 +1,9 @@
 #include "engine/HandEvaluation.h"
 #include <algorithm>
+#include <array>
 
 namespace solver::engine
 {
-namespace
-{
-struct Mass
-{
-    float total = 0.0f;
-    std::array<float, 52> cards{};
-
-    void Add(float weight, std::uint8_t first, std::uint8_t second)
-    {
-        total += weight;
-        cards[first] += weight;
-        cards[second] += weight;
-    }
-
-    float Without(std::uint8_t first, std::uint8_t second) const { return total - cards[first] - cards[second]; }
-};
-} // namespace
 
 std::vector<float> CompatibleHandMasses(const HandBoardData& data, std::size_t player, const float* opponentReach)
 {
@@ -42,23 +26,33 @@ void EvaluateFoldHands(
 )
 {
     const auto& mine = data.hands[player];
-    const auto& opponent = data.hands[1 - player];
-    Mass aggregate;
-    for (std::size_t other = 0; other < opponent.size(); ++other)
-        if (!(opponent[other].mask & boardMask))
-            aggregate.Add(opponentReach[other], opponent[other].cardIndices[0], opponent[other].cardIndices[1]);
+    const auto& holders = data.holders[1 - player];
+    // Board-blocked opponent hands carry zero reach, so every holder list adds up unchanged.
+    float total = 0.0f;
+    for (std::size_t other = 0; other < data.hands[1 - player].size(); ++other)
+        total += opponentReach[other];
+    std::array<float, 52> cards;
+    for (int card = 0; card < 52; ++card)
+    {
+        float mass = 0.0f;
+        for (auto entry = holders.cardOffsets[card]; entry < holders.cardOffsets[card + 1]; ++entry)
+            mass += opponentReach[holders.cardLists[entry]];
+        cards[card] = mass;
+    }
+    std::array<float, HandBoardData::kMaxHands> masses;
     for (std::size_t index = 0; index < mine.size(); ++index)
     {
         const auto& hand = mine[index];
-        values[index] = 0.0f;
-        if ((hand.mask & boardMask) || divisors[index] <= 0.0f)
-            continue;
         const float identical = hand.matchingOpponent < 0 ? 0.0f : opponentReach[hand.matchingOpponent];
-        const float mass = aggregate.Without(hand.cardIndices[0], hand.cardIndices[1]) + identical;
-        values[index] = (mass / divisors[index]) * utility;
+        masses[index] = (hand.mask & boardMask) ? 0.0f : total - cards[hand.cardIndices[0]] - cards[hand.cardIndices[1]] + identical;
     }
+    for (std::size_t index = 0; index < mine.size(); ++index)
+        values[index] = divisors[index] > 0.0f ? (masses[index] / divisors[index]) * utility : 0.0f;
 }
 
+// Prefix sums over the opponent's rank order give each hand's strictly weaker and
+// stronger mass in one lookup each; per-card runs remove the holders of its own cards.
+// Independent forward/reverse sums avoid subtracting nearly equal cumulative totals.
 void EvaluateShowdownHands(
     const HandBoardData& data,
     std::size_t player,
@@ -71,57 +65,61 @@ void EvaluateShowdownHands(
 {
     const auto& mine = ranks[player];
     const auto& opponent = ranks[1 - player];
-    const auto myCount = mine.hands.size(), opponentCount = opponent.hands.size();
+    const auto myCount = mine.hands.size(), opponentCount = opponent.hands.size(), count = data.hands[player].size();
     const float tie = utilities[1], winDelta = utilities[0] - tie, lossDelta = utilities[2] - tie;
-    std::fill_n(values, data.hands[player].size(), 0.0f);
-    // Zero-tie solver roots need only the strict win/loss sweeps.
-    if (tie != 0.0f)
+    std::array<float, HandBoardData::kMaxHands> ranked;
+    for (std::size_t i = 0; i < opponentCount; ++i)
+        ranked[i] = opponentReach[opponent.hands[i]];
+    // Both dependent chains advance in one loop so their latencies overlap.
+    std::array<float, HandBoardData::kMaxHands + 1> forward, reverse;
+    forward[0] = 0.0f;
+    reverse[opponentCount] = 0.0f;
+    for (std::size_t i = 0; i < opponentCount; ++i)
     {
-        Mass aggregate;
-        for (std::size_t other = 0; other < opponentCount; ++other)
-            aggregate.Add(opponentReach[opponent.hands[other]], opponent.card0[other], opponent.card1[other]);
-        for (std::size_t ranked = 0; ranked < myCount; ++ranked)
+        forward[i + 1] = forward[i] + ranked[i];
+        reverse[opponentCount - 1 - i] = reverse[opponentCount - i] + ranked[opponentCount - 1 - i];
+    }
+    // Each card's run starts with a zero entry at cardOffsets[card] + card.
+    std::array<float, 2 * HandBoardData::kMaxHands + 52> runs;
+    for (int card = 0; card < 52; ++card)
+    {
+        const std::size_t begin = opponent.holders.cardOffsets[card], end = opponent.holders.cardOffsets[card + 1];
+        float* run = runs.data() + begin + card;
+        run[0] = 0.0f;
+        for (auto entry = begin; entry < end; ++entry)
+            run[entry - begin + 1] = run[entry - begin] + opponentReach[opponent.holders.cardLists[entry]];
+    }
+    std::array<float, HandBoardData::kMaxHands> wins, losses, masses;
+    std::fill_n(wins.data(), count, 0.0f);
+    std::fill_n(losses.data(), count, 0.0f);
+    std::fill_n(masses.data(), count, 0.0f);
+    const bool needMass = tie != 0.0f;
+    for (std::size_t i = 0; i < myCount; ++i)
+    {
+        const auto hand = mine.hands[i];
+        const auto blockers = mine.blockers[i];
+        float blocked = 0.0f, blockedWins = 0.0f, blockedLosses = 0.0f;
+        for (int c = 0; c < 2; ++c)
         {
-            const auto hand = mine.hands[ranked];
-            if (divisors[hand] <= 0.0f)
-                continue;
+            const auto span = c ? mine.runs1[i] : mine.runs0[i];
+            const float* run = runs.data() + (span & 0xffffu);
+            const std::size_t length = span >> 16;
+            const std::size_t below = (blockers >> (16 * c)) & 0xffu, through = (blockers >> (16 * c + 8)) & 0xffu;
+            blocked += run[length];
+            blockedWins += run[below];
+            // A card's list has at most 51 entries, so this difference loses only ulps of that card's mass.
+            blockedLosses += run[length] - run[through];
+        }
+        wins[hand] = forward[mine.lowerBounds[i]] - blockedWins;
+        losses[hand] = reverse[mine.upperBounds[i]] - blockedLosses;
+        if (needMass)
+        {
             const int matching = data.hands[player][hand].matchingOpponent;
-            const float mass = aggregate.Without(mine.card0[ranked], mine.card1[ranked]) + (matching < 0 ? 0.0f : opponentReach[matching]);
-            values[hand] = (mass / divisors[hand]) * tie;
+            masses[hand] = forward[opponentCount] - blocked + (matching < 0 ? 0.0f : opponentReach[matching]);
         }
     }
-    Mass lower;
-    std::size_t cursor = 0;
-    for (std::size_t ranked = 0; ranked < myCount; ++ranked)
-    {
-        while (cursor < mine.lowerBounds[ranked])
-        {
-            lower.Add(opponentReach[opponent.hands[cursor]], opponent.card0[cursor], opponent.card1[cursor]);
-            ++cursor;
-        }
-        const auto hand = mine.hands[ranked];
-        if (divisors[hand] > 0.0f)
-        {
-            const float mass = lower.Without(mine.card0[ranked], mine.card1[ranked]);
-            values[hand] += (mass / divisors[hand]) * winDelta;
-        }
-    }
-    Mass upper;
-    cursor = opponentCount;
-    for (std::size_t ranked = myCount; ranked > 0;)
-    {
-        --ranked;
-        while (cursor > mine.upperBounds[ranked])
-        {
-            --cursor;
-            upper.Add(opponentReach[opponent.hands[cursor]], opponent.card0[cursor], opponent.card1[cursor]);
-        }
-        const auto hand = mine.hands[ranked];
-        if (divisors[hand] > 0.0f)
-        {
-            const float mass = upper.Without(mine.card0[ranked], mine.card1[ranked]);
-            values[hand] += (mass / divisors[hand]) * lossDelta;
-        }
-    }
+    for (std::size_t hand = 0; hand < count; ++hand)
+        values[hand] =
+            divisors[hand] > 0.0f ? (tie * masses[hand] + winDelta * wins[hand] + lossDelta * losses[hand]) / divisors[hand] : 0.0f;
 }
 } // namespace solver::engine

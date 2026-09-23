@@ -7,8 +7,11 @@ namespace solver::engine::gpu
 {
 namespace
 {
-// tests/fixtures/backend-parity.json relies on this target splitting its street regions.
-constexpr std::size_t kBatchScratchBytes = 128 * 1024 * 1024;
+// Sized so two lanes' river regions keep their reach and values mostly in the GPU's L2
+// between passes (64 MB on the tuning machine: 48 and 24 MB were within 2%, 16 MB loses
+// to launch overhead); tests/fixtures/backend-parity.json relies on this target splitting
+// its street regions.
+constexpr std::size_t kBatchScratchBytes = 32 * 1024 * 1024;
 
 template<typename T>
 BufferData Table(const std::vector<T>& values)
@@ -20,7 +23,7 @@ BufferData Table(const std::vector<T>& values)
 Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
 {
     const auto& tables = *data.tables;
-    static_assert(sizeof(Node) == 96 && sizeof(Hand) == 32 && sizeof(State) == 40 && sizeof(Pass) == 24);
+    static_assert(sizeof(Node) == 96 && sizeof(Hand) == 32 && sizeof(State) == 56 && sizeof(Pass) == 36);
     state.board = data.nodes.front().boardMask;
     for (U32 p = 0; p < 2; ++p)
     {
@@ -34,14 +37,10 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
     cards.resize(kCardListHeader);
     for (U32 p = 0; p < 2; ++p)
     {
-        for (U32 card = 0; card < 52; ++card)
-        {
-            cards[p * kCardListStride + card] = static_cast<U32>(cards.size());
-            for (U32 h = 0; h < state.hands[p]; ++h)
-                if (tables.hands[p][h].mask & (U64{1} << card))
-                    cards.push_back(h);
-        }
-        cards[p * kCardListStride + 52] = static_cast<U32>(cards.size());
+        const auto& holders = tables.holders[p];
+        for (U32 card = 0; card <= 52; ++card)
+            cards[p * kCardListStride + card] = static_cast<U32>(cards.size() + holders.cardOffsets[card]);
+        cards.insert(cards.end(), holders.cardLists.begin(), holders.cardLists.end());
     }
     const auto rankPitch = 3 * std::size_t(total);
     ranks.resize(tables.rankRows.size() * rankPitch, 0xffff);
@@ -60,41 +59,32 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
                 order[base + total + source.hands[i]] = U32(source.lowerBounds[i]) | (U32(source.upperBounds[i]) << 16);
             }
         }
-        // Each card's hands in rank order share the card list layout; board-blocked hands trail.
+        // Each card's hands in rank order (RankOrder::holders, which the CPU evaluator's
+        // blocker positions index) share the card list layout; board-blocked hands trail.
         for (U32 q = 0; q < 2; ++q)
+        {
+            const auto& ranked = tables.rankRows[row][q].holders;
+            const auto& all = tables.holders[q];
+            const auto base = rowBase + (q ? state.hands[0] : 0);
             for (U32 card = 0; card < 52; ++card)
             {
-                const auto begin = cards[q * kCardListStride + card], end = cards[q * kCardListStride + card + 1];
-                std::vector<U32> list(cards.begin() + begin, cards.begin() + end);
-                const auto rankOf = [&](U32 hand) { return ranks[rowBase + (q ? state.hands[0] : 0) + hand]; };
-                std::stable_sort(list.begin(), list.end(), [&](U32 a, U32 b) { return rankOf(a) < rankOf(b); });
-                for (std::size_t k = 0; k < list.size(); ++k)
-                    ranks[rowBase + total + begin - kCardListHeader + k] = static_cast<unsigned short>(list[k]);
+                auto list = std::copy(
+                    ranked.cardLists.begin() + ranked.cardOffsets[card],
+                    ranked.cardLists.begin() + ranked.cardOffsets[card + 1],
+                    ranks.begin() + (rowBase + total + cards[q * kCardListStride + card] - kCardListHeader)
+                );
+                for (auto e = all.cardOffsets[card]; e < all.cardOffsets[card + 1]; ++e)
+                    if (ranks[base + all.cardLists[e]] == 0xffff)
+                        *list++ = all.cardLists[e];
             }
-        // Per hand and held card: how many of the opponent's hands with that card rank strictly
-        // below, then at most, the hand. Fewer than 256 hands hold any card.
+        }
         for (U32 p = 0; p < 2; ++p)
-            for (U32 h = 0; h < state.hands[p]; ++h)
-            {
-                const U32 mineBase = p ? state.hands[0] : 0, oppBase = p ? 0 : state.hands[0];
-                const auto rank = ranks[rowBase + mineBase + h];
-                if (rank == 0xffff)
-                    continue;
-                U32 packed = 0;
-                for (U32 c = 0; c < 2; ++c)
-                {
-                    const U32 card = c ? hands[mineBase + h].card1 : hands[mineBase + h].card0;
-                    U32 below = 0, through = 0;
-                    for (auto e = cards[(1 - p) * kCardListStride + card]; e < cards[(1 - p) * kCardListStride + card + 1]; ++e)
-                    {
-                        const auto other = ranks[rowBase + oppBase + ranks[rowBase + total + e - kCardListHeader]];
-                        below += other < rank;
-                        through += other <= rank;
-                    }
-                    packed |= (below | (through << 8)) << (16 * c);
-                }
-                order[rowBase + 2 * total + mineBase + h] = packed;
-            }
+        {
+            const auto& source = tables.rankRows[row][p];
+            const U32 base = p ? state.hands[0] : 0;
+            for (std::size_t i = 0; i < source.hands.size(); ++i)
+                order[rowBase + 2 * total + base + source.hands[i]] = source.blockers[i];
+        }
     }
     // Traversal-ordered layout; the uploaded array repeats each node at its work positions.
     std::vector<Node> layout(data.nodes.size());
@@ -111,6 +101,7 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         n.actor = static_cast<U32>(source.actor);
         n.kind = source.kind;
         n.rankRow = static_cast<U32>(source.rankRow);
+        n.stamp = i;
         if (source.rankRow >= 0)
             for (U32 p = 0; p < 2; ++p)
                 n.rankCounts[p] = static_cast<U32>(tables.rankRows[source.rankRow][p].hands.size());
@@ -123,49 +114,60 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
     }
     for (U32 i = 0; i < layout.size(); ++i)
         for (U32 a = 0; a < layout[i].count; ++a)
-        {
-            auto& child = layout[edges[layout[i].edge + a]];
-            child.parent = i;
-            // Terminals never read the updating player's own reach; actions past the first 32 keep the write.
-            if (layout[i].kind == NodeKind::Decision && a < 32 && child.kind != NodeKind::Decision && child.kind != NodeKind::Chance)
-                layout[i].terminalChildren |= U32{1} << a;
-        }
+            layout[edges[layout[i].edge + a]].parent = i;
+    state.stampCount = static_cast<U32>(layout.size());
     outcomeEntries = std::size_t(state.outcomeRows) * state.hands[0] * state.hands[1];
     if (state.outcomeRows)
     {
-        initialization.push_back({Kernel::Outcomes, 0, static_cast<U32>(outcomeEntries), OutcomeStage::CountRunouts, 1, 0});
+        initialization.push_back({Kernel::Outcomes, 0, static_cast<U32>(outcomeEntries), OutcomeStage::CountRunouts, 1, 0, 0, 0, 0});
         if (state.outcomeRows > 1)
-            initialization.push_back({Kernel::Outcomes, 0, state.hands[0] * state.hands[1], OutcomeStage::SumTurns, 1, 0});
+            initialization.push_back({Kernel::Outcomes, 0, state.hands[0] * state.hands[1], OutcomeStage::SumTurns, 1, 0, 0, 0, 0});
     }
 
     // A street region retains only its live ancestors and child-root results.
     // Descendant batches reuse the same slots after their root values are backed up.
     std::vector<std::size_t> streetCost(layout.size());
+    std::vector<std::uint8_t> chanceBelow(layout.size());
     for (std::size_t i = layout.size(); i-- > 0;)
     {
         streetCost[i] = 1;
+        chanceBelow[i] = layout[i].kind == NodeKind::Chance;
         if (layout[i].kind == NodeKind::Chance)
             streetCost[i] += layout[i].count;
         else
             for (U32 a = 0; a < layout[i].count; ++a)
+            {
                 streetCost[i] += streetCost[edges[layout[i].edge + a]];
+                chanceBelow[i] |= chanceBelow[edges[layout[i].edge + a]];
+            }
     }
     std::vector<U32> work;
-    const auto emit = [&](Kernel kernel, const std::vector<U32>& list, U32 lanes, bool boundary)
+    const auto emit = [&](Kernel kernel, const std::vector<U32>& list, U32 lane, bool boundary, U32 split = 0)
     {
         if (list.empty())
             return;
         if (work.size() + list.size() > std::numeric_limits<U32>::max())
             throw std::runtime_error("GPU schedule exceeds the supported index range");
+        // Backup runs one thread per hand of the updating player; Reach lanes come from LaunchPass.
+        const U32 lanes = kernel == Kernel::Backup ? state.stride : 1u;
         passes.push_back(
-            {kernel, static_cast<U32>(work.size()), static_cast<U32>(list.size()), OutcomeStage::None, lanes, boundary ? 1u : 0u}
+            {kernel,
+             static_cast<U32>(work.size()),
+             static_cast<U32>(list.size()),
+             OutcomeStage::None,
+             lanes,
+             boundary ? 1u : 0u,
+             split,
+             lane,
+             0}
         );
         work.insert(work.end(), list.begin(), list.end());
     };
-    const auto bytesPerSlot = sizeof(float) * (total + state.stride);
+    // Each slot holds the opponent's reach and the updating player's values.
+    const auto bytesPerSlot = 2 * sizeof(float) * state.stride;
     const auto batchSlots = std::max<std::size_t>(1, kBatchScratchBytes / bytesPerSlot);
     layout[0].slot = layout[0].reachSlot[0] = layout[0].reachSlot[1] = 0;
-    const auto region = [&](const auto& self, const std::vector<U32>& roots, std::size_t next) -> void
+    const auto region = [&](const auto& self, const std::vector<U32>& roots, std::size_t next, U32 lane) -> void
     {
         std::vector<std::vector<U32>> levels;
         std::vector<U32> terminals, boundary;
@@ -195,20 +197,28 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         for (U32 root : roots)
             visit(visit, root, 0);
         slots = std::max(slots, next);
-        // Region roots derive both players' reach; deeper decisions propagate only their actor's.
+        // Region roots derive the opponent's reach; deeper decisions are grouped by
+        // actor so each player's launch covers only the opponent's (see LaunchPass).
         for (std::size_t depth = 0; depth < levels.size(); ++depth)
         {
             std::vector<U32> reach;
-            U32 lanes = 0;
             for (U32 index : levels[depth])
                 if (depth == 0 || layout[index].kind == NodeKind::Decision)
-                {
                     reach.push_back(index);
-                    lanes = std::max(lanes, depth == 0 ? total : state.hands[layout[index].actor]);
-                }
-            emit(Kernel::Reach, reach, lanes, depth == 0);
+            U32 split = 0;
+            if (depth > 0)
+                split = static_cast<U32>(
+                    std::stable_partition(reach.begin(), reach.end(), [&](U32 index) { return layout[index].actor == 0; }) - reach.begin()
+                );
+            emit(Kernel::Reach, reach, lane, depth == 0, split);
         }
-        emit(Kernel::Terminal, terminals, 1, false);
+        emit(Kernel::Terminal, terminals, lane, false);
+        // Batches of leaf regions (no chance node below) alternate between two lanes with
+        // disjoint scratch, so one batch's backup can overlap the next batch's reach and
+        // terminal passes. Lane 1 forks after this region's last pass and joins before its backup.
+        std::vector<std::pair<std::size_t, std::size_t>> batches;
+        // Lane 1's scratch starts past the largest lane-0 (even) batch.
+        std::size_t laneStride = 0;
         for (std::size_t begin = 0; begin < boundary.size();)
         {
             auto end = begin;
@@ -217,19 +227,42 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             {
                 cost += streetCost[boundary[end++]];
             } while (end < boundary.size() && cost + streetCost[boundary[end]] <= batchSlots);
-            self(self, std::vector<U32>(boundary.begin() + begin, boundary.begin() + end), next);
+            if (batches.size() % 2 == 0)
+                laneStride = std::max(laneStride, cost);
+            batches.emplace_back(begin, end);
             begin = end;
         }
+        // Every region emits a root Reach pass, and a region with batches backs up their chance parents.
+        const bool twoLanes =
+            lane == 0 && batches.size() > 1 && std::none_of(boundary.begin(), boundary.end(), [&](U32 root) { return chanceBelow[root]; });
+        if (twoLanes)
+            passes.back().sync |= kForkAfter;
+        for (std::size_t b = 0; b < batches.size(); ++b)
+        {
+            const U32 batchLane = twoLanes && (b & 1) ? 1u : 0u;
+            const auto batchPass = passes.size();
+            self(
+                self,
+                std::vector<U32>(boundary.begin() + batches[b].first, boundary.begin() + batches[b].second),
+                next + (batchLane ? laneStride : 0),
+                batchLane
+            );
+            if (batchLane)
+                passes[batchPass].sync |= kWaitFork;
+        }
+        const auto joinPass = passes.size();
         for (auto level = levels.rbegin(); level != levels.rend(); ++level)
         {
             std::vector<U32> decisions;
             for (U32 index : *level)
                 if (layout[index].kind == NodeKind::Decision || layout[index].kind == NodeKind::Chance)
                     decisions.push_back(index);
-            emit(Kernel::Backup, decisions, state.stride, false);
+            emit(Kernel::Backup, decisions, lane, false);
         }
+        if (twoLanes)
+            passes[joinPass].sync |= kJoinBefore;
     };
-    region(region, std::vector<U32>{0}, 1);
+    region(region, std::vector<U32>{0}, 1, 0);
     childSlots.reserve(edges.size());
     for (U32 child : edges)
         childSlots.push_back(layout[child].slot);
@@ -267,8 +300,10 @@ std::array<BufferData, kBufferCount> Plan::Buffers() const
     buffers[OutcomesBuffer] = {nullptr, outcomeEntries * sizeof(U32)};
     buffers[RegretsBuffer] = {nullptr, entries * sizeof(float)};
     buffers[SumsBuffer] = buffers[RegretsBuffer];
-    buffers[ScratchBuffer] = {nullptr, slots * (state.hands[0] + state.hands[1]) * sizeof(float)};
+    buffers[ScratchBuffer] = {nullptr, slots * state.stride * sizeof(float)};
     buffers[ValuesBuffer] = {nullptr, slots * state.stride * sizeof(float)};
+    buffers[FlagsBuffer] = {nullptr, slots * sizeof(U32)};
+    buffers[StampsBuffer] = {nullptr, 2 * std::size_t(state.stampCount) * sizeof(U32)};
     buffers[StateBuffer] = {&state, sizeof(State)};
     return buffers;
 }

@@ -5,6 +5,30 @@
 
 namespace solver::engine
 {
+namespace
+{
+// Lists each card's holders among hands[handAt(i)] for i < count, in visiting order.
+template<typename HandAt>
+void ListHolders(HandBoardData::CardLists& lists, const std::vector<HandBoardData::Hand>& hands, std::size_t count, HandAt handAt)
+{
+    std::array<std::uint16_t, 52> counts{};
+    for (std::size_t i = 0; i < count; ++i)
+        for (const auto card : hands[handAt(i)].cardIndices)
+            ++counts[card];
+    for (int card = 0; card < 52; ++card)
+        lists.cardOffsets[card + 1] = static_cast<std::uint16_t>(lists.cardOffsets[card] + counts[card]);
+    lists.cardLists.resize(2 * count);
+    std::array<std::uint16_t, 52> next{};
+    std::copy(lists.cardOffsets.begin(), lists.cardOffsets.begin() + 52, next.begin());
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        const auto hand = handAt(i);
+        for (const auto card : hands[hand].cardIndices)
+            lists.cardLists[next[card]++] = static_cast<std::uint16_t>(hand);
+    }
+}
+} // namespace
+
 HandBoardData::HandBoardData(const SolveProblem& problem, game::NodeId root)
     : game(problem.game)
     , board(game ? game->GetNode(root).State().board : throw std::invalid_argument("Hand tables require a compiled game"))
@@ -25,12 +49,18 @@ HandBoardData::HandBoardData(const SolveProblem& problem, game::NodeId root)
         }
         // A constant scale per player's range leaves regret matching unchanged.
         handMasks[player].resize(hands[player].size());
+        cardFactors[player].assign(52 * hands[player].size(), 1.0f);
         for (std::size_t hand = 0; hand < hands[player].size(); ++hand)
         {
             hands[player][hand].weight /= totalWeight;
             handMasks[player][hand] = hands[player][hand].mask;
+            for (const auto card : hands[player][hand].cardIndices)
+                cardFactors[player][card * hands[player].size() + hand] = 0.0f;
         }
     }
+
+    for (std::size_t player = 0; player < 2; ++player)
+        ListHolders(holders[player], hands[player], hands[player].size(), [](std::size_t hand) { return hand; });
 
     bool hasLegalPair = false;
     for (std::size_t first = 0; first < hands[0].size(); ++first)
@@ -75,15 +105,10 @@ HandBoardData::HandBoardData(const SolveProblem& problem, game::NodeId root)
             auto& order = rankRows.back()[player];
             order.ranks.reserve(ranked.size());
             order.hands.reserve(ranked.size());
-            order.card0.reserve(ranked.size());
-            order.card1.reserve(ranked.size());
             for (const auto& [rank, hand] : ranked)
             {
-                const Hand& source = hands[player][hand];
                 order.ranks.push_back(rank);
                 order.hands.push_back(hand);
-                order.card0.push_back(source.cardIndices[0]);
-                order.card1.push_back(source.cardIndices[1]);
             }
         }
         for (std::size_t player = 0; player < 2; ++player)
@@ -100,6 +125,40 @@ HandBoardData::HandBoardData(const SolveProblem& problem, game::NodeId root)
                 order.upperBounds.push_back(
                     static_cast<std::uint16_t>(std::upper_bound(opponent.begin(), opponent.end(), rank) - opponent.begin())
                 );
+            }
+            // Ranked visiting order keeps each card's holders in rank order.
+            ListHolders(order.holders, hands[player], order.hands.size(), [&](std::size_t ranked) { return order.hands[ranked]; });
+        }
+        for (std::size_t player = 0; player < 2; ++player)
+        {
+            auto& order = rankRows.back()[player];
+            const auto& opponent = rankRows.back()[1 - player];
+            std::vector<std::uint16_t> rankByHand(hands[1 - player].size());
+            for (std::size_t ranked = 0; ranked < opponent.hands.size(); ++ranked)
+                rankByHand[opponent.hands[ranked]] = opponent.ranks[ranked];
+            order.blockers.reserve(order.hands.size());
+            order.runs0.reserve(order.hands.size());
+            order.runs1.reserve(order.hands.size());
+            const auto holderRank = [&](std::uint16_t hand) { return rankByHand[hand]; };
+            for (std::size_t ranked = 0; ranked < order.hands.size(); ++ranked)
+            {
+                const auto rank = order.ranks[ranked];
+                std::uint32_t packed = 0;
+                for (int c = 0; c < 2; ++c)
+                {
+                    const auto card = hands[player][order.hands[ranked]].cardIndices[c];
+                    const auto begin = opponent.holders.cardLists.begin() + opponent.holders.cardOffsets[card];
+                    const auto end = opponent.holders.cardLists.begin() + opponent.holders.cardOffsets[card + 1];
+                    // Holder lists are rank-sorted, so the boundaries are binary searches.
+                    const auto below =
+                        std::lower_bound(begin, end, rank, [&](std::uint16_t hand, std::uint16_t r) { return holderRank(hand) < r; });
+                    const auto through =
+                        std::upper_bound(begin, end, rank, [&](std::uint16_t r, std::uint16_t hand) { return r < holderRank(hand); });
+                    packed |= (std::uint32_t(below - begin) | (std::uint32_t(through - begin) << 8)) << (16 * c);
+                    (c ? order.runs1 : order.runs0)
+                        .push_back(std::uint32_t(opponent.holders.cardOffsets[card] + card) | (std::uint32_t(end - begin) << 16));
+                }
+                order.blockers.push_back(packed);
             }
         }
     };

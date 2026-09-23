@@ -48,8 +48,8 @@ public:
                 Upload(i, sources[i]);
             id<MTLCommandBuffer> command = [queue_ commandBuffer];
             id<MTLBlitCommandEncoder> blit = [command blitCommandEncoder];
-            [blit fillBuffer:buffers_[RegretsBuffer] range:NSMakeRange(0, buffers_[RegretsBuffer].length) value:0];
-            [blit fillBuffer:buffers_[SumsBuffer] range:NSMakeRange(0, buffers_[SumsBuffer].length) value:0];
+            for (const auto index : {RegretsBuffer, SumsBuffer, FlagsBuffer, StampsBuffer})
+                [blit fillBuffer:buffers_[index] range:NSMakeRange(0, buffers_[index].length) value:0];
             [blit endEncoding];
             if (!plan.initialization.empty())
             {
@@ -71,7 +71,7 @@ public:
             id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
             Bind(encoder, state);
             for (const auto& pass : passes_)
-                Encode(encoder, pass);
+                Encode(encoder, LaunchPass(pass, shape_, state.player));
             [encoder endEncoding];
             Finish(command);
         }
@@ -79,7 +79,7 @@ public:
     std::vector<float> RootValues(const State& state) override
     {
         Update(state);
-        return Read(buffers_[ValuesBuffer], state.hands[state.player]);
+        return Read<float>(buffers_[ValuesBuffer], state.hands[state.player]);
     }
     std::vector<float> DownloadSums(bool releaseTraining) override
     {
@@ -87,16 +87,25 @@ public:
             for (std::size_t i = 0; i < buffers_.size(); ++i)
                 if (i != SumsBuffer)
                     buffers_[i] = nil;
-        auto result = Read(buffers_[SumsBuffer], entries_);
+        auto result = Read<float>(buffers_[SumsBuffer], entries_);
         if (releaseTraining)
             buffers_[SumsBuffer] = nil;
         return result;
     }
-    TrainingState DownloadTraining() override { return {Read(buffers_[RegretsBuffer], entries_), Read(buffers_[SumsBuffer], entries_)}; }
+    TrainingState DownloadTraining() override
+    {
+        return {
+            Read<float>(buffers_[RegretsBuffer], entries_),
+            Read<float>(buffers_[SumsBuffer], entries_),
+            NewestStamps(Read<std::uint32_t>(buffers_[StampsBuffer], 2 * std::size_t(shape_.stampCount)))
+        };
+    }
     void UploadTraining(const TrainingState& state) override
     {
-        Write(buffers_[RegretsBuffer], state.regrets);
-        Write(buffers_[SumsBuffer], state.strategySums);
+        Write(buffers_[RegretsBuffer], state.regrets, 0);
+        Write(buffers_[SumsBuffer], state.strategySums, 0);
+        for (std::size_t half = 0; half < 2; ++half)
+            Write(buffers_[StampsBuffer], state.stamps, half * shape_.stampCount * sizeof(std::uint32_t));
     }
 
 private:
@@ -127,6 +136,8 @@ private:
     }
     void Encode(id<MTLComputeCommandEncoder> encoder, Pass pass)
     {
+        if (pass.count == 0)
+            return;
         id<MTLComputePipelineState> pipeline = pipelines_[static_cast<std::size_t>(pass.operation)];
         [encoder setComputePipelineState:pipeline];
         [encoder setBytes:&pass length:sizeof(pass) atIndex:PassBuffer];
@@ -152,18 +163,20 @@ private:
         if (command.status == MTLCommandBufferStatusError)
             throw std::runtime_error(command.error.localizedDescription.UTF8String);
     }
-    std::vector<float> Read(id<MTLBuffer> source, std::size_t count)
+    template<typename T>
+    std::vector<T> Read(id<MTLBuffer> source, std::size_t count)
     {
-        std::vector<float> result(count);
-        Stage(source, count * sizeof(float), nullptr, result.data());
+        std::vector<T> result(count);
+        Stage(source, 0, count * sizeof(T), nullptr, result.data());
         return result;
     }
-    void Write(id<MTLBuffer> target, const std::vector<float>& source)
+    template<typename T>
+    void Write(id<MTLBuffer> target, const std::vector<T>& source, std::size_t targetOffset)
     {
-        Stage(target, source.size() * sizeof(float), source.data(), nullptr);
+        Stage(target, targetOffset, source.size() * sizeof(T), source.data(), nullptr);
     }
-    // Copies host input into buffer, or buffer into host output, through a shared staging buffer.
-    void Stage(id<MTLBuffer> buffer, std::size_t total, const void* input, void* output)
+    // Copies host input into buffer at base, or buffer into host output, through a shared staging buffer.
+    void Stage(id<MTLBuffer> buffer, std::size_t base, std::size_t total, const void* input, void* output)
     {
         if (!total)
             return;
@@ -181,9 +194,9 @@ private:
                 id<MTLCommandBuffer> command = [queue_ commandBuffer];
                 id<MTLBlitCommandEncoder> blit = [command blitCommandEncoder];
                 if (input)
-                    [blit copyFromBuffer:staging sourceOffset:0 toBuffer:buffer destinationOffset:offset size:bytes];
+                    [blit copyFromBuffer:staging sourceOffset:0 toBuffer:buffer destinationOffset:base + offset size:bytes];
                 else
-                    [blit copyFromBuffer:buffer sourceOffset:offset toBuffer:staging destinationOffset:0 size:bytes];
+                    [blit copyFromBuffer:buffer sourceOffset:base + offset toBuffer:staging destinationOffset:0 size:bytes];
                 [blit endEncoding];
                 Finish(command);
                 if (output)

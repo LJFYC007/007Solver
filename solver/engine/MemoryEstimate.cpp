@@ -58,8 +58,9 @@ MemoryEstimate EstimateCpuMemory(const SolveProblem& problem, int workers)
     // Include the bounded runout/regret scratch and per-team runtime overhead.
     const std::uint64_t workspace = storage.workspaceBytes * (count > 1 ? count + 1 : 1) + (count > 1 ? storage.parallelValuesBytes : 0) +
                                     (count + 1) * 128 * 1024 + rootVectors;
-    // Training retains regrets and strategy sums; current policies live in depth rows.
-    const std::uint64_t trainingPeak = 2 * sizeof(float) * entries + workspace + storage.flopOutcomesBytes;
+    // Training retains regrets, strategy sums and node stamps; current policies live in depth rows.
+    const std::uint64_t trainingPeak =
+        2 * sizeof(float) * entries + sizeof(std::uint32_t) * size.traversalNodes + workspace + storage.flopOutcomesBytes;
     // Checkpoints borrow sums while all training allocations remain resident.
     const auto checkpointPeak = trainingPeak + storage.workspaceBytes + rootVectors;
     // Final export releases regrets and workspaces before allocating the snapshot.

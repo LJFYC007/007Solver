@@ -14,6 +14,7 @@ CpuDcfrSession::CpuDcfrSession(const SolveProblem& problem, int workers)
         throw std::invalid_argument("CPU DCFR worker count must be positive");
     regrets_.resize(traversal_.strategySize, 0.0f);
     strategySums_.resize(traversal_.strategySize, 0.0f);
+    stamps_.resize(traversal_.nodes.size(), 0);
     for (std::size_t player = 0; player < 2; ++player)
         for (const auto& hand : traversal_.hands[player])
             divisors_[player].push_back(hand.opponentMass);
@@ -24,15 +25,13 @@ CpuDcfrSession::CpuDcfrSession(const SolveProblem& problem, int workers)
     rootValues_.resize(std::max(traversal_.hands[0].size(), traversal_.hands[1].size()));
 }
 
-void CpuDcfrSession::Update(std::size_t updatingPlayer, float positiveDiscount, float averageDiscount)
+void CpuDcfrSession::Update(std::size_t updatingPlayer, const UpdateWeights& weights)
 {
-    for (std::size_t player = 0; player < 2; ++player)
-    {
-        for (std::size_t hand = 0; hand < traversal_.hands[player].size(); ++hand)
-            workspace_.reach[player][hand] = player == updatingPlayer ? 1.0f : traversal_.hands[player][hand].weight;
-    }
+    const auto& opponentHands = traversal_.hands[1 - updatingPlayer];
+    for (std::size_t hand = 0; hand < opponentHands.size(); ++hand)
+        workspace_.reach[hand] = opponentHands[hand].weight;
 
-    HandTraversal::TrainState train{regrets_.data(), strategySums_.data(), positiveDiscount, averageDiscount};
+    HandTraversal::TrainState train{regrets_.data(), strategySums_.data(), stamps_.data(), weights};
     traversal_.WalkTraining(updatingPlayer, divisors_[updatingPlayer].data(), workspace_, rootValues_.data(), workers_, train);
 }
 
@@ -43,10 +42,12 @@ ExploitabilityMetrics CpuDcfrSession::EvaluateExploitability() const
 
 void CpuDcfrSession::WriteTrainingState(const TrainingState& state)
 {
-    if (state.regrets.size() != traversal_.strategySize || state.strategySums.size() != traversal_.strategySize)
+    if (state.regrets.size() != traversal_.strategySize || state.strategySums.size() != traversal_.strategySize ||
+        state.stamps.size() != traversal_.nodes.size())
         throw std::invalid_argument("Training state does not match the CPU strategy layout");
     regrets_ = state.regrets;
     strategySums_ = state.strategySums;
+    stamps_ = state.stamps;
 }
 
 StrategySnapshot CpuDcfrSession::ExportStrategy() &&
@@ -54,6 +55,7 @@ StrategySnapshot CpuDcfrSession::ExportStrategy() &&
     // Only the cumulative strategy and traversal layout are needed below. Release
     // training allocations before the snapshot probability and index arrays coexist.
     std::vector<float>().swap(regrets_);
+    std::vector<std::uint32_t>().swap(stamps_);
     workspace_ = {};
     std::vector<HandTraversal::Workspace>().swap(workers_);
     std::vector<float>().swap(rootValues_);

@@ -28,6 +28,8 @@ enum BufferIndex : U32
     SumsBuffer,
     ScratchBuffer,
     ValuesBuffer,
+    FlagsBuffer,  // per slot: whether the subtree carries opponent reach
+    StampsBuffer, // two halves of stampCount node stamps, alternating by update parity
     StateBuffer,
     PassBuffer,
     kDataBufferCount = StateBuffer,
@@ -39,7 +41,15 @@ enum : U32
 {
     kCardListStride = 53,
     kCardListHeader = 2 * kCardListStride,
+    kGroupFlags = 8, // leading Terminal group memory floats for the group-wide reach test: one per SIMD group
     kNoIndex = 0xffffffffu,
+};
+// Pass::sync bits ordering the two lanes; a sequential executor may ignore them.
+enum : U32
+{
+    kForkAfter = 1,  // lane 1 work emitted later depends on this lane-0 pass
+    kWaitFork = 2,   // this lane-1 pass waits for the latest fork
+    kJoinBefore = 4, // this lane-0 pass waits for all lane-1 work emitted so far
 };
 
 // Also the CPU traversal node kind. Fold, Showdown and ForcedRunout are leaves.
@@ -58,9 +68,9 @@ struct Node
     U64 board;
     U32 parent;
     U32 slot;
-    // Slot holding each player's reach entering this node. It was written by the
-    // nearest ancestor that changed it (the acting player's decision or a chance
-    // node), so siblings share the non-acting player's slot with their parent.
+    // Slot holding each player's reach entering this node when that player is the
+    // opponent of the update. It was written by the nearest ancestor that changed it
+    // (that player's decision or a chance node), so siblings share it with their parent.
     U32 reachSlot[2];
     U32 edge;
     U32 count;
@@ -68,9 +78,9 @@ struct Node
     NodeKind kind;
     U32 rankRow;
     U32 rankCounts[2];
-    U32 outcomeRow;       // zero for flop, card index + 1 for turn
-    U32 terminalChildren; // bit per action leading to a terminal, for the first 32 actions
-    U32 childSlot[3];     // leading entries of childSlots, so small decisions skip that lookup
+    U32 outcomeRow;   // zero for flop, card index + 1 for turn
+    U32 stamp;        // index of this node's update stamp
+    U32 childSlot[3]; // leading entries of childSlots, so small decisions skip that lookup
     float utility[3];
 };
 struct Hand
@@ -91,8 +101,13 @@ struct State
     U32 player;
     U32 evaluation;
     U32 outcomeRows;
-    float positiveDiscount;
-    float averageDiscount;
+    U32 update;     // 1-based index of this update for the updating player
+    U32 stampCount; // node stamps per half of the stamps buffer
+    // UpdateWeights: positive regrets are stored divided by positiveScale.
+    float positiveScale;
+    float positiveInverse;
+    float averageWeight; // t^2 weight of this update's reach * policy in the strategy sums
+    U32 padding;
 };
 enum class Kernel : U32
 {
@@ -113,8 +128,11 @@ struct Pass
     U32 offset;
     U32 count;
     OutcomeStage outcomeStage;
-    U32 lanes;    // threads per work item for one-dimensional launches
-    U32 boundary; // Reach items derive both players' reach from the game root or a dealt card
+    U32 lanes;    // threads per work item for one-dimensional launches; LaunchPass sets Reach's
+    U32 boundary; // Reach items derive the opponent's reach from the game root or a dealt card
+    U32 split;    // deeper Reach items before this index belong to actor 0, the rest to actor 1
+    U32 lane;     // river batches alternate lanes with disjoint scratch so their passes can overlap
+    U32 sync;     // kForkAfter, kWaitFork and kJoinBefore bits
 };
 } // namespace gpu
 } // namespace engine

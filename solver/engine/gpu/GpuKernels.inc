@@ -21,6 +21,7 @@ using namespace solver::engine::gpu;
 #define GPU_LOCAL_INDEX localIndex
 #define GPU_GROUP_SIZE groupSize
 #define GPU_GROUP_BARRIER() threadgroup_barrier(mem_flags::mem_threadgroup)
+#define GPU_LDEXP(value, exponent) ldexp(value, exponent)
 #else
 #define GPU_INLINE __device__ __forceinline__
 #define GPU_DEVICE
@@ -38,13 +39,15 @@ using namespace solver::engine::gpu;
 #define GPU_LOCAL_INDEX threadIdx.x
 #define GPU_GROUP_SIZE blockDim.x
 #define GPU_GROUP_BARRIER() __syncthreads()
+#define GPU_LDEXP(value, exponent) ldexpf(value, exponent)
 #endif
 #define GPU_ARGUMENTS                                                                                                                    \
     GPU_BUFFER(const Node, nodes, NodesBuffer), GPU_BUFFER(const U32, childSlots, ChildSlotsBuffer),                                     \
         GPU_BUFFER(const Hand, hands, HandsBuffer), GPU_BUFFER(const unsigned short, ranks, RanksBuffer),                                \
         GPU_BUFFER(const int, runouts, RunoutsBuffer), GPU_BUFFER(const U32, order, OrderBuffer),                                        \
         GPU_BUFFER(const U32, cards, CardsBuffer), GPU_BUFFER(U32, outcomes, OutcomesBuffer), GPU_BUFFER(float, regrets, RegretsBuffer), \
-        GPU_BUFFER(float, sums, SumsBuffer), GPU_BUFFER(float, scratch, ScratchBuffer), GPU_BUFFER(float, values, ValuesBuffer), GPU_TAIL
+        GPU_BUFFER(float, sums, SumsBuffer), GPU_BUFFER(float, scratch, ScratchBuffer), GPU_BUFFER(float, values, ValuesBuffer),         \
+        GPU_BUFFER(U32, flags, FlagsBuffer), GPU_BUFFER(U32, stamps, StampsBuffer), GPU_TAIL
 #ifdef __METAL_VERSION__
 #define GPU_STATE
 #else
@@ -57,53 +60,73 @@ GPU_INLINE float MatchedProbability(float regret, float positive, U32 actions)
     return positive > 0.0f ? (regret > 0.0f ? regret : 0.0f) / positive : 1.0f / float(actions);
 }
 
-// One parent/hand normalizes its entry policy once for all children. A zero
-// ActionCount keeps the general path; small decisions retain entry data.
+// One parent normalizes its entry policy once for all children and, while training,
+// accumulates its cumulative strategy from the reach it propagates. A thread carries
+// two adjacent hands so twice the loads are in flight per warp; pair and value1 are
+// zero when only hand h exists. A zero ActionCount keeps the general path; small
+// decisions retain entry data.
 template<U32 ActionCount>
 GPU_INLINE void ReachNode(
     Node n,
     State state,
     U32 p,
     U32 h,
-    U32 skip,
-    float value,
+    U32 pair,
+    float value0,
+    float value1,
     GPU_DEVICE const U32* childSlots,
     GPU_DEVICE const float* regrets,
-    GPU_DEVICE const float* sums,
+    GPU_DEVICE float* sums,
     GPU_DEVICE float* scratch
 )
 {
     const U32 count = p ? state.hands[1] : state.hands[0];
-    const U32 total = state.hands[0] + state.hands[1], base = p ? state.hands[0] : 0;
     const U32 actions = ActionCount ? ActionCount : n.count;
+    GPU_DEVICE const float* policy = state.evaluation ? sums : regrets;
+    const bool accumulate = !state.evaluation;
     U32 slots[ActionCount ? ActionCount : 1];
-    float entries[ActionCount ? ActionCount : 1];
+    float entries0[ActionCount ? ActionCount : 1], entries1[ActionCount ? ActionCount : 1];
+    float sums0[ActionCount ? ActionCount : 1], sums1[ActionCount ? ActionCount : 1];
     if (ActionCount)
         for (U32 a = 0; a < actions; ++a)
             slots[a] = n.childSlot[a];
-    // Zero reach still clears every child slot; only the policy lookup is skipped.
-    float positive = 0.0f;
-    if (value != 0.0f)
-        for (U32 a = 0; a < actions; ++a)
-        {
-            const U64 entry = n.strategy + U64(a) * count + h;
-            const float x = state.evaluation ? sums[entry] : regrets[entry];
-            if (ActionCount)
-                entries[a] = x;
-            positive += x > 0.0f ? x : 0.0f;
-        }
+    // Zero reach still clears every child slot; only its policy and sum loads are skipped.
+    float positive0 = 0.0f, positive1 = 0.0f;
     for (U32 a = 0; a < actions; ++a)
     {
-        if (a < 32 && ((skip >> a) & 1u))
-            continue;
-        float child = value;
-        if (value != 0.0f)
+        const U64 entry = n.strategy + U64(a) * count + h;
+        const float x0 = value0 != 0.0f ? policy[entry] : 0.0f;
+        const float x1 = value1 != 0.0f ? policy[entry + 1] : 0.0f;
+        if (ActionCount)
         {
-            const U64 entry = n.strategy + U64(a) * count + h;
-            const float x = ActionCount ? entries[a] : state.evaluation ? sums[entry] : regrets[entry];
-            child *= MatchedProbability(x, positive, actions);
+            entries0[a] = x0;
+            entries1[a] = x1;
+            sums0[a] = accumulate && value0 != 0.0f ? sums[entry] : 0.0f;
+            sums1[a] = accumulate && value1 != 0.0f ? sums[entry + 1] : 0.0f;
         }
-        scratch[U64(ActionCount ? slots[a] : childSlots[n.edge + a]) * total + base + h] = child;
+        positive0 += x0 > 0.0f ? x0 : 0.0f;
+        positive1 += x1 > 0.0f ? x1 : 0.0f;
+    }
+    for (U32 a = 0; a < actions; ++a)
+    {
+        const U64 entry = n.strategy + U64(a) * count + h;
+        float child0 = value0, child1 = value1;
+        if (value0 != 0.0f)
+            child0 *= MatchedProbability(ActionCount ? entries0[a] : policy[entry], positive0, actions);
+        if (value1 != 0.0f)
+            child1 *= MatchedProbability(ActionCount ? entries1[a] : policy[entry + 1], positive1, actions);
+        GPU_DEVICE float* target = scratch + U64(ActionCount ? slots[a] : childSlots[n.edge + a]) * state.stride + h;
+        target[0] = child0;
+        if (pair)
+            target[1] = child1;
+        // Zero increments leave the cumulative strategy untouched.
+        if (accumulate)
+        {
+            if (child0 != 0.0f)
+                sums[entry] = (ActionCount ? sums0[a] : sums[entry]) + state.averageWeight * child0;
+            if (child1 != 0.0f)
+                sums[entry + 1] = (ActionCount ? sums1[a] : sums[entry + 1]) + state.averageWeight * child1;
+        }
     }
 }
 
@@ -114,45 +137,69 @@ GPU_ENTRY(Reach)(GPU_ARGUMENTS)
     if (item >= pass.count)
         return;
     const Node n = nodes[pass.offset + item];
-    const U32 total = state.hands[0] + state.hands[1];
-    U32 p = n.actor, h = lane;
-    float value;
+    // Only the opponent's reach is propagated, one row of stride floats per slot: terminals
+    // read it and the opponent's cumulative strategy accumulates it. The updating player's
+    // own reach is never needed.
+    const U32 p = 1 - state.player, count = p ? state.hands[1] : state.hands[0], base = p ? state.hands[0] : 0;
+    U32 h = lane, pair = 0;
+    float value0, value1 = 0.0f;
     if (pass.boundary)
     {
-        // Region roots derive both players' reach from the game root or the dealt card.
-        p = lane < state.hands[0] ? 0 : 1;
-        h = p ? lane - state.hands[0] : lane;
-        // Own reach is consumed only by training updates.
-        if (p == state.player && state.evaluation)
+        // Region roots derive the opponent's reach from the game root or the dealt card.
+        if (h >= count)
             return;
-        const U32 base = p ? state.hands[0] : 0;
         if (n.parent == kNoIndex)
-            value = p == state.player ? 1.0f : hands[base + h].weight;
+            value0 = hands[base + h].weight;
         else
         {
             const Node parent = nodes[n.parent];
-            value = scratch[U64(p ? parent.reachSlot[1] : parent.reachSlot[0]) * total + base + h];
-            value = (hands[base + h].mask & n.board & ~parent.board) ? 0.0f
-                                                                     : value * (p == state.player ? 1.0f : 1.0f / float(parent.count - 4));
+            value0 = scratch[U64(p ? parent.reachSlot[1] : parent.reachSlot[0]) * state.stride + h];
+            value0 = (hands[base + h].mask & n.board & ~parent.board) ? 0.0f : value0 * (1.0f / float(parent.count - 4));
         }
-        scratch[U64(n.slot) * total + base + h] = value;
-        if (n.kind != NodeKind::Decision || p != n.actor)
+        scratch[U64(n.slot) * state.stride + h] = value0;
+        if (n.kind != NodeKind::Decision || n.actor != p)
             return;
     }
     else
     {
-        if (h >= (p ? state.hands[1] : state.hands[0]) || (p == state.player && state.evaluation))
+        // The opponent's deeper decisions propagate its reach, two adjacent hands per thread.
+        h = 2 * lane;
+        if (h >= count)
             return;
-        value = scratch[U64(p ? n.reachSlot[1] : n.reachSlot[0]) * total + (p ? state.hands[0] : 0) + h];
+        pair = h + 1 < count ? 1u : 0u;
+        GPU_DEVICE const float* source = scratch + U64(p ? n.reachSlot[1] : n.reachSlot[0]) * state.stride + h;
+        value0 = source[0];
+        value1 = pair ? source[1] : 0.0f;
     }
-    // Terminals read only the opponent's reach, so the updating player's own reach skips them.
-    const U32 skip = p == state.player ? n.terminalChildren : 0u;
     if (n.count == 2)
-        ReachNode<2>(n, state, p, h, skip, value, childSlots, regrets, sums, scratch);
+        ReachNode<2>(n, state, p, h, pair, value0, value1, childSlots, regrets, sums, scratch);
     else if (n.count == 3)
-        ReachNode<3>(n, state, p, h, skip, value, childSlots, regrets, sums, scratch);
+        ReachNode<3>(n, state, p, h, pair, value0, value1, childSlots, regrets, sums, scratch);
     else
-        ReachNode<0>(n, state, p, h, skip, value, childSlots, regrets, sums, scratch);
+        ReachNode<0>(n, state, p, h, pair, value0, value1, childSlots, regrets, sums, scratch);
+}
+
+// True in every lane of the group when any lane holds true. Metal reduces per SIMD
+// group through the leading group memory floats; CUDA has a group-wide primitive.
+GPU_INLINE bool GroupAny(bool value, GPU_SHARED float* groupFlags, U32 local, U32 groupWidth, U32 width)
+{
+#ifdef __METAL_VERSION__
+    // All SIMD lanes must participate in the vote before selecting its writer.
+    const bool simdAny = simd_any(value);
+    if (local % width == 0)
+        groupFlags[local / width] = simdAny ? 1.0f : 0.0f;
+    GPU_GROUP_BARRIER();
+    bool any = false;
+    for (U32 g = 0; g < (groupWidth + width - 1) / width; ++g)
+        any |= groupFlags[g] != 0.0f;
+    return any;
+#else
+    (void)groupFlags;
+    (void)local;
+    (void)groupWidth;
+    (void)width;
+    return __syncthreads_or(value);
+#endif
 }
 
 // All lanes of a complete SIMD group participate, including zero-padded tails.
@@ -233,31 +280,25 @@ GPU_ENTRY(Terminal)(GPU_ARGUMENTS GPU_GROUP_TAIL)
     if (item >= pass.count)
         return;
     const Node n = nodes[pass.offset + item];
-    const U32 total = state.hands[0] + state.hands[1], mineBase = p ? state.hands[0] : 0, oppBase = p ? 0 : state.hands[0];
+    const U32 total = state.hands[0] + state.hands[1], mineBase = p ? state.hands[0] : 0;
     const U32 reachSlot = p ? n.reachSlot[0] : n.reachSlot[1];
-    GPU_SHARED float* reach = groupMemory;
-    GPU_SHARED float* prefix = groupMemory + state.stride;
+    GPU_SHARED float* reach = groupMemory + kGroupFlags;
+    GPU_SHARED float* prefix = reach + state.stride;
     GPU_SHARED float* blockers = prefix + (2 * state.stride > 53u ? 2 * state.stride : 53u);
-#ifdef __METAL_VERSION__
-    for (U32 other = local; other < opponentCount; other += groupWidth)
-        reach[other] = scratch[U64(reachSlot) * total + oppBase + other];
-    GPU_GROUP_BARRIER();
-#else
     bool nonzero = false;
     for (U32 other = local; other < opponentCount; other += groupWidth)
     {
-        const float r = scratch[U64(reachSlot) * total + oppBase + other];
+        const float r = scratch[U64(reachSlot) * state.stride + other];
         reach[other] = r;
         nonzero |= r != 0.0f;
     }
-    // Every lane participates; zero values still flow through normal Backup.
-    if (!__syncthreads_or(nonzero))
-    {
-        for (U32 h = local; h < count; h += groupWidth)
-            values[U64(n.slot) * state.stride + h] = 0.0f;
+    // A terminal without opponent reach has zero values, which Backup substitutes from
+    // the flag instead of reading them.
+    const bool live = GroupAny(nonzero, groupMemory, local, groupWidth, GPU_WIDTH);
+    if (local == 0)
+        flags[n.slot] = live ? 1u : 0u;
+    if (!live)
         return;
-    }
-#endif
     for (U32 direction = local / GPU_WIDTH; direction < 2; direction += groupWidth / GPU_WIDTH)
         TerminalPrefix(n, state, local % GPU_WIDTH, GPU_WIDTH, direction != 0, order, reach, prefix);
     if (n.kind == NodeKind::Fold)
@@ -357,7 +398,9 @@ GPU_ENTRY(Terminal)(GPU_ARGUMENTS GPU_GROUP_TAIL)
 }
 
 // A zero ActionCount keeps the general path; small decisions retain entry data
-// and issue every load before the first store so latencies overlap.
+// and issue every load before the first store so latencies overlap. A node is live
+// when any child subtree carries opponent reach; pruned nodes have zero values and
+// keep their regrets, whose skipped discounts the stamps apply at the next live update.
 template<U32 ActionCount>
 GPU_INLINE void BackupNode(
     Node n,
@@ -365,9 +408,9 @@ GPU_INLINE void BackupNode(
     U32 h,
     GPU_DEVICE const U32* childSlots,
     GPU_DEVICE float* regrets,
-    GPU_DEVICE float* sums,
-    GPU_DEVICE const float* scratch,
-    GPU_DEVICE float* values
+    GPU_DEVICE float* values,
+    GPU_DEVICE U32* flags,
+    GPU_DEVICE U32* stamps
 )
 {
     const U32 count = state.player ? state.hands[1] : state.hands[0];
@@ -375,35 +418,56 @@ GPU_INLINE void BackupNode(
     const bool acting = n.kind == NodeKind::Decision && n.actor == state.player;
     const bool training = acting && !state.evaluation;
     U32 slots[ActionCount ? ActionCount : 1];
+    U32 lives[ActionCount ? ActionCount : 1];
     float entryRegrets[ActionCount ? ActionCount : 1];
-    float entrySums[ActionCount ? ActionCount : 1];
     float childValues[ActionCount ? ActionCount : 1];
-    float probabilities[ActionCount ? ActionCount : 1];
-    if (ActionCount)
-        for (U32 a = 0; a < actions; ++a)
-            slots[a] = n.childSlot[a];
-    // Reuse the entry-policy denominator for value backup and strategy sums.
-    float positive = 0.0f, own = 0.0f;
+    U32 live = 0;
+    for (U32 a = 0; a < actions; ++a)
+    {
+        const U32 slot = ActionCount ? n.childSlot[a] : childSlots[n.edge + a];
+        const U32 flag = flags[slot];
+        if (ActionCount)
+        {
+            slots[a] = slot;
+            lives[a] = flag;
+        }
+        live |= flag;
+    }
+    if (h == 0)
+        flags[n.slot] = live;
+    float halving = 1.0f;
     if (training)
     {
+        // Stamps alternate between two halves: a pass reads the half its player's previous
+        // update wrote while writing the other, and every acting decision writes its entry.
+        const U32 read = (state.update & 1u) * state.stampCount, write = ((state.update + 1u) & 1u) * state.stampCount;
+        const U32 stamp = stamps[read + n.stamp];
+        if (h == 0)
+            stamps[write + n.stamp] = live ? state.update : stamp;
+        const U32 skipped = state.update - 1u - stamp;
+        halving = GPU_LDEXP(1.0f, -int(skipped < 200u ? skipped : 200u));
+    }
+    if (!live)
+    {
+        if (n.parent == kNoIndex)
+            values[U64(n.slot) * state.stride + h] = 0.0f;
+        return;
+    }
+    // Reuse the entry-policy denominator for value backup and the regret update.
+    float positive = 0.0f;
+    if (training)
         for (U32 a = 0; a < actions; ++a)
         {
-            const U64 entry = n.strategy + U64(a) * count + h;
-            const float r = regrets[entry];
+            const float r = regrets[n.strategy + U64(a) * count + h];
             if (ActionCount)
-            {
                 entryRegrets[a] = r;
-                entrySums[a] = sums[entry];
-            }
             positive += r > 0.0f ? r : 0.0f;
         }
-        const U32 total = state.hands[0] + state.hands[1], base = state.player ? state.hands[0] : 0;
-        own = scratch[U64(state.player ? n.reachSlot[1] : n.reachSlot[0]) * total + base + h];
-    }
     float value = 0.0f;
     for (U32 a = 0; a < actions; ++a)
     {
-        const float child = values[U64(ActionCount ? slots[a] : childSlots[n.edge + a]) * state.stride + h];
+        const U32 slot = ActionCount ? slots[a] : childSlots[n.edge + a];
+        const float child = (ActionCount ? lives[a] : flags[slot]) ? values[U64(slot) * state.stride + h] : 0.0f;
         if (ActionCount)
             childValues[a] = child;
         if (acting && state.evaluation)
@@ -411,10 +475,7 @@ GPU_INLINE void BackupNode(
         else if (acting)
         {
             const float r = ActionCount ? entryRegrets[a] : regrets[n.strategy + U64(a) * count + h];
-            const float probability = MatchedProbability(r, positive, actions);
-            if (ActionCount)
-                probabilities[a] = probability;
-            value += child * probability;
+            value += child * MatchedProbability(r, positive, actions);
         }
         else
             value += child;
@@ -425,11 +486,13 @@ GPU_INLINE void BackupNode(
         {
             const U64 entry = n.strategy + U64(a) * count + h;
             const float old = ActionCount ? entryRegrets[a] : regrets[entry];
-            const float probability = ActionCount ? probabilities[a] : MatchedProbability(old, positive, actions);
-            const float child = ActionCount ? childValues[a] : values[U64(childSlots[n.edge + a]) * state.stride + h];
-            const float r = old + (child - value);
-            regrets[entry] = r * (r > 0.0f ? state.positiveDiscount : 0.5f);
-            sums[entry] = state.averageDiscount * ((ActionCount ? entrySums[a] : sums[entry]) + own * probability);
+            const U32 slot = ActionCount ? slots[a] : childSlots[n.edge + a];
+            const float child = ActionCount ? childValues[a] : (flags[slot] ? values[U64(slot) * state.stride + h] : 0.0f);
+            // Positive regrets are stored divided by positiveScale, so the discounts of the
+            // updates this node skipped are already in place; negative regrets halve once
+            // per skipped update.
+            const float regret = (old > 0.0f ? old * state.positiveScale : old * halving) + (child - value);
+            regrets[entry] = regret > 0.0f ? regret * state.positiveInverse : regret * 0.5f;
         }
 }
 
@@ -442,11 +505,11 @@ GPU_ENTRY(Backup)(GPU_ARGUMENTS)
         return;
     const Node n = nodes[pass.offset + item];
     if (n.count == 2)
-        BackupNode<2>(n, state, h, childSlots, regrets, sums, scratch, values);
+        BackupNode<2>(n, state, h, childSlots, regrets, values, flags, stamps);
     else if (n.count == 3)
-        BackupNode<3>(n, state, h, childSlots, regrets, sums, scratch, values);
+        BackupNode<3>(n, state, h, childSlots, regrets, values, flags, stamps);
     else
-        BackupNode<0>(n, state, h, childSlots, regrets, sums, scratch, values);
+        BackupNode<0>(n, state, h, childSlots, regrets, values, flags, stamps);
 }
 
 GPU_ENTRY(Outcomes)(GPU_ARGUMENTS)

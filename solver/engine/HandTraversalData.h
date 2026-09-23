@@ -40,7 +40,7 @@ struct HandTraversalData
     float rootHalfPot = 0.0f;
 
     std::vector<std::uint32_t> children;
-    std::vector<std::uint64_t> dealtCardMasks;
+    std::vector<std::uint8_t> dealtCards; // card index of each chance edge
     std::size_t maxDepth = 1;
 
     struct ChanceGroup
@@ -75,10 +75,24 @@ private:
     void PrepareFlopRunout();
 };
 
-// Resident DCFR state in the strategySize layout shared by both backends.
+// Resident DCFR state in the layouts shared by both backends: regrets and cumulative
+// strategies in the strategySize layout, and per traversal node the update index of the
+// actor's last unpruned update (zero before the first), which discounts regrets lazily.
 struct TrainingState
 {
     std::vector<float> regrets;
     std::vector<float> strategySums;
+    std::vector<std::uint32_t> stamps;
+};
+
+// One player update's DCFR weights. Positive regrets are stored divided by positiveScale,
+// the product of t^1.5 / (t^1.5 + 1) over the player's earlier updates, so pruned
+// updates need no discount pass; negative regrets are halved once per skipped update.
+struct UpdateWeights
+{
+    std::uint32_t update;  // 1-based index of this update for the updating player
+    float positiveScale;   // product of earlier positive discounts
+    float positiveInverse; // 1 / positiveScale
+    float averageWeight;   // t^2, the weight of this update's reach * policy in the sums
 };
 } // namespace solver::engine

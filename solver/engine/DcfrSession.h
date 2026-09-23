@@ -44,6 +44,8 @@ private:
     std::unique_ptr<GpuDcfrSession> gpu_;
     MemoryEstimate memory_{};
     int completedIterations_ = 0;
+    // Product of positive regret discounts over completed rounds (one update per player).
+    double positiveScale_ = 1.0;
     float trainingTimeSeconds_ = 0.0f;
     bool exported_ = false;
 };

@@ -32,15 +32,23 @@ void DcfrSession::Run(int iterations, const std::function<void(int)>& callback)
     for (int iteration = 0; iteration < iterations; ++iteration)
     {
         const auto player = static_cast<std::size_t>(completedIterations_ % 2);
-        const float t = completedIterations_ / 2 + 1.0f;
-        const float power = t * std::sqrt(t);
-        const float positiveDiscount = power / (power + 1.0f);
-        const float averageDiscount = (t / (t + 1.0f)) * (t / (t + 1.0f));
+        const auto t = static_cast<std::uint32_t>(completedIterations_ / 2 + 1);
+        // Both discounts apply lazily: positive regrets are stored divided by the product
+        // of their t^1.5 / (t^1.5 + 1) discounts, and cumulative strategies hold the sum of
+        // t^2 * reach * policy, DCFR's (t / (t + 1))^2 discount rescaled away by normalization.
+        const UpdateWeights weights{
+            t, static_cast<float>(positiveScale_), static_cast<float>(1.0 / positiveScale_), static_cast<float>(t) * static_cast<float>(t)
+        };
         if (gpu_)
-            gpu_->Update(player, positiveDiscount, averageDiscount);
+            gpu_->Update(player, weights);
         else
-            cpu_->Update(player, positiveDiscount, averageDiscount);
+            cpu_->Update(player, weights);
         ++completedIterations_;
+        if (completedIterations_ % 2 == 0)
+        {
+            const double power = t * std::sqrt(static_cast<double>(t));
+            positiveScale_ *= power / (power + 1.0);
+        }
         if (callback)
         {
             const auto now = std::chrono::steady_clock::now();

@@ -18,7 +18,7 @@ public:
 
 private:
     friend class DcfrSession;
-    void Update(std::size_t player, float positiveDiscount, float averageDiscount);
+    void Update(std::size_t player, const UpdateWeights& weights);
     ExploitabilityMetrics EvaluateExploitability() const;
     // Independent CPU certification of the resident average policy.
     ExploitabilityMetrics EvaluateExploitabilityOnCpu() const;

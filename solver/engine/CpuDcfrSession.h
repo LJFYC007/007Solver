@@ -20,16 +20,17 @@ public:
 
 private:
     friend class DcfrSession;
-    void Update(std::size_t player, float positiveDiscount, float averageDiscount);
+    void Update(std::size_t player, const UpdateWeights& weights);
     ExploitabilityMetrics EvaluateExploitability() const;
     StrategySnapshot ExportStrategy() &&;
-    TrainingState ReadTrainingState() const { return {regrets_, strategySums_}; }
+    TrainingState ReadTrainingState() const { return {regrets_, strategySums_, stamps_}; }
     void WriteTrainingState(const TrainingState& state);
     const HandTraversal traversal_;
     std::array<std::vector<float>, 2> divisors_;
     // Action-major rows, with a fixed root-hand stride for the acting player.
     std::vector<float> regrets_;
     std::vector<float> strategySums_;
+    std::vector<std::uint32_t> stamps_;
     HandTraversal::Workspace workspace_;
     std::vector<HandTraversal::Workspace> workers_;
     std::vector<float> rootValues_;

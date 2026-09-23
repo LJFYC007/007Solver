@@ -19,21 +19,25 @@ public:
     using Node = HandTraversalData::Node;
     static constexpr std::size_t kMaxHands = HandTraversalData::kMaxHands;
     // One depth-first stack per worker, reused across all subtrees and iterations.
+    // Every walk propagates only the opponent's reach: one row per depth.
     struct Workspace
     {
-        std::array<std::vector<float>, 2> reach;
+        std::vector<float> reach;
         std::vector<float> childValues;
         std::vector<float> accumulated;
         std::vector<float> parallelValues;
+        std::vector<std::uint8_t> parallelLive; // whether each chance task's subtree carried opponent reach
         std::vector<float> strategies;
     };
-    // Training Walk inlines regret matching and updates from these buffers.
+    // Training Walk inlines regret matching and updates from these buffers. The
+    // opponent's strategy sums accumulate averageWeight * reach * policy at its
+    // decisions; consumers normalize per hand. Stamps hold each node's last unpruned update.
     struct TrainState
     {
         float* regrets = nullptr;
         float* strategySums = nullptr;
-        float positiveDiscount = 0.0f;
-        float averageDiscount = 0.0f;
+        std::uint32_t* stamps = nullptr;
+        UpdateWeights weights{};
     };
     enum class Evaluation
     {
@@ -96,7 +100,7 @@ private:
     using FlopOutcomes = HandTraversalData::FlopOutcomes;
     struct WorkspaceSize
     {
-        std::array<std::size_t, 2> reach;
+        std::size_t reach;
         std::size_t childValues;
         std::size_t accumulated;
         std::size_t parallelValues;
@@ -110,9 +114,8 @@ private:
         const std::array<std::size_t, 2>& handCounts,
         std::size_t chanceTasks
     );
-    const std::array<std::vector<std::uint64_t>, 2>& handMasks;
     const std::vector<std::uint32_t>& children;
-    const std::vector<std::uint64_t>& dealtCardMasks;
+    const std::vector<std::uint8_t>& dealtCards;
     const std::vector<std::array<RankOrder, 2>>& rankRows;
     const std::size_t& maxDepth;
 
@@ -128,16 +131,18 @@ private:
         bool bestResponse = false;
     };
     std::vector<float> EvaluateHands(const WalkContext& context, const std::vector<float>& opponentReach) const;
-    // Required entry policies stay in a row per depth. Each player's reach points
-    // at the row written by the nearest ancestor that changed it, which rewrites
-    // that row only after the subtree reading it finishes. Training supplies a
-    // cursor only when consuming completed chance tasks in preorder.
-    void Walk(
+    // Required entry policies stay in a row per depth. The opponent's reach points at
+    // the row written by the nearest ancestor that changed it, which rewrites that row
+    // only after the subtree reading it finishes. Returns whether the subtree carried
+    // opponent reach, as the GPU's terminal flags do; subtrees without it are skipped
+    // and their acting decisions keep their stamps. Training supplies a cursor only when
+    // consuming completed chance tasks in preorder.
+    bool Walk(
         std::uint32_t node,
         const WalkContext& context,
         Workspace& workspace,
         std::size_t depth,
-        std::array<const float*, 2> reach,
+        const float* opponentReach,
         float* values,
         std::size_t* parallelCursor = nullptr
     ) const;
@@ -147,12 +152,12 @@ private:
 
     void MatchRegrets(const Node& node, const TrainState& train, float* current) const;
     void EvaluateFlopRunout(const Node& node, std::size_t player, const float* opponentReach, const float* divisors, float* values) const;
-    // Returns parent at another player's decision, whose reach the child shares; otherwise writes and returns child.
+    // Returns parent at another player's decision, whose reach the child shares; otherwise
+    // writes and returns child, including the chance probability at chance nodes.
     const float* PropagateChild(
         std::uint32_t node,
         std::size_t action,
         std::size_t player,
-        bool includeChance,
         const float* strategy,
         const float* parent,
         float* child

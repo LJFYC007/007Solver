@@ -7,6 +7,8 @@ namespace solver::engine
 // Conditional-value denominators use direct positive summation, without blocker subtraction.
 std::vector<float> CompatibleHandMasses(const HandBoardData& data, std::size_t player, const float* opponentReach);
 
+// Opponent hands overlapping boardMask must carry zero reach; chance propagation and
+// the root tables guarantee that, so every holder list is summed without masking.
 void EvaluateFoldHands(
     const HandBoardData& data,
     std::size_t player,
