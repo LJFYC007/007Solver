@@ -12,7 +12,7 @@ Each [DcfrSession](engine/DcfrSession.h) iteration updates one player, alternati
 
 CPU and GPU use float arithmetic and can differ with accumulation and traversal order. `DcfrSession::EvaluateCheckpoint` uses CPU evaluation for final metrics and GPU checkpoints that reach the supplied stopping target. Callers must supply that target whenever a checkpoint can end training. Final metrics must describe the exported strategy and use the same cumulative-strategy normalization.
 
-The [GPU plan](engine/gpu/GpuPlan.h) may reuse descendant scratch only after backup, retaining live ancestor reaches and child-root values. Its batching target is not a hard memory limit: individual street regions and retained ancestors can exceed it, and the whole tree's regrets and cumulative strategies remain resident.
+The [GPU plan](engine/gpu/GpuPlan.h) may reuse descendant scratch only after backup, retaining live ancestor reaches and child-root values. Each player's reach is stored in the slot written by the nearest ancestor that changed it, so a decision rewrites only its actor's side. Terminal evaluation reads only the opponent's reach, which may remain in an ancestor's slot; the updating player's reach need not be stored for terminals. Its batching target is not a hard memory limit: individual street regions and retained ancestors can exceed it, and the whole tree's regrets and cumulative strategies remain resident.
 
 Allocation estimates include checkpoint scratch and GPU readback while training remains resident; later navigation and EV caches are excluded. See [CPU sizing](engine/MemoryEstimate.cpp) and [GPU sizing](engine/GpuDcfrSession.cpp).
 

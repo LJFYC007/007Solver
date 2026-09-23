@@ -136,7 +136,7 @@ private:
         }
         else
         {
-            const auto threads = pass.count * (pass.operation == Kernel::Outcomes ? 1 : shape_.stride);
+            const auto threads = pass.count * pass.lanes;
             [encoder dispatchThreads:MTLSizeMake(threads, 1, 1) threadsPerThreadgroup:MTLSizeMake(group, 1, 1)];
         }
         [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];

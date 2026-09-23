@@ -23,7 +23,6 @@ enum BufferIndex : U32
     RunoutsBuffer,
     OrderBuffer,
     CardsBuffer,
-    WorkBuffer,
     OutcomesBuffer,
     RegretsBuffer,
     SumsBuffer,
@@ -50,14 +49,19 @@ struct Node
     U64 board;
     U32 parent;
     U32 slot;
+    // Slot holding each player's reach entering this node. It was written by the
+    // nearest ancestor that changed it (the acting player's decision or a chance
+    // node), so siblings share the non-acting player's slot with their parent.
+    U32 reachSlot[2];
     U32 edge;
     U32 count;
     U32 actor;
     NodeKind kind;
     U32 rankRow;
     U32 rankCounts[2];
-    U32 outcomeRow; // zero for flop, card index + 1 for turn
-    U32 dealtCard;
+    U32 outcomeRow;       // zero for flop, card index + 1 for turn
+    U32 terminalChildren; // bit per action leading to a terminal, for the first 32 actions
+    U32 childSlot[3];     // leading entries of childSlots, so small decisions skip that lookup
     float utility[3];
 };
 struct Hand
@@ -72,6 +76,7 @@ struct Hand
 };
 struct State
 {
+    U64 board; // initial public board mask
     U32 hands[2];
     U32 stride;
     U32 player;
@@ -99,6 +104,8 @@ struct Pass
     U32 offset;
     U32 count;
     OutcomeStage outcomeStage;
+    U32 lanes;    // threads per work item for one-dimensional launches
+    U32 boundary; // Reach items derive both players' reach from the game root or a dealt card
 };
 } // namespace gpu
 } // namespace engine

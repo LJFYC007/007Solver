@@ -98,11 +98,11 @@ private:
     }
     void Launch(Pass pass, U32 player)
     {
-        // Backup tiles only the current player's hands; Reach still propagates both players.
+        // Backup tiles only the current player's hands; other passes are linear over pass.lanes.
         const bool handTiles = pass.operation == Kernel::Backup;
         const auto handCount = shape_.hands[player];
         const auto group = pass.operation == Kernel::Terminal ? 64u : handTiles ? (std::min(handCount, 256u) + 31) / 32 * 32 : 256u;
-        const auto threads = pass.count * (pass.operation == Kernel::Reach ? shape_.stride : 1);
+        const auto threads = pass.count * pass.lanes;
         const dim3 blocks = handTiles ? dim3(pass.count, (handCount + group - 1) / group)
                                       : dim3(pass.operation == Kernel::Terminal ? pass.count : (threads + group - 1) / group);
         const auto shared = pass.operation == Kernel::Terminal ? TerminalSharedBytes(shape_) : 0;
@@ -115,7 +115,6 @@ private:
         static_cast<const int*>(buffers_[RunoutsBuffer]),          \
         static_cast<const U32*>(buffers_[OrderBuffer]),            \
         static_cast<const U32*>(buffers_[CardsBuffer]),            \
-        static_cast<const U32*>(buffers_[WorkBuffer]),             \
         static_cast<U32*>(buffers_[OutcomesBuffer]),               \
         static_cast<float*>(buffers_[RegretsBuffer]),              \
         static_cast<float*>(buffers_[SumsBuffer]),                 \

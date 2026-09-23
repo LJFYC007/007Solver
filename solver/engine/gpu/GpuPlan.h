@@ -12,8 +12,9 @@ namespace solver::engine::gpu
 constexpr std::size_t kReadbackBytes = 16 * 1024 * 1024;
 inline std::size_t TerminalSharedBytes(const State& state)
 {
-    // Fold stores one total and 52 card masses, even for small ranges.
-    return (state.stride + std::max(2 * state.stride, 53u)) * sizeof(float);
+    // Opponent reach, forward/reverse rank prefixes (Fold stores one total and 52
+    // card masses instead), then each card's rank-ordered blocked reach prefix.
+    return (state.stride + std::max(2 * state.stride, 53u) + 2 * state.stride + 52) * sizeof(float);
 }
 
 struct BufferData
@@ -27,16 +28,19 @@ struct BufferData
 struct Plan
 {
     explicit Plan(const HandTraversalData& data);
+    // One entry per scheduled work item, in pass order, so kernels index nodes by
+    // pass offset. A node repeats at each of its passes; parents name a Backup entry.
     std::vector<Node> nodes;
     // Reach writes and Backup reads child slots without a dependent Node lookup.
     std::vector<U32> childSlots;
     std::vector<Hand> hands;
+    // Each rank row stores ranks by hand, then every card's hands in rank order.
     std::vector<unsigned short> ranks;
-    // Each rank row stores sorted hands, then packed lower/upper bounds by hand.
+    // Each rank row stores sorted hands, packed lower/upper bounds by hand, then
+    // packed per-card blocker positions by hand.
     std::vector<U32> order;
     std::vector<int> runouts;
     std::vector<U32> cards;
-    std::vector<U32> work;
     std::vector<Pass> initialization;
     std::vector<Pass> passes;
     State state{};
