@@ -8,6 +8,7 @@ namespace solver::engine::gpu
 namespace
 {
 constexpr U32 kNoParent = std::numeric_limits<U32>::max();
+// tests/fixtures/backend-parity.json relies on this target splitting its street regions.
 constexpr std::size_t kBatchScratchBytes = 128 * 1024 * 1024;
 
 template<typename T>

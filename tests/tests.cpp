@@ -1,5 +1,6 @@
 #include "analysis/AnalysisSession.h"
 #include "engine/DcfrSession.h"
+#include "engine/HandTraversalData.h"
 #include "engine/StrategyEvaluator.h"
 #include "game/GameCompiler.h"
 #include "io/ScenarioLoader.h"
@@ -32,12 +33,17 @@ const Json& References()
     return references;
 }
 
+std::shared_ptr<const engine::SolveProblem> LoadProblem(const std::string& name)
+{
+    auto scenario = solver::io::LoadScenario(std::string(TEST_FIXTURE_DIR) + name + ".json");
+    return std::make_shared<const engine::SolveProblem>(engine::SolveProblem{game::CompileGame(scenario.game), std::move(scenario.ranges)});
+}
+
 std::shared_ptr<const engine::SolveProblem> Problem(const std::string& name)
 {
     // Changing the input requires regenerating its independent reference.
     EXPECT_EQ(Fixture(name), References().at(name).at("scenario"));
-    auto scenario = solver::io::LoadScenario(std::string(TEST_FIXTURE_DIR) + name + ".json");
-    return std::make_shared<const engine::SolveProblem>(engine::SolveProblem{game::CompileGame(scenario.game), std::move(scenario.ranges)});
+    return LoadProblem(name);
 }
 
 void CheckSolve(const std::string& name, engine::ComputeDevice requestedDevice, int workers)
@@ -96,6 +102,34 @@ engine::StrategySnapshot FixedStrategy(const engine::SolveProblem& problem, cons
     }
     return engine::StrategySnapshot(problem.game, std::move(entries));
 }
+
+void ExpectNodesNear(
+    const engine::HandTraversalData& layout,
+    const std::vector<float>& expected,
+    const std::vector<float>& actual,
+    const char* label
+)
+{
+    ASSERT_EQ(expected.size(), layout.strategySize);
+    ASSERT_EQ(actual.size(), expected.size());
+    std::size_t mismatches = 0;
+    for (const auto& node : layout.nodes)
+    {
+        if (node.kind != game::NodeKind::Decision)
+            continue;
+        // Low-reach nodes hold tiny entries, so scale by each node's largest CPU entry.
+        // Rounding stays below 1e-4 of that scale; update bugs move entries far more.
+        const auto end = node.strategyOffset + node.childCount * layout.tables->hands[node.actor].size();
+        float scale = 0.0f;
+        for (auto i = node.strategyOffset; i < end; ++i)
+            scale = std::max(scale, std::fabs(expected[i]));
+        for (auto i = node.strategyOffset; i < end; ++i)
+            if (!(std::fabs(actual[i] - expected[i]) <= 1e-3f * scale) && mismatches++ < 3)
+                ADD_FAILURE() << label << " at node " << node.id.Value() << " entry " << i - node.strategyOffset << ": CPU " << expected[i]
+                              << ", GPU " << actual[i] << ", node scale " << scale;
+    }
+    EXPECT_EQ(mismatches, 0u) << label;
+}
 } // namespace
 
 TEST(StrategyEvaluatorTest, UniformPolicyMatchesIndependentBestResponses)
@@ -140,6 +174,32 @@ TEST(SolverReferenceTest, RaiseFlopGpu)
     if (!engine::GpuDcfrSession::Available())
         GTEST_SKIP() << "No supported CUDA or Metal GPU is available";
     CheckSolve("raise-flop", engine::ComputeDevice::Auto, 0);
+}
+
+TEST(BackendParityTest, GpuUpdatesMatchCpuFromSharedState)
+{
+    if (!engine::GpuDcfrSession::Available())
+        GTEST_SKIP() << "No supported CUDA or Metal GPU is available";
+    const auto problem = LoadProblem("backend-parity");
+    const engine::HandTraversalData layout(*problem, problem->game->Root());
+    engine::DcfrSession cpu(problem, engine::ComputeDevice::Cpu, 4);
+    engine::DcfrSession gpu(problem, engine::ComputeDevice::Gpu);
+    RecordProperty("device", gpu.DeviceName());
+    // Independent trajectories diverge at near-tied regrets, so every GPU update starts from the CPU state.
+    const int updates = Fixture("backend-parity").at("iterations").get<int>();
+    auto expected = cpu.ReadTrainingState();
+    for (int update = 0; update < updates; ++update)
+    {
+        SCOPED_TRACE("update " + std::to_string(update));
+        gpu.WriteTrainingState(expected);
+        cpu.Run(1);
+        gpu.Run(1);
+        expected = cpu.ReadTrainingState();
+        const auto actual = gpu.ReadTrainingState();
+        ExpectNodesNear(layout, expected.regrets, actual.regrets, "regrets");
+        ExpectNodesNear(layout, expected.strategySums, actual.strategySums, "strategy sums");
+        ASSERT_FALSE(HasFailure());
+    }
 }
 
 TEST(AnalysisSessionTest, FixedPoliciesMatchIndependentNodeValuesAndReach)

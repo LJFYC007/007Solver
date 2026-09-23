@@ -43,6 +43,14 @@ ExploitabilityMetrics CpuDcfrSession::EvaluateExploitability() const
     return EvaluateAverageStrategy(traversal_, strategySums_.data());
 }
 
+void CpuDcfrSession::WriteTrainingState(const TrainingState& state)
+{
+    if (state.regrets.size() != traversal_.strategySize || state.strategySums.size() != traversal_.strategySize)
+        throw std::invalid_argument("Training state does not match the CPU strategy layout");
+    regrets_ = state.regrets;
+    strategySums_ = state.strategySums;
+}
+
 StrategySnapshot CpuDcfrSession::ExportStrategy() &&
 {
     // Only the cumulative strategy and traversal layout are needed below. Release

@@ -24,6 +24,8 @@ private:
     void Update(std::size_t player, float positiveDiscount, float averageDiscount);
     ExploitabilityMetrics EvaluateExploitability() const;
     StrategySnapshot ExportStrategy() &&;
+    TrainingState ReadTrainingState() const { return {regrets_, strategySums_}; }
+    void WriteTrainingState(const TrainingState& state);
     std::shared_ptr<const SolveProblem> problem_;
     const HandTraversal traversal_;
     std::array<std::vector<float>, 2> divisors_;

@@ -8,6 +8,8 @@ The [correctness suite](../README.md#checks) runs offline against checked-in ref
 
 GPU cases skip without a supported device. Check the device and skipped cases in the JSON report or `ctest -V`; passing CUDA checks does not validate Metal.
 
+The backend parity [input](fixtures/backend-parity.json) has no independent answer; the CPU backend is its reference. It must keep splitting street regions into several GPU batches.
+
 ## Benchmark
 
 Benchmarks are opt-in; normal builds and CTest do not run them:

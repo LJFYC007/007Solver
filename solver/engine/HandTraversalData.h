@@ -71,4 +71,11 @@ private:
     void PrepareChanceTasks();
     void PrepareFlopRunout();
 };
+
+// Resident DCFR state in the strategySize layout shared by both backends.
+struct TrainingState
+{
+    std::vector<float> regrets;
+    std::vector<float> strategySums;
+};
 } // namespace solver::engine

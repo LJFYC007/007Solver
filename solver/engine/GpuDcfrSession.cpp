@@ -81,6 +81,13 @@ ExploitabilityMetrics GpuDcfrSession::EvaluateExploitabilityOnCpu() const
     return EvaluateAverageStrategy(HandTraversal(data_), sums.data());
 }
 
+void GpuDcfrSession::WriteTrainingState(const TrainingState& state)
+{
+    if (state.regrets.size() != data_->strategySize || state.strategySums.size() != data_->strategySize)
+        throw std::invalid_argument("Training state does not match the GPU strategy layout");
+    executor_->UploadTraining(state);
+}
+
 StrategySnapshot GpuDcfrSession::ExportStrategy() &&
 {
     auto sums = executor_->DownloadSums(true);

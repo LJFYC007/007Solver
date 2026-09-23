@@ -94,6 +94,12 @@ public:
             buffers_[SumsBuffer] = nil;
         return result;
     }
+    TrainingState DownloadTraining() override { return {Read(buffers_[RegretsBuffer], entries_), Read(buffers_[SumsBuffer], entries_)}; }
+    void UploadTraining(const TrainingState& state) override
+    {
+        Write(buffers_[RegretsBuffer], state.regrets);
+        Write(buffers_[SumsBuffer], state.strategySums);
+    }
 
 private:
     id<MTLDevice> device_;
@@ -151,26 +157,41 @@ private:
     std::vector<float> Read(id<MTLBuffer> source, std::size_t count)
     {
         std::vector<float> result(count);
-        if (!count)
-            return result;
+        Stage(source, count * sizeof(float), nullptr, result.data());
+        return result;
+    }
+    void Write(id<MTLBuffer> target, const std::vector<float>& source)
+    {
+        Stage(target, source.size() * sizeof(float), source.data(), nullptr);
+    }
+    // Copies host input into buffer, or buffer into host output, through a shared staging buffer.
+    void Stage(id<MTLBuffer> buffer, std::size_t total, const void* input, void* output)
+    {
+        if (!total)
+            return;
         @autoreleasepool
         {
             // Bounded staging avoids duplicating the full strategy buffer in unified memory.
-            const auto capacity = std::min<std::size_t>(count * sizeof(float), kReadbackBytes);
+            const auto capacity = std::min<std::size_t>(total, kReadbackBytes);
             id<MTLBuffer> staging = [device_ newBufferWithLength:capacity options:MTLResourceStorageModeShared];
-            Check(staging, nil, "Cannot allocate Metal readback buffer");
-            for (std::size_t offset = 0; offset < count * sizeof(float); offset += capacity)
+            Check(staging, nil, "Cannot allocate Metal staging buffer");
+            for (std::size_t offset = 0; offset < total; offset += capacity)
             {
-                const auto bytes = std::min(capacity, count * sizeof(float) - offset);
+                const auto bytes = std::min(capacity, total - offset);
+                if (input)
+                    std::memcpy(staging.contents, static_cast<const char*>(input) + offset, bytes);
                 id<MTLCommandBuffer> command = [queue_ commandBuffer];
                 id<MTLBlitCommandEncoder> blit = [command blitCommandEncoder];
-                [blit copyFromBuffer:source sourceOffset:offset toBuffer:staging destinationOffset:0 size:bytes];
+                if (input)
+                    [blit copyFromBuffer:staging sourceOffset:0 toBuffer:buffer destinationOffset:offset size:bytes];
+                else
+                    [blit copyFromBuffer:buffer sourceOffset:offset toBuffer:staging destinationOffset:0 size:bytes];
                 [blit endEncoding];
                 Finish(command);
-                std::memcpy(reinterpret_cast<char*>(result.data()) + offset, staging.contents, bytes);
+                if (output)
+                    std::memcpy(static_cast<char*>(output) + offset, staging.contents, bytes);
             }
         }
-        return result;
     }
 };
 } // namespace

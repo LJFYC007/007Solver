@@ -1,7 +1,7 @@
 """Derive bundled test scenarios from the captured GTO Wizard catalog.
 
 This copies input weights only. Independent reference answers must be regenerated
-with tests/oracle after changing any scenario; this script never creates answers.
+with tests/oracle after changing a referenced scenario; this script never creates answers.
 """
 import hashlib
 import json
@@ -97,6 +97,14 @@ wide["rangeSource"]["reduction"] = (
     "100bb starting stacks leave 87bb each; the 26.5bb pot includes the folded SB's 0.5bb. "
     "No range subsets or weight rescaling."
 )
-for name, value in [("weighted-flop", weighted), ("raise-flop", raised), ("utg-bb-wide", wide)]:
+# Lockstep CPU/GPU updates; iterations counts compared updates.
+parity = scenario("8max", 3, None, 30.0, "Ac Kh Qs", 26.5, 12)
+parity["rangeSource"]["reduction"] = (
+    "Full captured 8-max UTG raise 2.5 / BB raise 13 / UTG call ranges. "
+    "Stacks are reduced to 30bb for runtime while GPU street regions still split into batches; "
+    "the 26.5bb pot includes the folded SB's 0.5bb. No range subsets or weight rescaling. "
+    "The CPU backend is the reference; there is no independent answer."
+)
+for name, value in [("weighted-flop", weighted), ("raise-flop", raised), ("utg-bb-wide", wide), ("backend-parity", parity)]:
     (fixtures / f"{name}.json").write_bytes((json.dumps(value, indent=4) + "\n").encode())
-print("Updated three input fixtures from GTO Wizard; regenerate independent references next.")
+print("Updated four input fixtures from GTO Wizard; regenerate independent references for changed referenced inputs next.")

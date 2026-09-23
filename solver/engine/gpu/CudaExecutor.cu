@@ -63,7 +63,7 @@ public:
     {
         Update(state);
         std::vector<float> values(state.hands[state.player]);
-        Check(cudaMemcpy(values.data(), buffers_[ValuesBuffer], values.size() * sizeof(float), cudaMemcpyDeviceToHost));
+        Copy(values.data(), buffers_[ValuesBuffer], values.size() * sizeof(float), cudaMemcpyDeviceToHost);
         return values;
     }
     std::vector<float> DownloadSums(bool releaseTraining) override
@@ -76,11 +76,22 @@ public:
                     Free(i);
         }
         std::vector<float> result(entries_);
-        if (!result.empty())
-            Check(cudaMemcpy(result.data(), buffers_[SumsBuffer], result.size() * sizeof(float), cudaMemcpyDeviceToHost));
+        Copy(result.data(), buffers_[SumsBuffer], result.size() * sizeof(float), cudaMemcpyDeviceToHost);
         if (releaseTraining)
             Free(SumsBuffer);
         return result;
+    }
+    TrainingState DownloadTraining() override
+    {
+        TrainingState state{std::vector<float>(entries_), std::vector<float>(entries_)};
+        Copy(state.regrets.data(), buffers_[RegretsBuffer], entries_ * sizeof(float), cudaMemcpyDeviceToHost);
+        Copy(state.strategySums.data(), buffers_[SumsBuffer], entries_ * sizeof(float), cudaMemcpyDeviceToHost);
+        return state;
+    }
+    void UploadTraining(const TrainingState& state) override
+    {
+        Copy(buffers_[RegretsBuffer], state.regrets.data(), entries_ * sizeof(float), cudaMemcpyHostToDevice);
+        Copy(buffers_[SumsBuffer], state.strategySums.data(), entries_ * sizeof(float), cudaMemcpyHostToDevice);
     }
 
 private:
@@ -93,8 +104,17 @@ private:
     void Upload(std::size_t index, const BufferData& source)
     {
         Check(cudaMalloc(&buffers_[index], source.AllocationBytes()));
-        if (source.data && source.bytes)
-            Check(cudaMemcpy(buffers_[index], source.data, source.bytes, cudaMemcpyHostToDevice));
+        if (source.data)
+            Copy(buffers_[index], source.data, source.bytes, cudaMemcpyHostToDevice);
+    }
+    void Copy(void* target, const void* source, std::size_t bytes, cudaMemcpyKind kind)
+    {
+        // The non-blocking stream does not wait for legacy-stream copies, and pageable
+        // uploads may return before their DMA completes.
+        if (!bytes)
+            return;
+        Check(cudaMemcpyAsync(target, source, bytes, kind, stream_));
+        Check(cudaStreamSynchronize(stream_));
     }
     void Launch(Pass pass, U32 player)
     {

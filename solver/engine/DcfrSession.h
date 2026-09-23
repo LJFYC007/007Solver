@@ -26,6 +26,11 @@ public:
     ExploitabilityMetrics EvaluateCheckpoint(bool final, std::optional<double> stoppingTarget = std::nullopt) const;
     // Consumes training state; only metadata remains available afterward.
     StrategySnapshot ExportStrategy() &&;
+    // Exact resident state in the layout both devices share, for lockstep parity checks.
+    // It omits the iteration count that selects the player and discounts, so sessions
+    // exchanging state must have completed equal iterations. Copies are outside Memory().
+    TrainingState ReadTrainingState() const;
+    void WriteTrainingState(const TrainingState& state);
     int CompletedIterations() const { return completedIterations_; }
     float TrainingTimeSeconds() const { return trainingTimeSeconds_; }
     int WorkerCount() const;

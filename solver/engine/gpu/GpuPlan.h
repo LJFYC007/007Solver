@@ -60,6 +60,8 @@ public:
     virtual void Update(const State& state) = 0;
     virtual std::vector<float> RootValues(const State& state) = 0;
     virtual std::vector<float> DownloadSums(bool releaseTraining) = 0;
+    virtual TrainingState DownloadTraining() = 0;
+    virtual void UploadTraining(const TrainingState& state) = 0;
     virtual const char* Name() const = 0;
 };
 std::unique_ptr<Executor> MakeExecutor(const Plan& plan);
