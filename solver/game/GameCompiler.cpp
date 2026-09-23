@@ -18,17 +18,16 @@ public:
             spec_.initialPot,
             spec_.initialStacks,
             {core::Chips{}, core::Chips{}},
-            spec_.initialStreet,
+            core::Street::Flop,
             spec_.initialBoard
         };
-        BuildNode(IsAllIn(root) ? NodeKind::Chance : NodeKind::Decision, root, std::nullopt);
+        BuildNode(root.HasAllInPlayer() ? NodeKind::Chance : NodeKind::Decision, root, std::nullopt);
         return std::move(nodes_);
     }
 
 private:
     const GameSpec& spec_;
     std::vector<BettingTopologyNode> nodes_;
-    static bool IsAllIn(const PublicState& state) { return state.stacks[0] == core::Chips{} || state.stacks[1] == core::Chips{}; }
     std::uint32_t BuildNode(NodeKind kind, PublicState state, std::optional<TerminalOutcome> terminal)
     {
         if (kind == NodeKind::Chance && state.street == core::Street::River)
@@ -54,7 +53,7 @@ private:
                 state.street == core::Street::Flop ? core::Street::Turn : core::Street::River,
                 state.board.Append(core::Card(card))
             };
-            const auto child = BuildNode(IsAllIn(state) ? NodeKind::Chance : NodeKind::Decision, next, std::nullopt);
+            const auto child = BuildNode(state.HasAllInPlayer() ? NodeKind::Chance : NodeKind::Decision, next, std::nullopt);
             nodes_[index].children.push_back(child);
         }
         else if (kind == NodeKind::Decision)
@@ -78,7 +77,7 @@ private:
             }
         }
         auto& node = nodes_[index];
-        const bool forced = kind == NodeKind::Chance && IsAllIn(state);
+        const bool forced = kind == NodeKind::Chance && state.HasAllInPlayer();
         const std::uint64_t copies = kind == NodeKind::Chance ? 52 - state.board.CardCount() : 1;
         std::uint64_t logical = 1;
         std::uint64_t active = 1;
@@ -114,7 +113,7 @@ private:
 };
 std::shared_ptr<const CompiledGame> CompileGame(const GameSpec& spec)
 {
-    if (spec.initialStreet != core::Street::Flop || spec.initialBoard.CardCount() != 3)
+    if (spec.initialBoard.CardCount() != 3)
         throw std::invalid_argument("The game compiler requires a three-card flop");
     if (spec.initialPot < core::Chips{} || spec.initialStacks[0] < core::Chips{} || spec.initialStacks[1] < core::Chips{})
         throw std::invalid_argument("Game pot and stacks cannot be negative");

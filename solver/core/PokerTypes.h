@@ -25,7 +25,6 @@ public:
     static PlayerId Player0() { return PlayerId(0); }
     static PlayerId Player1() { return PlayerId(1); }
 
-    std::uint8_t Value() const { return value_; }
     std::size_t Index() const { return value_; }
     PlayerId Other() const { return PlayerId(static_cast<std::uint8_t>(1 - value_)); }
 

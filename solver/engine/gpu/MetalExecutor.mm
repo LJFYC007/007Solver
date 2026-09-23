@@ -25,8 +25,6 @@ public:
         {
             device_ = MTLCreateSystemDefaultDevice();
             Check(device_, nil, "Metal device is unavailable");
-            if (plan.DeviceBytes() > device_.recommendedMaxWorkingSetSize)
-                throw std::runtime_error("GPU training state and batch scratch exceed the recommended Metal working set");
             queue_ = [device_ newCommandQueue];
             Check(queue_, nil, "Cannot create Metal command queue");
             NSError* error = nil;

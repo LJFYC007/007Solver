@@ -127,7 +127,6 @@ Scenario ReadScenario(std::istream& input)
     return {
         {
             core::ParseBoard(json.at("board").get<std::string>(), 3),
-            core::Street::Flop,
             ParseChips(json.at("initialPot"), "initialPot"),
             {
                 ParseChips(json.at("heroStack"), "heroStack"),

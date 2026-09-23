@@ -57,10 +57,7 @@ HandBoardData::HandBoardData(const SolveProblem& problem, game::NodeId root)
     // Rank rows are shared by all betting histories and reversed turn/river runouts.
     const auto addRanks = [&](const core::Board& board)
     {
-        const int first = board.CardAt(3).Index();
-        const int second = board.CardAt(4).Index();
-        const int high = std::max(first, second);
-        const int key = high * (high - 1) / 2 + std::min(first, second);
+        const auto key = core::CardPairIndex(board.CardAt(3), board.CardAt(4));
         if (rowsByRunout[key] >= 0)
             return;
         rowsByRunout[key] = static_cast<int>(rankRows.size());
@@ -80,7 +77,6 @@ HandBoardData::HandBoardData(const SolveProblem& problem, game::NodeId root)
             order.hands.reserve(ranked.size());
             order.card0.reserve(ranked.size());
             order.card1.reserve(ranked.size());
-            order.masks.reserve(ranked.size());
             for (const auto& [rank, hand] : ranked)
             {
                 const Hand& source = hands[player][hand];
@@ -88,7 +84,6 @@ HandBoardData::HandBoardData(const SolveProblem& problem, game::NodeId root)
                 order.hands.push_back(hand);
                 order.card0.push_back(source.cardIndices[0]);
                 order.card1.push_back(source.cardIndices[1]);
-                order.masks.push_back(source.mask);
             }
         }
         for (std::size_t player = 0; player < 2; ++player)

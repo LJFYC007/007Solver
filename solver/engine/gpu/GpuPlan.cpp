@@ -7,7 +7,6 @@ namespace solver::engine::gpu
 {
 namespace
 {
-constexpr U32 kNoParent = std::numeric_limits<U32>::max();
 // tests/fixtures/backend-parity.json relies on this target splitting its street regions.
 constexpr std::size_t kBatchScratchBytes = 128 * 1024 * 1024;
 
@@ -32,21 +31,21 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
     state.stride = std::max(state.hands[0], state.hands[1]);
     const U32 total = state.hands[0] + state.hands[1];
     runouts.assign(tables.rowsByRunout.begin(), tables.rowsByRunout.end());
-    cards.resize(106);
+    cards.resize(kCardListHeader);
     for (U32 p = 0; p < 2; ++p)
     {
         for (U32 card = 0; card < 52; ++card)
         {
-            cards[p * 53 + card] = static_cast<U32>(cards.size());
+            cards[p * kCardListStride + card] = static_cast<U32>(cards.size());
             for (U32 h = 0; h < state.hands[p]; ++h)
                 if (tables.hands[p][h].mask & (U64{1} << card))
                     cards.push_back(h);
         }
-        cards[p * 53 + 52] = static_cast<U32>(cards.size());
+        cards[p * kCardListStride + 52] = static_cast<U32>(cards.size());
     }
     const auto rankPitch = 3 * std::size_t(total);
     ranks.resize(tables.rankRows.size() * rankPitch, 0xffff);
-    order.resize(tables.rankRows.size() * rankPitch, kNoParent);
+    order.resize(tables.rankRows.size() * rankPitch, kNoIndex);
     for (std::size_t row = 0; row < tables.rankRows.size(); ++row)
     {
         const auto rowBase = row * rankPitch;
@@ -65,12 +64,12 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         for (U32 q = 0; q < 2; ++q)
             for (U32 card = 0; card < 52; ++card)
             {
-                const auto begin = cards[q * 53 + card], end = cards[q * 53 + card + 1];
+                const auto begin = cards[q * kCardListStride + card], end = cards[q * kCardListStride + card + 1];
                 std::vector<U32> list(cards.begin() + begin, cards.begin() + end);
                 const auto rankOf = [&](U32 hand) { return ranks[rowBase + (q ? state.hands[0] : 0) + hand]; };
                 std::stable_sort(list.begin(), list.end(), [&](U32 a, U32 b) { return rankOf(a) < rankOf(b); });
                 for (std::size_t k = 0; k < list.size(); ++k)
-                    ranks[rowBase + total + begin - 106 + k] = static_cast<unsigned short>(list[k]);
+                    ranks[rowBase + total + begin - kCardListHeader + k] = static_cast<unsigned short>(list[k]);
             }
         // Per hand and held card: how many of the opponent's hands with that card rank strictly
         // below, then at most, the hand. Fewer than 256 hands hold any card.
@@ -86,9 +85,9 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
                 {
                     const U32 card = c ? hands[mineBase + h].card1 : hands[mineBase + h].card0;
                     U32 below = 0, through = 0;
-                    for (auto e = cards[(1 - p) * 53 + card]; e < cards[(1 - p) * 53 + card + 1]; ++e)
+                    for (auto e = cards[(1 - p) * kCardListStride + card]; e < cards[(1 - p) * kCardListStride + card + 1]; ++e)
                     {
-                        const auto other = ranks[rowBase + oppBase + ranks[rowBase + total + e - 106]];
+                        const auto other = ranks[rowBase + oppBase + ranks[rowBase + total + e - kCardListHeader]];
                         below += other < rank;
                         through += other <= rank;
                     }
@@ -106,21 +105,17 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         auto& n = layout[i];
         n.strategy = source.strategyOffset;
         n.board = source.boardMask;
-        n.parent = kNoParent;
+        n.parent = kNoIndex;
         n.edge = static_cast<U32>(source.childOffset);
         n.count = static_cast<U32>(source.childCount);
         n.actor = static_cast<U32>(source.actor);
-        n.kind = source.forcedRunout                       ? NodeKind::ForcedRunout
-                 : source.kind == game::NodeKind::Decision ? NodeKind::Decision
-                 : source.kind == game::NodeKind::Chance   ? NodeKind::Chance
-                 : source.rankRow < 0                      ? NodeKind::Fold
-                                                           : NodeKind::Showdown;
+        n.kind = source.kind;
         n.rankRow = static_cast<U32>(source.rankRow);
         if (source.rankRow >= 0)
             for (U32 p = 0; p < 2; ++p)
                 n.rankCounts[p] = static_cast<U32>(tables.rankRows[source.rankRow][p].hands.size());
         std::copy(source.utilities.begin(), source.utilities.end(), n.utility);
-        if (source.forcedRunout)
+        if (source.kind == NodeKind::ForcedRunout)
         {
             n.outcomeRow = source.board.CardCount() == 3 ? 0 : source.board.CardAt(3).Index() + 1;
             state.outcomeRows = std::max(state.outcomeRows, n.outcomeRow + 1);
@@ -242,7 +237,7 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         for (U32 a = 0; a < n.count && a < 3; ++a)
             n.childSlot[a] = childSlots[n.edge + a];
     // Kernels index nodes by work position, so parents name their Backup entry.
-    std::vector<U32> backupPosition(layout.size(), kNoParent);
+    std::vector<U32> backupPosition(layout.size(), kNoIndex);
     for (const auto& pass : passes)
         if (pass.operation == Kernel::Backup)
             for (U32 i = 0; i < pass.count; ++i)
@@ -251,10 +246,10 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
     for (std::size_t i = 0; i < work.size(); ++i)
     {
         nodes[i] = layout[work[i]];
-        if (nodes[i].parent == kNoParent)
+        if (nodes[i].parent == kNoIndex)
             continue;
         nodes[i].parent = backupPosition[nodes[i].parent];
-        if (nodes[i].parent == kNoParent)
+        if (nodes[i].parent == kNoIndex)
             throw std::runtime_error("GPU plan parent lacks a backup entry");
     }
 }

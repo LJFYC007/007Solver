@@ -22,10 +22,6 @@ public:
         try
         {
             Check(cudaSetDevice(0));
-            std::size_t available, total;
-            Check(cudaMemGetInfo(&available, &total));
-            if (plan.DeviceBytes() > available)
-                throw std::runtime_error("GPU training state and batch scratch exceed available CUDA memory");
             Check(cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking));
             const auto sources = plan.Buffers();
             for (std::size_t i = 0; i < buffers_.size(); ++i)

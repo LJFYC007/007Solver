@@ -126,7 +126,7 @@ int SolverService::Run(const std::string& scenarioPath, engine::ComputeDevice de
         engine::MemoryEstimate estimate{};
 
         diagnostics_ << "Start solving game...\n";
-        const float initialPot = static_cast<float>(game->Spec().initialPot.Raw()) / core::Chips::kUnitsPerChip;
+        const float initialPot = core::ToChipUnits(game->Spec().initialPot);
         const float target = initialPot * (scenario.accuracyPercent / 100.0f);
         engine::ExploitabilityMetrics metrics;
         int completedIterations = 0;

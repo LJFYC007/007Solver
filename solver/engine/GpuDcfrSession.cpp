@@ -4,20 +4,22 @@
 
 namespace solver::engine
 {
-GpuDcfrSession::GpuDcfrSession(std::shared_ptr<const SolveProblem> problem) : problem_(std::move(problem))
+GpuDcfrSession::GpuDcfrSession(const SolveProblem& problem)
 {
-    if (!problem_ || !problem_->game)
-        throw std::invalid_argument("GPU DCFR session requires a solve problem");
     if (!Available())
         throw std::runtime_error("A supported CUDA or Apple Silicon GPU is unavailable");
-    const auto counts = MeasureSolveSize(*problem_);
+    const auto counts = MeasureSolveSize(problem);
     const auto& size = counts.tree;
-    if (counts.strategyEntries > gpu::DeviceMemoryBudget() / (2 * sizeof(float)))
+    const auto budget = gpu::DeviceMemoryBudget();
+    if (counts.strategyEntries > budget / (2 * sizeof(float)))
         throw std::runtime_error("Regret and cumulative strategy alone exceed GPU memory; reduce the tree or use CPU");
-    data_ = std::make_shared<const HandTraversalData>(*problem_, problem_->game->Root());
+    data_ = std::make_shared<const HandTraversalData>(problem, problem.game->Root());
     const gpu::Plan plan(*data_);
+    const auto device = plan.DeviceBytes();
+    if (device > budget)
+        throw std::runtime_error("GPU training state and batch scratch exceed available GPU memory");
     state_ = plan.state;
-    const auto fixed = HandTraversal::EstimateStorage(*problem_->game, counts.hands);
+    const auto fixed = HandTraversal::EstimateStorage(*problem.game, counts.hands);
     // Combined host/device allocation estimate, not a claim about available VRAM.
     // Metal retains a copy of the update passes after the temporary upload plan dies.
     const auto host = size.storageBytes + fixed.fixedBytes + plan.passes.size() * sizeof(gpu::Pass);
@@ -25,7 +27,6 @@ GpuDcfrSession::GpuDcfrSession(std::shared_ptr<const SolveProblem> problem) : pr
     const auto staging = std::min(sumsBytes, gpu::kReadbackBytes);
     const auto maxHands = std::max(counts.hands[0], counts.hands[1]);
     const auto evaluationVectors = sizeof(float) * (counts.hands[0] + counts.hands[1] + maxHands);
-    const auto device = plan.DeviceBytes();
     const auto initialization = device + plan.HostBytes();
     const auto checkpointDownload = device + sumsBytes + staging;
     const auto certification = device + sumsBytes + fixed.workspaceBytes + evaluationVectors;
@@ -35,7 +36,7 @@ GpuDcfrSession::GpuDcfrSession(std::shared_ptr<const SolveProblem> problem) : pr
     const auto exportDownload = 2 * sumsBytes + staging;
     const auto exportSnapshot = snapshot + data_->maxActions * maxHands * sizeof(float);
     const auto peak = host + std::max<std::uint64_t>({initialization, checkpointDownload, certification, exportDownload, exportSnapshot});
-    memory_ = {size.logicalNodes, size.topologyNodes, size.traversalNodes, counts.strategyEntries, peak + peak / 8 + 64 * 1024 * 1024, 0};
+    memory_ = MakeMemoryEstimate(counts, peak, 0);
     executor_ = gpu::MakeExecutor(plan);
 }
 
@@ -55,24 +56,15 @@ void GpuDcfrSession::Update(std::size_t player, float positiveDiscount, float av
 
 ExploitabilityMetrics GpuDcfrSession::EvaluateExploitability() const
 {
-    std::array<float, 2> response{};
     auto state = state_;
     state.evaluation = 1;
+    std::array<std::vector<float>, 2> values;
     for (gpu::U32 p = 0; p < 2; ++p)
     {
         state.player = p;
-        const auto values = executor_->RootValues(state);
-        float value = 0.0f, mass = 0.0f;
-        for (std::size_t h = 0; h < values.size(); ++h)
-        {
-            const auto& hand = data_->tables->hands[p][h];
-            const float weight = hand.weight * hand.opponentMass;
-            value += weight * values[h];
-            mass += weight;
-        }
-        response[p] = value / mass;
+        values[p] = executor_->RootValues(state);
     }
-    return {response[0], response[1], (response[0] + response[1]) / 2.0f};
+    return RootExploitability(*data_->tables, values);
 }
 
 ExploitabilityMetrics GpuDcfrSession::EvaluateExploitabilityOnCpu() const

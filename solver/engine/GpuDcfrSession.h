@@ -11,7 +11,7 @@ namespace solver::engine
 class GpuDcfrSession
 {
 public:
-    explicit GpuDcfrSession(std::shared_ptr<const SolveProblem> problem);
+    explicit GpuDcfrSession(const SolveProblem& problem);
     static bool Available();
     const char* DeviceName() const { return executor_->Name(); }
     const MemoryEstimate& Memory() const { return memory_; }
@@ -25,7 +25,6 @@ private:
     StrategySnapshot ExportStrategy() &&;
     TrainingState ReadTrainingState() const { return executor_->DownloadTraining(); }
     void WriteTrainingState(const TrainingState& state);
-    std::shared_ptr<const SolveProblem> problem_;
     std::shared_ptr<const HandTraversalData> data_;
     std::unique_ptr<gpu::Executor> executor_;
     gpu::State state_{};

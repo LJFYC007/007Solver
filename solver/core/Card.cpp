@@ -232,4 +232,11 @@ bool Overlaps(HoleCards hand, const Board& board)
     }
     return false;
 }
+
+std::size_t CardPairIndex(Card first, Card second)
+{
+    const int low = std::min(first.Index(), second.Index());
+    const int high = std::max(first.Index(), second.Index());
+    return static_cast<std::size_t>(high * (high - 1) / 2 + low);
+}
 } // namespace solver::core

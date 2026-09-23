@@ -13,11 +13,11 @@ namespace
 template<typename Visitor>
 void VisitPairs(const ReachCalculator::PlayerOwnReachWeights& own, const core::Board& board, Visitor visit)
 {
-    for (const auto& [first, firstWeight] : own.player0)
+    for (const auto& [first, firstWeight] : own[0])
     {
         if (firstWeight <= 0.0f || core::Overlaps(first, board))
             continue;
-        for (const auto& [second, secondWeight] : own.player1)
+        for (const auto& [second, secondWeight] : own[1])
         {
             if (secondWeight <= 0.0f || core::Overlaps(second, board) || core::Overlaps(first, second))
                 continue;
@@ -135,7 +135,7 @@ ReachCalculator::PlayerOwnReachWeights ReachCalculator::PropagateOwnReach(
 {
     PlayerOwnReachWeights propagatedReach = ownReach;
     const game::GameNode& node = result_.Problem().game->GetNode(nodeId);
-    HandWeights& actingReach = node.State().playerToAct == core::PlayerId::Player0() ? propagatedReach.player0 : propagatedReach.player1;
+    HandWeights& actingReach = propagatedReach[node.State().playerToAct.Index()];
     for (auto& [hand, weight] : actingReach)
     {
         if (core::Overlaps(hand, node.State().board))

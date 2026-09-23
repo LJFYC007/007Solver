@@ -14,15 +14,6 @@ void ValidateWeight(float weight)
 }
 } // namespace
 
-Range::Range(Table exactComboWeights) : handWeights_(std::move(exactComboWeights))
-{
-    for (const auto& [hand, weight] : handWeights_)
-    {
-        static_cast<void>(hand);
-        ValidateWeight(weight);
-    }
-}
-
 Range::Range(const std::vector<std::pair<HoleCards, float>>& exactComboWeights)
 {
     for (const auto& [hand, weight] : exactComboWeights)
@@ -34,12 +25,6 @@ Range::Range(const std::vector<std::pair<HoleCards, float>>& exactComboWeights)
             throw std::runtime_error("Duplicate exact combo in range: " + FormatCard(cards[0]) + " " + FormatCard(cards[1]));
         }
     }
-}
-
-float Range::GetWeight(HoleCards hand) const
-{
-    const auto handIt = handWeights_.find(hand);
-    return handIt == handWeights_.end() ? 0.0f : handIt->second;
 }
 
 RangeSet::RangeSet(Range player0, Range player1) : ranges_{std::move(player0), std::move(player1)} {}

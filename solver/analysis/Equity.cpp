@@ -11,9 +11,9 @@ EquityReport AnalysisSession::QueryEquity(game::NodeId nodeId)
     const auto board = problem.game->GetNode(nodeId).State().board;
     const auto& reach = reachCalculator_.ReachFor(nodeId);
     EquityReport report{nodeId};
-    const std::array<const ReachCalculator::HandWeights*, 2> weights{&reach.ownReachWeights.player0, &reach.ownReachWeights.player1};
+    const auto& weights = reach.ownReachWeights;
     for (std::size_t player = 0; player < 2; ++player)
-        for (const auto& [hand, weight] : *weights[player])
+        for (const auto& [hand, weight] : weights[player])
             if (weight > 0.0f && !core::Overlaps(hand, board))
                 report.players[player].hands.push_back({hand, weight, std::nullopt});
     if (!reachCalculator_.CommonBlockers(reach, board))
@@ -25,7 +25,7 @@ EquityReport AnalysisSession::QueryEquity(game::NodeId nodeId)
     std::array<std::vector<float>, 2> ownReach;
     for (std::size_t player = 0; player < 2; ++player)
         for (const auto& hand : tables.hands[player])
-            ownReach[player].push_back(weights[player]->at(hand.cards));
+            ownReach[player].push_back(weights[player].at(hand.cards));
 
     for (std::size_t player = 0; player < 2; ++player)
     {

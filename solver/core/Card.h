@@ -2,7 +2,6 @@
 
 #include <array>
 #include <cstddef>
-#include <functional>
 #include <string>
 #include <vector>
 
@@ -36,14 +35,7 @@ public:
     friend bool operator<(HoleCards left, HoleCards right) { return left.packed_ < right.packed_; }
 
 private:
-    friend struct HoleCardsHash;
-
     int packed_;
-};
-
-struct HoleCardsHash
-{
-    std::size_t operator()(HoleCards cards) const noexcept { return std::hash<int>{}(cards.packed_); }
 };
 
 class Board
@@ -81,4 +73,6 @@ bool Contains(HoleCards hand, Card card);
 bool Contains(const Board& board, Card card);
 bool Overlaps(HoleCards first, HoleCards second);
 bool Overlaps(HoleCards hand, const Board& board);
+// Order-independent index of two distinct cards, below 52 * 51 / 2.
+std::size_t CardPairIndex(Card first, Card second);
 } // namespace solver::core

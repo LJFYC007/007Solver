@@ -32,7 +32,6 @@ struct HandBoardData
         std::vector<std::uint16_t> upperBounds;
         std::vector<std::uint8_t> card0;
         std::vector<std::uint8_t> card1;
-        std::vector<std::uint64_t> masks;
     };
 
     std::shared_ptr<const game::CompiledGame> game;
@@ -43,5 +42,6 @@ struct HandBoardData
     std::array<int, kMaxHands> rowsByRunout;
 
     HandBoardData(const SolveProblem& problem, game::NodeId root);
+    int RankRow(const core::Board& river) const { return rowsByRunout[core::CardPairIndex(river.CardAt(3), river.CardAt(4))]; }
 };
 } // namespace solver::engine

@@ -5,7 +5,6 @@
 #include "engine/StrategySnapshot.h"
 #include <array>
 #include <cstdint>
-#include <memory>
 #include <vector>
 
 namespace solver::engine
@@ -14,7 +13,7 @@ class CpuDcfrSession
 {
 public:
     // Zero workers selects the OpenMP runtime's default team size.
-    explicit CpuDcfrSession(std::shared_ptr<const SolveProblem> problem, int workers = 0);
+    explicit CpuDcfrSession(const SolveProblem& problem, int workers = 0);
 
     // Configured workspace/team limit; the OpenMP runtime may use fewer threads.
     int WorkerCount() const { return workerCount_; }
@@ -26,7 +25,6 @@ private:
     StrategySnapshot ExportStrategy() &&;
     TrainingState ReadTrainingState() const { return {regrets_, strategySums_}; }
     void WriteTrainingState(const TrainingState& state);
-    std::shared_ptr<const SolveProblem> problem_;
     const HandTraversal traversal_;
     std::array<std::vector<float>, 2> divisors_;
     // Action-major rows, with a fixed root-hand stride for the acting player.

@@ -7,31 +7,34 @@ namespace solver::engine
 {
 namespace
 {
-void CheckProblem(const SolveProblem& problem, const StrategySnapshot& strategy)
-{
-    if (!problem.game || problem.game.get() != &strategy.Game())
-        throw std::invalid_argument("Evaluation strategy belongs to a different game");
-}
-
 ExploitabilityMetrics EvaluateBestResponses(const HandTraversal& traversal, const StrategySnapshot* strategy, const float* strategySums)
+{
+    const auto values = [&](std::size_t player)
+    {
+        // At the game root, opponent reach is the range weight and divisors are compatible opponent masses.
+        std::vector<float> reach, divisors;
+        for (const auto& hand : traversal.hands[1 - player])
+            reach.push_back(hand.weight);
+        for (const auto& hand : traversal.hands[player])
+            divisors.push_back(hand.opponentMass);
+        return strategy ? traversal.EvaluateSnapshot(*strategy, player, reach, divisors, HandTraversal::Evaluation::BestResponse)
+                        : traversal.EvaluateAverageBestResponse(strategySums, player, reach, divisors);
+    };
+    return RootExploitability(*traversal.Data().tables, {values(0), values(1)});
+}
+} // namespace
+
+ExploitabilityMetrics RootExploitability(const HandBoardData& tables, const std::array<std::vector<float>, 2>& bestResponseValues)
 {
     std::array<float, 2> bestResponses{};
     for (std::size_t player = 0; player < 2; ++player)
     {
-        std::vector<float> reach;
-        if (strategy)
-            reach = traversal.OpponentReachAtRoot(*strategy, 1 - player);
-        else
-            for (const auto& hand : traversal.hands[1 - player])
-                reach.push_back(hand.weight);
-        const auto divisors = traversal.CompatibleMasses(player, reach.data());
-        const auto values = strategy
-                                ? traversal.EvaluateSnapshot(*strategy, player, reach, divisors, HandTraversal::Evaluation::BestResponse)
-                                : traversal.EvaluateAverageBestResponse(strategySums, player, reach, divisors);
+        const auto& values = bestResponseValues[player];
         float totalValue = 0.0f, totalMass = 0.0f;
         for (std::size_t hand = 0; hand < values.size(); ++hand)
         {
-            const float mass = traversal.hands[player][hand].weight * divisors[hand];
+            const auto& source = tables.hands[player][hand];
+            const float mass = source.weight * source.opponentMass;
             totalValue += mass * values[hand];
             totalMass += mass;
         }
@@ -39,11 +42,11 @@ ExploitabilityMetrics EvaluateBestResponses(const HandTraversal& traversal, cons
     }
     return {bestResponses[0], bestResponses[1], (bestResponses[0] + bestResponses[1]) / 2.0f};
 }
-} // namespace
 
 ExploitabilityMetrics EvaluateExploitability(const SolveProblem& problem, const StrategySnapshot& strategy)
 {
-    CheckProblem(problem, strategy);
+    if (!problem.game || problem.game.get() != &strategy.Game())
+        throw std::invalid_argument("Evaluation strategy belongs to a different game");
     return EvaluateBestResponses(HandTraversal(problem, problem.game->Root()), &strategy, nullptr);
 }
 
@@ -52,11 +55,7 @@ ExploitabilityMetrics EvaluateAverageStrategy(const HandTraversal& traversal, co
     return EvaluateBestResponses(traversal, nullptr, strategySums);
 }
 
-NodeStrategyEvaluator::NodeStrategyEvaluator(const SolveProblem& problem, const StrategySnapshot& strategy)
-    : problem_(problem), strategy_(strategy)
-{
-    CheckProblem(problem_, strategy_);
-}
+NodeStrategyEvaluator::NodeStrategyEvaluator(const SolveResult& result) : problem_(result.Problem()), strategy_(result.Strategy()) {}
 
 std::map<core::HoleCards, float> NodeStrategyEvaluator::Evaluate(game::NodeId node, core::PlayerId player)
 {

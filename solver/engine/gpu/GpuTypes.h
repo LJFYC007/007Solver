@@ -33,7 +33,16 @@ enum BufferIndex : U32
     kDataBufferCount = StateBuffer,
     kBufferCount = PassBuffer,
 };
+// Each player's card list starts with 52 card offsets and an end offset into the
+// cards buffer; hand indices follow both players' offsets.
+enum : U32
+{
+    kCardListStride = 53,
+    kCardListHeader = 2 * kCardListStride,
+    kNoIndex = 0xffffffffu,
+};
 
+// Also the CPU traversal node kind. Fold, Showdown and ForcedRunout are leaves.
 enum class NodeKind : U32
 {
     Decision,

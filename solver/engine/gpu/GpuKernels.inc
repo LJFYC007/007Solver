@@ -51,6 +51,12 @@ using namespace solver::engine::gpu;
 #define GPU_STATE const State state = *statePointer;
 #endif
 
+// Regret matching: positive is the hand's positive-regret sum over all actions.
+GPU_INLINE float MatchedProbability(float regret, float positive, U32 actions)
+{
+    return positive > 0.0f ? (regret > 0.0f ? regret : 0.0f) / positive : 1.0f / float(actions);
+}
+
 // One parent/hand normalizes its entry policy once for all children. A zero
 // ActionCount keeps the general path; small decisions retain entry data.
 template<U32 ActionCount>
@@ -95,7 +101,7 @@ GPU_INLINE void ReachNode(
         {
             const U64 entry = n.strategy + U64(a) * count + h;
             const float x = ActionCount ? entries[a] : state.evaluation ? sums[entry] : regrets[entry];
-            child *= positive > 0.0f ? (x > 0.0f ? x : 0.0f) / positive : 1.0f / float(actions);
+            child *= MatchedProbability(x, positive, actions);
         }
         scratch[U64(ActionCount ? slots[a] : childSlots[n.edge + a]) * total + base + h] = child;
     }
@@ -120,7 +126,7 @@ GPU_ENTRY(Reach)(GPU_ARGUMENTS)
         if (p == state.player && state.evaluation)
             return;
         const U32 base = p ? state.hands[0] : 0;
-        if (n.parent == 0xffffffffu)
+        if (n.parent == kNoIndex)
             value = p == state.player ? 1.0f : hands[base + h].weight;
         else
         {
@@ -258,7 +264,7 @@ GPU_ENTRY(Terminal)(GPU_ARGUMENTS GPU_GROUP_TAIL)
         for (U32 card = local; card < 52; card += groupWidth)
         {
             float mass = 0.0f;
-            for (U32 entry = cards[opponent * 53 + card]; entry < cards[opponent * 53 + card + 1]; ++entry)
+            for (U32 entry = cards[opponent * kCardListStride + card]; entry < cards[opponent * kCardListStride + card + 1]; ++entry)
                 mass += reach[cards[entry]];
             prefix[1 + card] = mass;
         }
@@ -267,9 +273,9 @@ GPU_ENTRY(Terminal)(GPU_ARGUMENTS GPU_GROUP_TAIL)
     if (n.kind == NodeKind::Showdown)
         for (U32 card = local; card < 52; card += groupWidth)
         {
-            const U32 begin = cards[opponent * 53 + card], end = cards[opponent * 53 + card + 1];
-            GPU_DEVICE const unsigned short* sorted = ranks + U64(n.rankRow) * 3 * total + total + (begin - 106);
-            GPU_SHARED float* run = blockers + (begin - cards[opponent * 53]) + card;
+            const U32 begin = cards[opponent * kCardListStride + card], end = cards[opponent * kCardListStride + card + 1];
+            GPU_DEVICE const unsigned short* sorted = ranks + U64(n.rankRow) * 3 * total + total + (begin - kCardListHeader);
+            GPU_SHARED float* run = blockers + (begin - cards[opponent * kCardListStride]) + card;
             float sum = 0.0f;
             run[0] = 0.0f;
             for (U32 k = 0; k < end - begin; ++k)
@@ -330,8 +336,8 @@ GPU_ENTRY(Terminal)(GPU_ARGUMENTS GPU_GROUP_TAIL)
         for (U32 c = 0; c < 2; ++c)
         {
             const U32 card = c == 0 ? mine.card0 : mine.card1;
-            const U32 begin = cards[opponent * 53 + card], length = cards[opponent * 53 + card + 1] - begin;
-            GPU_SHARED const float* run = blockers + (begin - cards[opponent * 53]) + card;
+            const U32 begin = cards[opponent * kCardListStride + card], length = cards[opponent * kCardListStride + card + 1] - begin;
+            GPU_SHARED const float* run = blockers + (begin - cards[opponent * kCardListStride]) + card;
             const U32 below = (positions >> (16 * c)) & 0xffu, through = (positions >> (16 * c + 8)) & 0xffu;
             blocked += run[length];
             blockedWins += run[below];
@@ -405,7 +411,7 @@ GPU_INLINE void BackupNode(
         else if (acting)
         {
             const float r = ActionCount ? entryRegrets[a] : regrets[n.strategy + U64(a) * count + h];
-            const float probability = positive > 0.0f ? (r > 0.0f ? r : 0.0f) / positive : 1.0f / float(actions);
+            const float probability = MatchedProbability(r, positive, actions);
             if (ActionCount)
                 probabilities[a] = probability;
             value += child * probability;
@@ -419,9 +425,7 @@ GPU_INLINE void BackupNode(
         {
             const U64 entry = n.strategy + U64(a) * count + h;
             const float old = ActionCount ? entryRegrets[a] : regrets[entry];
-            const float probability = ActionCount       ? probabilities[a]
-                                      : positive > 0.0f ? (old > 0.0f ? old : 0.0f) / positive
-                                                        : 1.0f / float(actions);
+            const float probability = ActionCount ? probabilities[a] : MatchedProbability(old, positive, actions);
             const float child = ActionCount ? childValues[a] : values[U64(childSlots[n.edge + a]) * state.stride + h];
             const float r = old + (child - value);
             regrets[entry] = r * (r > 0.0f ? state.positiveDiscount : 0.5f);
@@ -485,6 +489,7 @@ GPU_ENTRY(Outcomes)(GPU_ARGUMENTS)
                 if (first == second || (excluded & (U64(1) << second)))
                     continue;
                 const U32 high = first > second ? first : second, low = first < second ? first : second;
+                // Matches core::CardPairIndex.
                 const int rankRow = runouts[high * (high - 1) / 2 + low];
                 const U64 offset = U64(rankRow) * 3 * (state.hands[0] + state.hands[1]);
                 const U32 a = ranks[offset + h0], b = ranks[offset + state.hands[0] + h1];

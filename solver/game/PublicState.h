@@ -21,6 +21,7 @@ struct PublicState
 
     core::Chips Stack(core::PlayerId player) const { return stacks[player.Index()]; }
     core::Chips Contribution(core::PlayerId player) const { return streetContributions[player.Index()]; }
+    bool HasAllInPlayer() const { return stacks[0] == core::Chips{} || stacks[1] == core::Chips{}; }
 };
 
 core::Chips AmountToCall(const PublicState& state);

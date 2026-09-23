@@ -24,6 +24,8 @@ struct SolveSize
     std::uint64_t infoSets = 0;
 };
 SolveSize MeasureSolveSize(const SolveProblem& problem);
+// Adds headroom for allocator/runtime costs to a combined allocation peak.
+MemoryEstimate MakeMemoryEstimate(const SolveSize& size, std::uint64_t peakBytes, int workers);
 
 int CpuWorkerCount(int requested = 0);
 // Conservative solve/export/evaluation peak, before allocating the active layout or

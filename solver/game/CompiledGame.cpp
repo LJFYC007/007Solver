@@ -13,13 +13,6 @@ constexpr std::size_t kHandCount = 52 * 51 / 2;
 constexpr std::size_t kRunoutCount = 49 * 48 / 2;
 // SKPokerEval ranks are at most 7462; blocked slots must never compare as real ranks.
 constexpr std::uint16_t kBlockedRank = std::numeric_limits<std::uint16_t>::max();
-
-std::size_t CardPairIndex(core::Card first, core::Card second)
-{
-    const int low = std::min(first.Index(), second.Index());
-    const int high = std::max(first.Index(), second.Index());
-    return static_cast<std::size_t>(high * (high - 1) / 2 + low);
-}
 } // namespace
 
 GameNode::GameNode(
@@ -43,7 +36,7 @@ const TerminalOutcome& GameNode::Terminal() const
 
 bool GameNode::IsForcedRunout() const
 {
-    return Kind() == NodeKind::Chance && (state_.stacks[0] == core::Chips{} || state_.stacks[1] == core::Chips{});
+    return Kind() == NodeKind::Chance && state_.HasAllInPlayer();
 }
 
 BettingEdge GameNode::GetBettingEdge(std::size_t index) const
@@ -108,7 +101,7 @@ CompiledGame::CompiledGame(GameSpec spec, std::vector<BettingTopologyNode> topol
 
             // Only the rank row is shared by reversed runouts; game histories keep their original order.
             const core::Board board = spec_.initialBoard.Append(first).Append(second);
-            showdownRowOffsets_[CardPairIndex(first, second)] = rowOffset;
+            showdownRowOffsets_[core::CardPairIndex(first, second)] = rowOffset;
             for (std::size_t handIndex = 0; handIndex < hands.size(); ++handIndex)
             {
                 if (!core::Overlaps(hands[handIndex], board))
@@ -121,9 +114,9 @@ CompiledGame::CompiledGame(GameSpec spec, std::vector<BettingTopologyNode> topol
 
 int CompiledGame::ShowdownRank(const core::Board& board, core::HoleCards hand) const
 {
-    const std::size_t rowOffset = showdownRowOffsets_[CardPairIndex(board.CardAt(3), board.CardAt(4))];
+    const std::size_t rowOffset = showdownRowOffsets_[core::CardPairIndex(board.CardAt(3), board.CardAt(4))];
     const auto cards = hand.Cards();
-    const std::uint16_t rank = showdownRanks_[rowOffset + CardPairIndex(cards[0], cards[1])];
+    const std::uint16_t rank = showdownRanks_[rowOffset + core::CardPairIndex(cards[0], cards[1])];
     if (rank == kBlockedRank)
         throw std::runtime_error("Private hand overlaps the public board");
     return rank;

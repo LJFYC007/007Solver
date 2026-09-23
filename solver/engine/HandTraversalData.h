@@ -2,6 +2,7 @@
 
 #include "engine/HandBoardData.h"
 #include "engine/StrategySnapshot.h"
+#include "engine/gpu/GpuTypes.h"
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -15,10 +16,12 @@ struct HandTraversalData
     static constexpr std::size_t kMaxHands = HandBoardData::kMaxHands;
     using Hand = HandBoardData::Hand;
     using RankOrder = HandBoardData::RankOrder;
+    // The GPU layout uses the same kinds. Forced runouts are leaves; only showdowns have a rank row.
+    using Kind = gpu::NodeKind;
     struct Node
     {
         game::NodeId id;
-        game::NodeKind kind;
+        Kind kind;
         std::size_t actor;
         std::size_t childOffset;
         std::size_t childCount;
@@ -26,8 +29,9 @@ struct HandTraversalData
         std::uint64_t boardMask;
         core::Board board;
         int rankRow = -1;
-        bool forcedRunout = false;
         std::array<float, 3> utilities{};
+
+        bool IsLeaf() const { return kind != Kind::Decision && kind != Kind::Chance; }
     };
     std::shared_ptr<const HandBoardData> tables;
     std::vector<Node> nodes;
@@ -60,7 +64,6 @@ struct HandTraversalData
     // Counts are exact out of C(45, 2) legal runouts, independent of reach/payoffs.
     std::vector<FlopOutcomes> flopOutcomes_;
 
-    std::shared_ptr<const game::CompiledGame> game;
     std::size_t infoSetCount = 0;
 
     HandTraversalData(const SolveProblem& problem, game::NodeId root, bool prepareTraining = false);

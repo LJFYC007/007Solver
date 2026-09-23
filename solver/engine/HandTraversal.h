@@ -89,6 +89,7 @@ public:
     ) const;
 
 private:
+    using Kind = HandTraversalData::Kind;
     using RankOrder = HandTraversalData::RankOrder;
     using ChanceGroup = HandTraversalData::ChanceGroup;
     using ChanceTask = HandTraversalData::ChanceTask;
@@ -113,11 +114,10 @@ private:
     const std::vector<std::uint32_t>& children;
     const std::vector<std::uint64_t>& dealtCardMasks;
     const std::vector<std::array<RankOrder, 2>>& rankRows;
-    const std::array<int, kMaxHands>& rowsByRunout;
     const std::size_t& maxDepth;
 
-    // Only the entry points construct policy combinations. Every read-only path
-    // uses exact runout accumulation, including checkpoints on a training layout.
+    // Only the entry points construct policy combinations. Only training uses the flop
+    // runout cache; read-only paths, including checkpoints, use exact runout accumulation.
     struct WalkContext
     {
         std::size_t player;
@@ -126,16 +126,18 @@ private:
         const float* strategySums = nullptr;
         TrainState* train = nullptr;
         bool bestResponse = false;
-        bool useRunoutCache = false;
     };
     std::vector<float> EvaluateHands(const WalkContext& context, const std::vector<float>& opponentReach) const;
-    // Required entry policies stay in a row per depth. Training supplies a
+    // Required entry policies stay in a row per depth. Each player's reach points
+    // at the row written by the nearest ancestor that changed it, which rewrites
+    // that row only after the subtree reading it finishes. Training supplies a
     // cursor only when consuming completed chance tasks in preorder.
     void Walk(
         std::uint32_t node,
         const WalkContext& context,
         Workspace& workspace,
         std::size_t depth,
+        std::array<const float*, 2> reach,
         float* values,
         std::size_t* parallelCursor = nullptr
     ) const;
@@ -145,7 +147,8 @@ private:
 
     void MatchRegrets(const Node& node, const TrainState& train, float* current) const;
     void EvaluateFlopRunout(const Node& node, std::size_t player, const float* opponentReach, const float* divisors, float* values) const;
-    void PropagateChild(
+    // Returns parent at another player's decision, whose reach the child shares; otherwise writes and returns child.
+    const float* PropagateChild(
         std::uint32_t node,
         std::size_t action,
         std::size_t player,
@@ -155,13 +158,15 @@ private:
         float* child
     ) const;
     void EvaluateTerminal(const Node& node, std::size_t player, const float* opponentReach, const float* divisors, float* values) const;
+    // Utilities are win/tie/loss for player; recurses over undealt cards to river showdowns.
     void EvaluateRunout(
-        Node node,
+        const std::array<float, 3>& utilities,
+        const core::Board& board,
+        std::uint64_t boardMask,
         std::size_t player,
         const float* opponentReach,
         const float* divisors,
-        float* values,
-        bool useCache
+        float* values
     ) const;
 };
 } // namespace solver::engine

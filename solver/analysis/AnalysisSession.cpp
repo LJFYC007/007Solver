@@ -9,7 +9,7 @@
 namespace solver::analysis
 {
 AnalysisSession::AnalysisSession(engine::SolveResult result)
-    : result_(std::move(result)), reachCalculator_(result_), nodeEvaluator_(result_.Problem(), result_.Strategy())
+    : result_(std::move(result)), reachCalculator_(result_), nodeEvaluator_(result_)
 {}
 
 NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
@@ -22,12 +22,10 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
     };
 
     const auto& currentReach = reachCalculator_.ReachFor(nodeId);
-    for (const auto& [hand, weight] : currentReach.ownReachWeights.player0)
-        if (!core::Overlaps(hand, node.State().board))
-            report.state.rangeCombos[0] += weight;
-    for (const auto& [hand, weight] : currentReach.ownReachWeights.player1)
-        if (!core::Overlaps(hand, node.State().board))
-            report.state.rangeCombos[1] += weight;
+    for (std::size_t player = 0; player < 2; ++player)
+        for (const auto& [hand, weight] : currentReach.ownReachWeights[player])
+            if (!core::Overlaps(hand, node.State().board))
+                report.state.rangeCombos[player] += weight;
 
     if (node.Kind() == game::NodeKind::Terminal)
     {
@@ -56,11 +54,7 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
     const ReachCalculator::HandWeights marginalReachMasses =
         reachCalculator_.BuildMarginalReachMasses(currentReach, node.State().board, player);
     report.hands = BuildHandReports(
-        nodeId,
-        result_.Problem().ranges.For(player),
-        marginalReachMasses,
-        player == core::PlayerId::Player0() ? currentReach.ownReachWeights.player0 : currentReach.ownReachWeights.player1,
-        player
+        nodeId, result_.Problem().ranges.For(player), marginalReachMasses, currentReach.ownReachWeights[player.Index()], player
     );
 
     for (std::size_t edgeIndex = 0; edgeIndex < node.BettingEdgeCount(); ++edgeIndex)

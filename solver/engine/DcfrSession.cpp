@@ -13,13 +13,13 @@ DcfrSession::DcfrSession(std::shared_ptr<const SolveProblem> problem, ComputeDev
         throw std::invalid_argument("DCFR session requires a solve problem");
     if (device == ComputeDevice::Gpu || (device == ComputeDevice::Auto && GpuDcfrSession::Available()))
     {
-        gpu_ = std::make_unique<GpuDcfrSession>(std::move(problem));
+        gpu_ = std::make_unique<GpuDcfrSession>(*problem);
         memory_ = gpu_->Memory();
     }
     else
     {
         memory_ = EstimateCpuMemory(*problem, workers);
-        cpu_ = std::make_unique<CpuDcfrSession>(std::move(problem), workers);
+        cpu_ = std::make_unique<CpuDcfrSession>(*problem, workers);
     }
 }
 void DcfrSession::Run(int iterations, const std::function<void(int)>& callback)

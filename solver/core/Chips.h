@@ -42,4 +42,9 @@ private:
 
     std::int32_t rawUnits_ = 0;
 };
+
+constexpr float ToChipUnits(Chips chips)
+{
+    return static_cast<float>(chips.Raw()) / Chips::kUnitsPerChip;
+}
 } // namespace solver::core

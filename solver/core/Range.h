@@ -15,10 +15,8 @@ public:
     using Table = std::map<HoleCards, float>;
 
     Range() = default;
-    explicit Range(Table exactComboWeights);
     explicit Range(const std::vector<std::pair<HoleCards, float>>& exactComboWeights);
 
-    float GetWeight(HoleCards hand) const;
     const Table& Entries() const { return handWeights_; }
 
 private:

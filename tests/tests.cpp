@@ -115,7 +115,7 @@ void ExpectNodesNear(
     std::size_t mismatches = 0;
     for (const auto& node : layout.nodes)
     {
-        if (node.kind != game::NodeKind::Decision)
+        if (node.kind != engine::HandTraversalData::Kind::Decision)
             continue;
         // Low-reach nodes hold tiny entries, so scale by each node's largest CPU entry.
         // Rounding stays below 1e-4 of that scale; update bugs move entries far more.

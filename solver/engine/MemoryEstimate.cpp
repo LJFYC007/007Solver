@@ -30,6 +30,19 @@ SolveSize MeasureSolveSize(const SolveProblem& problem)
     return size;
 }
 
+MemoryEstimate MakeMemoryEstimate(const SolveSize& size, std::uint64_t peakBytes, int workers)
+{
+    const auto& tree = size.tree;
+    return {
+        tree.logicalNodes,
+        tree.topologyNodes,
+        tree.traversalNodes,
+        size.strategyEntries,
+        peakBytes + peakBytes / 8 + 64 * 1024 * 1024,
+        workers
+    };
+}
+
 MemoryEstimate EstimateCpuMemory(const SolveProblem& problem, int workers)
 {
     const auto counts = MeasureSolveSize(problem);
@@ -55,6 +68,6 @@ MemoryEstimate EstimateCpuMemory(const SolveProblem& problem, int workers)
     const std::uint64_t exportPeak = snapshot + sizeof(float) * size.maxActions * maxHands + storage.flopOutcomesBytes;
     const std::uint64_t evaluationPeak = snapshot + storage.workspaceBytes + rootVectors;
     const std::uint64_t peak = size.storageBytes + storage.fixedBytes + std::max({checkpointPeak, exportPeak, evaluationPeak});
-    return {size.logicalNodes, size.topologyNodes, size.traversalNodes, entries, peak + peak / 8 + 64 * 1024 * 1024, count};
+    return MakeMemoryEstimate(counts, peak, count);
 }
 } // namespace solver::engine

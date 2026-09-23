@@ -2,6 +2,7 @@
 
 #include "core/Range.h"
 #include "engine/SolveResult.h"
+#include <array>
 #include <cstddef>
 #include <map>
 #include <optional>
@@ -13,12 +14,8 @@ class ReachCalculator
 {
 public:
     using HandWeights = std::map<core::HoleCards, float>;
-
-    struct PlayerOwnReachWeights
-    {
-        HandWeights player0;
-        HandWeights player1;
-    };
+    // Indexed by player.
+    using PlayerOwnReachWeights = std::array<HandWeights, 2>;
 
     struct NodeReach
     {

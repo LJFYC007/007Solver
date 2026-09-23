@@ -13,11 +13,6 @@ namespace
 {
 using Json = nlohmann::basic_json<std::map, std::vector, std::string, bool, std::int64_t, std::uint64_t, float>;
 
-float ToChipUnits(core::Chips chips)
-{
-    return static_cast<float>(chips.Raw()) / core::Chips::kUnitsPerChip;
-}
-
 std::string PlayerCode(core::PlayerId player)
 {
     return player == core::PlayerId::Player0() ? "hero" : "villain";
@@ -113,12 +108,12 @@ Json BuildNodeJson(const analysis::NodeReport& node)
          {
              {"street", StreetCode(node.state.street)},
              {"board", FormatBoard(node.state.board)},
-             {"pot", ToChipUnits(node.state.pot)},
+             {"pot", core::ToChipUnits(node.state.pot)},
              {"rangeCombos", {{"hero", node.state.rangeCombos[0]}, {"villain", node.state.rangeCombos[1]}}},
              {"stacks",
               {
-                  {"hero", ToChipUnits(node.state.stacks[0])},
-                  {"villain", ToChipUnits(node.state.stacks[1])},
+                  {"hero", core::ToChipUnits(node.state.stacks[0])},
+                  {"villain", core::ToChipUnits(node.state.stacks[1])},
               }},
          }},
     };
@@ -175,8 +170,8 @@ Json BuildNodeJson(const analysis::NodeReport& node)
     {
         jsonNode["actions"].push_back({
             {"kind", ActionCode(action)},
-            {"amountTo", ToChipUnits(action.amountTo)},
-            {"chipsCommitted", ToChipUnits(action.chipsCommitted)},
+            {"amountTo", core::ToChipUnits(action.amountTo)},
+            {"chipsCommitted", core::ToChipUnits(action.chipsCommitted)},
             {"isAllIn", action.isAllIn},
             {"nextNodeId", action.nextNodeId.Value()},
         });
