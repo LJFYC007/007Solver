@@ -40,6 +40,8 @@ Newest first. One entry per recorded run: tested commit, results, triage, tests 
 - Catalog parity is within 1.1e-5 of node scale.
 - The benchmark measured 2.61 updates/s at 0.0107% accuracy, but it overlapped harness compiles. The clean measurement from earlier in the day is 3.0 updates/s.
 
+**Routine:** `trig_01JHuqTskJ3FtSCP2HLfWHQK` was created: daily at 18:00 UTC, a fresh session per firing (see [README.md](README.md#schedule)). It was fired manually once to verify the skip path; the result is recorded below.
+
 **Independent review of the harness:** it found that replayed lane schedules can't expose overlapping lane scratch. [LaneCheck.h](gpu/LaneCheck.h) now proves the two-lane schedule conflict-free:
 
 | Input | Unordered pass pairs per player | Conflicts |

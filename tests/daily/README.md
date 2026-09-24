@@ -27,6 +27,13 @@ Read this file first, then [BACKLOG.md](BACKLOG.md) and the latest [JOURNAL.md](
 
 For harness development, use `run.py --quick` (skips the slowest stages) or `--only '<regex>'`. Neither records state. `--no-record` suppresses recording for a complete run.
 
+## Schedule
+
+- **Trigger:** routine `trig_01JHuqTskJ3FtSCP2HLfWHQK` ("007Solver daily check") fires at `0 18 * * *` UTC, which is 02:00 in the owner's UTC+8. Each firing starts a **fresh** cloud session with push notifications.
+- **Why fresh sessions:** waking one long-lived session would re-read its whole history every day, even to skip.
+- **Continuity:** a fresh session has no repository attached and no memory. Its prompt attaches the repository with `add_repo`, runs the one-command skip check against `state.json` on this branch, and otherwise follows this README. These files are the only memory between days, so keep them current.
+- **Changes:** change the prompt or schedule with the routine tools (`update_trigger`) rather than recreating the routine, which would lose its run history.
+
 ## Stages
 
 | Stage | Verifies |
