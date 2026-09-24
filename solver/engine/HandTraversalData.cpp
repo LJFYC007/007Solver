@@ -65,6 +65,8 @@ HandTraversalData::HandTraversalData(std::shared_ptr<const HandBoardData> tables
                 }
                 if (kind == Kind::Showdown)
                     node.rankRow = this->tables->RankRow(state.board);
+                else
+                    runoutRows = std::max(runoutRows, RunoutRow(node) + 1);
             }
         }
         const auto index = static_cast<std::uint32_t>(nodes.size());
@@ -87,10 +89,7 @@ HandTraversalData::HandTraversalData(std::shared_ptr<const HandBoardData> tables
     if (prepareTraining)
     {
         PrepareChanceTasks();
-        if (std::any_of(
-                nodes.begin(), nodes.end(), [](const Node& node) { return node.kind == Kind::ForcedRunout && node.board.CardCount() == 3; }
-            ))
-            PrepareFlopRunout();
+        PrepareRunoutOutcomes();
     }
 }
 
@@ -108,22 +107,45 @@ void HandTraversalData::PrepareChanceTasks()
     );
 }
 
-void HandTraversalData::PrepareFlopRunout()
+void HandTraversalData::PrepareRunoutOutcomes()
 {
+    if (!runoutRows)
+        return;
     const auto& hands = tables->hands;
     const auto& masks = tables->handMasks;
-    flopOutcomes_.resize(hands[0].size() * hands[1].size());
-    for (const auto& ranks : tables->rankRows)
-        for (std::size_t first = 0; first < ranks[0].hands.size(); ++first)
-            for (std::size_t second = 0; second < ranks[1].hands.size(); ++second)
-            {
-                const auto hand0 = ranks[0].hands[first], hand1 = ranks[1].hands[second];
-                if (masks[0][hand0] & masks[1][hand1])
-                    continue;
-                auto& outcomes = flopOutcomes_[hand0 * hands[1].size() + hand1];
-                outcomes.wins += ranks[0].ranks[first] > ranks[1].ranks[second];
-                outcomes.losses += ranks[0].ranks[first] < ranks[1].ranks[second];
-            }
+    const std::size_t pairs = hands[0].size() * hands[1].size();
+    runoutOutcomes_.assign(2 * runoutRows * pairs, 0);
+    // Each rank row is one unordered pair of undealt cards: a runout of the flop row and,
+    // with either card as the turn, a river of that card's turn row.
+    for (int high = 0; high < 52; ++high)
+        for (int low = 0; low < high; ++low)
+        {
+            const int row = tables->rowsByRunout[core::CardPairIndex(core::Card(high), core::Card(low))];
+            if (row < 0)
+                continue;
+            std::uint32_t* targets[3] = {runoutOutcomes_.data()};
+            std::size_t targetCount = 1;
+            for (const int turn : {high, low})
+                if (static_cast<std::size_t>(turn) + 1 < runoutRows)
+                    targets[targetCount++] = runoutOutcomes_.data() + (static_cast<std::size_t>(turn) + 1) * pairs;
+            const auto& ranks = tables->rankRows[row];
+            for (std::size_t first = 0; first < ranks[0].hands.size(); ++first)
+                for (std::size_t second = 0; second < ranks[1].hands.size(); ++second)
+                {
+                    const auto hand0 = ranks[0].hands[first], hand1 = ranks[1].hands[second];
+                    if (masks[0][hand0] & masks[1][hand1])
+                        continue;
+                    const std::uint32_t outcome = (ranks[0].ranks[first] > ranks[1].ranks[second] ? 1u : 0u) |
+                                                  (ranks[0].ranks[first] < ranks[1].ranks[second] ? 1u << 16 : 0u);
+                    for (std::size_t target = 0; target < targetCount; ++target)
+                        targets[target][hand0 * hands[1].size() + hand1] += outcome;
+                }
+        }
+    std::uint32_t* transposed = runoutOutcomes_.data() + runoutRows * pairs;
+    for (std::size_t row = 0; row < runoutRows; ++row)
+        for (std::size_t hand0 = 0; hand0 < hands[0].size(); ++hand0)
+            for (std::size_t hand1 = 0; hand1 < hands[1].size(); ++hand1)
+                transposed[row * pairs + hand1 * hands[0].size() + hand0] = runoutOutcomes_[row * pairs + hand0 * hands[1].size() + hand1];
 }
 
 StrategySnapshot HandTraversalData::ExportStrategy(std::vector<float> sums) const

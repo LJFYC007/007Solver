@@ -23,7 +23,7 @@ enum BufferIndex : U32
     RunoutsBuffer,
     OrderBuffer,
     CardsBuffer,
-    OutcomesBuffer,
+    OutcomesBuffer, // runout win/loss counts per hand pair: player-0-major rows, then player-1-major copies
     RegretsBuffer,
     SumsBuffer,
     ScratchBuffer,
@@ -42,16 +42,9 @@ enum : U32
     kCardListStride = 53,
     kCardListHeader = 2 * kCardListStride,
     kGroupFlags = 8, // leading Terminal group memory floats for the group-wide reach test: one per SIMD group
+    kLaneCount = 3,  // Pass::lane values: two alternating leaf-batch lanes, then the spine
     kNoIndex = 0xffffffffu,
 };
-// Pass::sync bits ordering the two lanes; a sequential executor may ignore them.
-enum : U32
-{
-    kForkAfter = 1,  // lane 1 work emitted later depends on this lane-0 pass
-    kWaitFork = 2,   // this lane-1 pass waits for the latest fork
-    kJoinBefore = 4, // this lane-0 pass waits for all lane-1 work emitted so far
-};
-
 // Also the CPU traversal node kind. Fold, Showdown and ForcedRunout are leaves.
 enum class NodeKind : U32
 {
@@ -83,14 +76,15 @@ struct Node
     U32 childSlot[3]; // leading entries of childSlots, so small decisions skip that lookup
     float utility[3];
 };
+// Two 16-byte halves: Terminal loads the first for every hand and the second only at
+// showdowns; Reach reads the weight alone.
 struct Hand
 {
     U64 mask;
-    float weight;
     float divisor;
-    U32 card0;
-    U32 card1;
-    int matching;
+    U32 cards; // card0 | card1 << 8 | (identical opponent hand + 1) << 16, zero without one
+    float weight;
+    U32 runs[2]; // per held card, the opponent's holder run: Terminal run-table offset | length << 16
     U32 padding;
 };
 struct State
@@ -107,7 +101,7 @@ struct State
     float positiveScale;
     float positiveInverse;
     float averageWeight; // t^2 weight of this update's reach * policy in the strategy sums
-    U32 padding;
+    U32 orderPitch;      // entries per rank row of the order buffer, even so hand pairs align
 };
 enum class Kernel : U32
 {
@@ -128,11 +122,10 @@ struct Pass
     U32 offset;
     U32 count;
     OutcomeStage outcomeStage;
-    U32 lanes;    // threads per work item for one-dimensional launches; LaunchPass sets Reach's
+    U32 lanes;    // threads per work item for one-dimensional launches; LaunchPass sets Reach's and Backup's
     U32 boundary; // Reach items derive the opponent's reach from the game root or a dealt card
     U32 split;    // deeper Reach items before this index belong to actor 0, the rest to actor 1
-    U32 lane;     // river batches alternate lanes with disjoint scratch so their passes can overlap
-    U32 sync;     // kForkAfter, kWaitFork and kJoinBefore bits
+    U32 lane;     // the stream running this pass; a sequential executor runs the pass list in order
 };
 } // namespace gpu
 } // namespace engine

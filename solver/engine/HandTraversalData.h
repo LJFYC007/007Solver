@@ -55,14 +55,17 @@ struct HandTraversalData
     };
     std::vector<ChanceGroup> chanceGroups_;
     std::vector<ChanceTask> chanceTasks_;
-    struct FlopOutcomes
+    // Runout rows of player-0 win | loss << 16 counts per (player-0 hand, player-1 hand)
+    // pair, exact out of the legal runouts and independent of reach/payoffs: row 0 for
+    // flop all-ins (990 runouts) and row card + 1 for turn all-ins on that card (44), as
+    // the GPU's outcome rows. The player-0-major rows are followed by player-1-major
+    // copies so either player's accumulation sweeps its hands contiguously.
+    std::vector<std::uint32_t> runoutOutcomes_;
+    static std::size_t RunoutRow(const Node& node)
     {
-        std::uint16_t wins = 0;
-        std::uint16_t losses = 0;
-    };
-    // One player-0-major table for this traversal's flop and exact hand layout.
-    // Counts are exact out of C(45, 2) legal runouts, independent of reach/payoffs.
-    std::vector<FlopOutcomes> flopOutcomes_;
+        return node.board.CardCount() == 3 ? 0 : static_cast<std::size_t>(node.board.CardAt(3).Index()) + 1;
+    }
+    std::size_t runoutRows = 0; // one past the largest RunoutRow of a forced runout, zero without any
 
     std::size_t infoSetCount = 0;
 
@@ -72,7 +75,7 @@ struct HandTraversalData
 
 private:
     void PrepareChanceTasks();
-    void PrepareFlopRunout();
+    void PrepareRunoutOutcomes();
 };
 
 // Resident DCFR state in the layouts shared by both backends: regrets and cumulative

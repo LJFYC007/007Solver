@@ -60,13 +60,13 @@ MemoryEstimate EstimateCpuMemory(const SolveProblem& problem, int workers)
                                     (count + 1) * 128 * 1024 + rootVectors;
     // Training retains regrets, strategy sums and node stamps; current policies live in depth rows.
     const std::uint64_t trainingPeak =
-        2 * sizeof(float) * entries + sizeof(std::uint32_t) * size.traversalNodes + workspace + storage.flopOutcomesBytes;
+        2 * sizeof(float) * entries + sizeof(std::uint32_t) * size.traversalNodes + workspace + storage.runoutOutcomesBytes;
     // Checkpoints borrow sums while all training allocations remain resident.
     const auto checkpointPeak = trainingPeak + storage.workspaceBytes + rootVectors;
     // Final export releases regrets and workspaces before allocating the snapshot.
     // Snapshot probabilities reuse the strategy-sum allocation; indices are built directly.
     const std::uint64_t snapshot = StrategySnapshot::EstimateStorageBytes(decisions, infosets, entries);
-    const std::uint64_t exportPeak = snapshot + sizeof(float) * size.maxActions * maxHands + storage.flopOutcomesBytes;
+    const std::uint64_t exportPeak = snapshot + sizeof(float) * size.maxActions * maxHands + storage.runoutOutcomesBytes;
     const std::uint64_t evaluationPeak = snapshot + storage.workspaceBytes + rootVectors;
     const std::uint64_t peak = size.storageBytes + storage.fixedBytes + std::max({checkpointPeak, exportPeak, evaluationPeak});
     return MakeMemoryEstimate(counts, peak, count);

@@ -9,8 +9,8 @@ using namespace solver::engine::gpu;
     constant State &state [[buffer(StateBuffer)]], constant Pass &pass [[buffer(PassBuffer)]], uint gid [[thread_position_in_grid]], \
         uint simdWidth [[threads_per_simdgroup]]
 #define GPU_INDEX gid
-#define GPU_ITEM_INDEX (gid / state.stride)
-#define GPU_HAND_INDEX (gid % state.stride)
+#define GPU_ITEM_INDEX (gid / pass.lanes)
+#define GPU_HAND_INDEX (gid % pass.lanes)
 #define GPU_WIDTH simdWidth
 #define GPU_SHARED threadgroup
 #define GPU_GROUP_TAIL                                                                                    \
@@ -22,6 +22,7 @@ using namespace solver::engine::gpu;
 #define GPU_GROUP_SIZE groupSize
 #define GPU_GROUP_BARRIER() threadgroup_barrier(mem_flags::mem_threadgroup)
 #define GPU_LDEXP(value, exponent) ldexp(value, exponent)
+#define GPU_UINT_AS_FLOAT(value) as_type<float>(value)
 #else
 #define GPU_INLINE __device__ __forceinline__
 #define GPU_DEVICE
@@ -40,6 +41,7 @@ using namespace solver::engine::gpu;
 #define GPU_GROUP_SIZE blockDim.x
 #define GPU_GROUP_BARRIER() __syncthreads()
 #define GPU_LDEXP(value, exponent) ldexpf(value, exponent)
+#define GPU_UINT_AS_FLOAT(value) __uint_as_float(value)
 #endif
 #define GPU_ARGUMENTS                                                                                                                    \
     GPU_BUFFER(const Node, nodes, NodesBuffer), GPU_BUFFER(const U32, childSlots, ChildSlotsBuffer),                                     \
@@ -257,7 +259,7 @@ GPU_INLINE void TerminalPrefix(
             prefix[0] = sum;
         return;
     }
-    GPU_DEVICE const U32* sorted = order + U64(n.rankRow) * 3 * total + base;
+    GPU_DEVICE const U32* sorted = order + U64(n.rankRow) * state.orderPitch + 2 * total + base;
     for (U32 begin = 0; begin < rankCount; begin += width)
     {
         const U32 offset = begin + lane, i = reverse ? rankCount - 1 - offset : offset;
@@ -327,58 +329,87 @@ GPU_ENTRY(Terminal)(GPU_ARGUMENTS GPU_GROUP_TAIL)
         }
     GPU_GROUP_BARRIER();
     GPU_DEVICE float* output = values + U64(n.slot) * state.stride;
+    const float win = p == 0 ? n.utility[0] : -n.utility[2];
+    const float tie = p == 0 ? n.utility[1] : -n.utility[1];
+    const float loss = p == 0 ? n.utility[2] : -n.utility[0];
+    const U32 legal = p ? n.rankCounts[0] : n.rankCounts[1];
+    // As in the CPU evaluator, zero-tie showdowns need only win/loss masses.
+    const bool needMass = tie != 0.0f;
+    const float rankedMass = needMass && legal ? prefix[legal - 1] : 0.0f;
     for (U32 h = local; h < count; h += groupWidth)
     {
-        const Hand mine = hands[mineBase + h];
-        if ((mine.mask & n.board) || mine.divisor <= 0.0f)
+        // The hand's first half: mask, divisor and packed cards (see Hand).
+        GPU_DEVICE const uint4* record = (GPU_DEVICE const uint4*)(hands + mineBase + h);
+        const uint4 first = record[0];
+        const U64 mask = U64(first.x) | (U64(first.y) << 32);
+        const float divisor = GPU_UINT_AS_FLOAT(first.z);
+        const U32 card0 = first.w & 0xffu, card1 = (first.w >> 8) & 0xffu, identical = first.w >> 16;
+        if ((mask & n.board) || divisor <= 0.0f)
         {
             output[h] = 0.0f;
             continue;
         }
         if (n.kind == NodeKind::Fold)
         {
-            float mass = prefix[0] - prefix[1 + mine.card0] - prefix[1 + mine.card1];
-            if (mine.matching >= 0)
-                mass += reach[mine.matching];
-            output[h] = (mass / mine.divisor) * (p == 0 ? n.utility[0] : -n.utility[0]);
+            float mass = prefix[0] - prefix[1 + card0] - prefix[1 + card1];
+            if (identical)
+                mass += reach[identical - 1];
+            output[h] = (mass / divisor) * (p == 0 ? n.utility[0] : -n.utility[0]);
             continue;
         }
-        const float win = p == 0 ? n.utility[0] : -n.utility[2];
-        const float tie = p == 0 ? n.utility[1] : -n.utility[1];
-        const float loss = p == 0 ? n.utility[2] : -n.utility[0];
         float mass = 0.0f, wins = 0.0f, losses = 0.0f;
         if (n.kind == NodeKind::ForcedRunout)
         {
-            for (U32 other = 0; other < opponentCount; ++other)
+            // This player's hands are contiguous per opponent hand in its layout of the row
+            // (see OutcomesBuffer), so a warp's loads coalesce; eight independent loads per
+            // step overlap the row's latency while the sums keep their opponent order.
+            const U64 pairs = U64(state.hands[0]) * state.hands[1];
+            GPU_DEVICE const U32* table = outcomes + (p == 0 ? U64(state.outcomeRows) * pairs : 0) + U64(n.outcomeRow) * pairs + h;
+#define GPU_RUNOUT_STEP(countsValue, index)                               \
+    {                                                                     \
+        const U32 counts = (countsValue);                                 \
+        /* Overlapping pairs hold the sentinel and contribute nothing. */ \
+        const float r = counts == 0xffffffffu ? 0.0f : reach[index];      \
+        mass += r;                                                        \
+        wins += r * float(p == 0 ? counts & 0xffffu : counts >> 16);      \
+        losses += r * float(p == 0 ? counts >> 16 : counts & 0xffffu);    \
+    }
+            U32 other = 0;
+            for (; other + 8 <= opponentCount; other += 8)
             {
-                const U64 pair = p == 0 ? U64(h) * state.hands[1] + other : U64(other) * state.hands[1] + h;
-                const U32 counts = outcomes[U64(n.outcomeRow) * state.hands[0] * state.hands[1] + pair];
-                // Overlapping pairs hold the sentinel and contribute nothing; no branch per pair.
-                const float r = counts == 0xffffffffu ? 0.0f : reach[other];
-                mass += r;
-                wins += r * float(p == 0 ? counts & 0xffffu : counts >> 16);
-                losses += r * float(p == 0 ? counts >> 16 : counts & 0xffffu);
+                const U32 c0 = table[U64(other) * count], c1 = table[U64(other + 1) * count];
+                const U32 c2 = table[U64(other + 2) * count], c3 = table[U64(other + 3) * count];
+                const U32 c4 = table[U64(other + 4) * count], c5 = table[U64(other + 5) * count];
+                const U32 c6 = table[U64(other + 6) * count], c7 = table[U64(other + 7) * count];
+                GPU_RUNOUT_STEP(c0, other)
+                GPU_RUNOUT_STEP(c1, other + 1)
+                GPU_RUNOUT_STEP(c2, other + 2)
+                GPU_RUNOUT_STEP(c3, other + 3)
+                GPU_RUNOUT_STEP(c4, other + 4)
+                GPU_RUNOUT_STEP(c5, other + 5)
+                GPU_RUNOUT_STEP(c6, other + 6)
+                GPU_RUNOUT_STEP(c7, other + 7)
             }
-            const float divisor = n.outcomeRow == 0 ? 990.0f : 44.0f;
-            output[h] = (tie * mass + (win - tie) * (wins / divisor) + (loss - tie) * (losses / divisor)) / mine.divisor;
+            for (; other < opponentCount; ++other)
+                GPU_RUNOUT_STEP(table[U64(other) * count], other)
+#undef GPU_RUNOUT_STEP
+            const float runouts = n.outcomeRow == 0 ? 990.0f : 44.0f;
+            output[h] = (tie * mass + (win - tie) * (wins / runouts) + (loss - tie) * (losses / runouts)) / divisor;
             continue;
         }
-        const U32 legal = p ? n.rankCounts[0] : n.rankCounts[1];
         // Rank boundaries and blocker positions depend only on the board and ranges.
-        GPU_DEVICE const U32* row = order + U64(n.rankRow) * 3 * total;
-        const U32 bounds = row[total + mineBase + h], positions = row[2 * total + mineBase + h];
-        const U32 lower = bounds & 0xffffu, upper = bounds >> 16;
+        const uint2 packed = ((GPU_DEVICE const uint2*)(order + U64(n.rankRow) * state.orderPitch))[mineBase + h];
+        const U32 lower = packed.x & 0xffffu, upper = packed.x >> 16, positions = packed.y;
         wins = lower ? prefix[lower - 1] : 0.0f;
         losses = upper < legal ? prefix[state.stride + upper] : 0.0f;
-        // As in the CPU evaluator, zero-tie showdowns need only win/loss masses.
-        const bool needMass = tie != 0.0f;
-        mass = needMass && legal ? prefix[legal - 1] : 0.0f;
+        // The hand's second half locates each held card's run over the opponent's holders.
+        const uint4 second = record[1];
         float blocked = 0.0f, blockedWins = 0.0f, blockedLosses = 0.0f;
         for (U32 c = 0; c < 2; ++c)
         {
-            const U32 card = c == 0 ? mine.card0 : mine.card1;
-            const U32 begin = cards[opponent * kCardListStride + card], length = cards[opponent * kCardListStride + card + 1] - begin;
-            GPU_SHARED const float* run = blockers + (begin - cards[opponent * kCardListStride]) + card;
+            const U32 span = c == 0 ? second.y : second.z;
+            GPU_SHARED const float* run = blockers + (span & 0xffffu);
+            const U32 length = span >> 16;
             const U32 below = (positions >> (16 * c)) & 0xffu, through = (positions >> (16 * c + 8)) & 0xffu;
             blocked += run[length];
             blockedWins += run[below];
@@ -387,25 +418,38 @@ GPU_ENTRY(Terminal)(GPU_ARGUMENTS GPU_GROUP_TAIL)
         }
         if (needMass)
         {
-            mass -= blocked;
-            if (mine.matching >= 0)
-                mass += reach[mine.matching];
+            mass = rankedMass - blocked;
+            if (identical)
+                mass += reach[identical - 1];
         }
         wins -= blockedWins;
         losses -= blockedLosses;
-        output[h] = (tie * mass + (win - tie) * wins + (loss - tie) * losses) / mine.divisor;
+        output[h] = (tie * mass + (win - tie) * wins + (loss - tie) * losses) / divisor;
     }
 }
 
+// The stored regret after adding increment. Positive regrets are stored divided by
+// positiveScale, so the discounts of the updates a node skipped are already in place;
+// negative regrets halve once per skipped update.
+GPU_INLINE float UpdatedRegret(float old, float increment, float halving, State state)
+{
+    const float regret = (old > 0.0f ? old * state.positiveScale : old * halving) + increment;
+    return regret > 0.0f ? regret * state.positiveInverse : regret * 0.5f;
+}
+
 // A zero ActionCount keeps the general path; small decisions retain entry data
-// and issue every load before the first store so latencies overlap. A node is live
-// when any child subtree carries opponent reach; pruned nodes have zero values and
-// keep their regrets, whose skipped discounts the stamps apply at the next live update.
+// and issue every load before the first store so latencies overlap. A thread carries
+// two adjacent hands so twice the loads are in flight per warp; pair is zero when only
+// hand h exists. Child values are loaded before their flags are known and replaced by
+// zero for dead children, so the flag and value latencies overlap. A node is live when
+// any child subtree carries opponent reach; pruned nodes have zero values and keep
+// their regrets, whose skipped discounts the stamps apply at the next live update.
 template<U32 ActionCount>
 GPU_INLINE void BackupNode(
     Node n,
     State state,
     U32 h,
+    U32 pair,
     GPU_DEVICE const U32* childSlots,
     GPU_DEVICE float* regrets,
     GPU_DEVICE float* values,
@@ -419,8 +463,8 @@ GPU_INLINE void BackupNode(
     const bool training = acting && !state.evaluation;
     U32 slots[ActionCount ? ActionCount : 1];
     U32 lives[ActionCount ? ActionCount : 1];
-    float entryRegrets[ActionCount ? ActionCount : 1];
-    float childValues[ActionCount ? ActionCount : 1];
+    float entryRegrets0[ActionCount ? ActionCount : 1], entryRegrets1[ActionCount ? ActionCount : 1];
+    float childValues0[ActionCount ? ActionCount : 1], childValues1[ActionCount ? ActionCount : 1];
     U32 live = 0;
     for (U32 a = 0; a < actions; ++a)
     {
@@ -447,69 +491,97 @@ GPU_INLINE void BackupNode(
         const U32 skipped = state.update - 1u - stamp;
         halving = GPU_LDEXP(1.0f, -int(skipped < 200u ? skipped : 200u));
     }
+    GPU_DEVICE float* output = values + U64(n.slot) * state.stride + h;
     if (!live)
     {
         if (n.parent == kNoIndex)
-            values[U64(n.slot) * state.stride + h] = 0.0f;
+        {
+            output[0] = 0.0f;
+            if (pair)
+                output[1] = 0.0f;
+        }
         return;
     }
     // Reuse the entry-policy denominator for value backup and the regret update.
-    float positive = 0.0f;
+    float positive0 = 0.0f, positive1 = 0.0f;
     if (training)
         for (U32 a = 0; a < actions; ++a)
         {
-            const float r = regrets[n.strategy + U64(a) * count + h];
+            GPU_DEVICE const float* entry = regrets + n.strategy + U64(a) * count + h;
+            const float r0 = entry[0], r1 = pair ? entry[1] : 0.0f;
             if (ActionCount)
-                entryRegrets[a] = r;
-            positive += r > 0.0f ? r : 0.0f;
+            {
+                entryRegrets0[a] = r0;
+                entryRegrets1[a] = r1;
+            }
+            positive0 += r0 > 0.0f ? r0 : 0.0f;
+            positive1 += r1 > 0.0f ? r1 : 0.0f;
         }
-    float value = 0.0f;
+    float value0 = 0.0f, value1 = 0.0f;
     for (U32 a = 0; a < actions; ++a)
     {
         const U32 slot = ActionCount ? slots[a] : childSlots[n.edge + a];
-        const float child = (ActionCount ? lives[a] : flags[slot]) ? values[U64(slot) * state.stride + h] : 0.0f;
+        const U32 flag = ActionCount ? lives[a] : flags[slot];
+        GPU_DEVICE const float* source = values + U64(slot) * state.stride + h;
+        const float loaded0 = source[0], loaded1 = pair ? source[1] : 0.0f;
+        const float child0 = flag ? loaded0 : 0.0f, child1 = flag ? loaded1 : 0.0f;
         if (ActionCount)
-            childValues[a] = child;
+        {
+            childValues0[a] = child0;
+            childValues1[a] = child1;
+        }
         if (acting && state.evaluation)
-            value = a == 0 || child > value ? child : value;
+        {
+            value0 = a == 0 || child0 > value0 ? child0 : value0;
+            value1 = a == 0 || child1 > value1 ? child1 : value1;
+        }
         else if (acting)
         {
-            const float r = ActionCount ? entryRegrets[a] : regrets[n.strategy + U64(a) * count + h];
-            value += child * MatchedProbability(r, positive, actions);
+            GPU_DEVICE const float* entry = regrets + n.strategy + U64(a) * count + h;
+            value0 += child0 * MatchedProbability(ActionCount ? entryRegrets0[a] : entry[0], positive0, actions);
+            if (pair)
+                value1 += child1 * MatchedProbability(ActionCount ? entryRegrets1[a] : entry[1], positive1, actions);
         }
         else
-            value += child;
+        {
+            value0 += child0;
+            value1 += child1;
+        }
     }
-    values[U64(n.slot) * state.stride + h] = value;
+    output[0] = value0;
+    if (pair)
+        output[1] = value1;
     if (training)
         for (U32 a = 0; a < actions; ++a)
         {
-            const U64 entry = n.strategy + U64(a) * count + h;
-            const float old = ActionCount ? entryRegrets[a] : regrets[entry];
+            GPU_DEVICE float* entry = regrets + n.strategy + U64(a) * count + h;
             const U32 slot = ActionCount ? slots[a] : childSlots[n.edge + a];
-            const float child = ActionCount ? childValues[a] : (flags[slot] ? values[U64(slot) * state.stride + h] : 0.0f);
-            // Positive regrets are stored divided by positiveScale, so the discounts of the
-            // updates this node skipped are already in place; negative regrets halve once
-            // per skipped update.
-            const float regret = (old > 0.0f ? old * state.positiveScale : old * halving) + (child - value);
-            regrets[entry] = regret > 0.0f ? regret * state.positiveInverse : regret * 0.5f;
+            GPU_DEVICE const float* source = values + U64(slot) * state.stride + h;
+            const float child0 = ActionCount ? childValues0[a] : (flags[slot] ? source[0] : 0.0f);
+            entry[0] = UpdatedRegret(ActionCount ? entryRegrets0[a] : entry[0], child0 - value0, halving, state);
+            if (pair)
+            {
+                const float child1 = ActionCount ? childValues1[a] : (flags[slot] ? source[1] : 0.0f);
+                entry[1] = UpdatedRegret(ActionCount ? entryRegrets1[a] : entry[1], child1 - value1, halving, state);
+            }
         }
 }
 
 GPU_ENTRY(Backup)(GPU_ARGUMENTS)
 {
     GPU_STATE
-    const U32 item = GPU_ITEM_INDEX, h = GPU_HAND_INDEX;
+    const U32 item = GPU_ITEM_INDEX, h = 2 * GPU_HAND_INDEX;
     const U32 count = state.player ? state.hands[1] : state.hands[0];
     if (item >= pass.count || h >= count)
         return;
+    const U32 pair = h + 1 < count ? 1u : 0u;
     const Node n = nodes[pass.offset + item];
     if (n.count == 2)
-        BackupNode<2>(n, state, h, childSlots, regrets, values, flags, stamps);
+        BackupNode<2>(n, state, h, pair, childSlots, regrets, values, flags, stamps);
     else if (n.count == 3)
-        BackupNode<3>(n, state, h, childSlots, regrets, values, flags, stamps);
+        BackupNode<3>(n, state, h, pair, childSlots, regrets, values, flags, stamps);
     else
-        BackupNode<0>(n, state, h, childSlots, regrets, values, flags, stamps);
+        BackupNode<0>(n, state, h, pair, childSlots, regrets, values, flags, stamps);
 }
 
 GPU_ENTRY(Outcomes)(GPU_ARGUMENTS)
@@ -521,11 +593,13 @@ GPU_ENTRY(Outcomes)(GPU_ARGUMENTS)
     const U32 row = U32(index / pairs), h0 = U32(index % pairs / state.hands[1]), h1 = U32(index % state.hands[1]);
     const U64 mask0 = hands[h0].mask, mask1 = hands[state.hands[0] + h1].mask;
     const U64 board = state.board;
+    // The player-1-major copy of every row follows the player-0-major rows.
+    const U64 transposed = (U64(state.outcomeRows) + row) * pairs + U64(h1) * state.hands[0] + h0;
     U32 wins = 0, losses = 0;
     // Overlapping private cards store a sentinel that Terminal's runout loop tests instead of masks.
     if (mask0 & mask1)
     {
-        outcomes[index] = 0xffffffffu;
+        outcomes[index] = outcomes[transposed] = 0xffffffffu;
         return;
     }
     if (pass.outcomeStage == OutcomeStage::SumTurns)
@@ -561,5 +635,5 @@ GPU_ENTRY(Outcomes)(GPU_ARGUMENTS)
             }
         }
     }
-    outcomes[index] = wins | (losses << 16);
+    outcomes[index] = outcomes[transposed] = wins | (losses << 16);
 }

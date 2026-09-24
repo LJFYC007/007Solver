@@ -16,11 +16,14 @@ inline std::size_t TerminalSharedBytes(const State& state)
     // and 52 card masses instead), then each card's rank-ordered blocked reach prefix.
     return (kGroupFlags + state.stride + std::max(2 * state.stride, 53u) + 2 * state.stride + 52) * sizeof(float);
 }
-// One updating player's launch of a pass. Only the opponent's reach is propagated, so
-// a boundary Reach pass launches one lane per opponent hand and a deeper one launches
-// the opponent's decisions, grouped by actor within the pass, with two hands per lane.
+// One updating player's launch of a pass. Backup launches one lane per two of the
+// updating player's hands. Only the opponent's reach is propagated, so a boundary Reach
+// pass launches one lane per opponent hand and a deeper one launches the opponent's
+// decisions, grouped by actor within the pass, with two hands per lane.
 inline Pass LaunchPass(Pass pass, const State& shape, U32 player)
 {
+    if (pass.operation == Kernel::Backup)
+        pass.lanes = (shape.hands[player] + 1) / 2;
     if (pass.operation != Kernel::Reach)
         return pass;
     const U32 opponent = 1 - player;
@@ -67,13 +70,16 @@ struct Plan
     std::vector<Hand> hands;
     // Each rank row stores ranks by hand, then every card's hands in rank order.
     std::vector<unsigned short> ranks;
-    // Each rank row stores sorted hands, packed lower/upper bounds by hand, then
-    // packed per-card blocker positions by hand.
+    // Each rank row stores packed lower/upper bounds and per-card blocker positions
+    // interleaved by hand, then the sorted hands, at an even pitch (State::orderPitch).
     std::vector<U32> order;
     std::vector<int> runouts;
     std::vector<U32> cards;
     std::vector<Pass> initialization;
     std::vector<Pass> passes;
+    // Per pass, the earlier passes in other streams whose slot accesses conflict with it:
+    // the graph edges a parallel executor needs beyond stream order.
+    std::vector<std::vector<U32>> predecessors;
     State state{};
     std::size_t entries = 0;
     std::size_t slots = 0;

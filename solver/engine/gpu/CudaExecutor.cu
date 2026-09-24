@@ -22,26 +22,23 @@ public:
         try
         {
             Check(cudaSetDevice(0));
-            Check(cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking));
-            Check(cudaStreamCreateWithFlags(&lane_, cudaStreamNonBlocking));
+            for (auto& stream : streams_)
+                Check(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
             Check(cudaEventCreateWithFlags(&fork_, cudaEventDisableTiming));
             Check(cudaEventCreateWithFlags(&join_, cudaEventDisableTiming));
+            events_.resize(plan.passes.size());
+            for (auto& event : events_)
+                Check(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
             const auto sources = plan.Buffers();
             for (std::size_t i = 0; i < buffers_.size(); ++i)
                 Upload(i, sources[i]);
             for (const auto index : {RegretsBuffer, SumsBuffer, FlagsBuffer, StampsBuffer})
                 Check(cudaMemsetAsync(buffers_[index], 0, sources[index].bytes, stream_));
             for (const auto& pass : plan.initialization)
-                Launch(pass, 0);
+                Dispatch(pass, stream_);
             Check(cudaStreamSynchronize(stream_));
             for (U32 player = 0; player < 2; ++player)
-            {
-                Check(cudaStreamBeginCapture(stream_, cudaStreamCaptureModeThreadLocal));
-                for (const auto& pass : plan.passes)
-                    Launch(pass, player);
-                Check(cudaStreamEndCapture(stream_, &graphs_[player]));
-                Check(cudaGraphInstantiate(&executables_[player], graphs_[player], nullptr, nullptr, 0));
-            }
+                Capture(plan, player);
         }
         catch (...)
         {
@@ -107,11 +104,13 @@ private:
     std::array<void*, kBufferCount> buffers_{};
     State shape_;
     std::size_t entries_;
-    cudaStream_t stream_ = nullptr;
-    // Lane 1 of the captured graphs; fork/join events turn Pass::sync into graph edges.
-    cudaStream_t lane_ = nullptr;
-    cudaEvent_t fork_ = nullptr;
-    cudaEvent_t join_ = nullptr;
+    // One stream per Pass::lane; the first is the capture origin and update stream. Each
+    // pass records an event so passes in other streams can wait for their predecessors.
+    std::array<cudaStream_t, kLaneCount> streams_{};
+    cudaStream_t& stream_ = streams_[0];
+    cudaEvent_t fork_ = nullptr; // the origin's state at the start of a capture
+    cudaEvent_t join_ = nullptr; // each other stream's end, joined into the origin
+    std::vector<cudaEvent_t> events_;
     std::array<cudaGraph_t, 2> graphs_{};
     std::array<cudaGraphExec_t, 2> executables_{};
     void Upload(std::size_t index, const BufferData& source)
@@ -129,30 +128,45 @@ private:
         Check(cudaMemcpyAsync(target, source, bytes, kind, stream_));
         Check(cudaStreamSynchronize(stream_));
     }
-    void Launch(Pass pass, U32 player)
+    // Captures one player's update: every stream forks from the origin at its first pass,
+    // waits for the events of the pass's predecessors, and joins the origin at the end.
+    void Capture(const Plan& plan, U32 player)
     {
-        pass = LaunchPass(pass, shape_, player);
-        cudaStream_t stream = pass.lane ? lane_ : stream_;
-        if (pass.sync & kWaitFork)
-            Check(cudaStreamWaitEvent(lane_, fork_, 0));
-        if (pass.sync & kJoinBefore)
+        Check(cudaStreamBeginCapture(stream_, cudaStreamCaptureModeThreadLocal));
+        Check(cudaEventRecord(fork_, stream_));
+        std::array<bool, kLaneCount> used{true};
+        for (std::size_t i = 0; i < plan.passes.size(); ++i)
         {
-            Check(cudaEventRecord(join_, lane_));
-            Check(cudaStreamWaitEvent(stream_, join_, 0));
+            const Pass pass = LaunchPass(plan.passes[i], shape_, player);
+            cudaStream_t stream = streams_[pass.lane];
+            if (!used[pass.lane])
+            {
+                Check(cudaStreamWaitEvent(stream, fork_, 0));
+                used[pass.lane] = true;
+            }
+            for (const U32 predecessor : plan.predecessors[i])
+                Check(cudaStreamWaitEvent(stream, events_[predecessor], 0));
+            Dispatch(pass, stream);
+            Check(cudaEventRecord(events_[i], stream));
         }
-        if (pass.count)
-            Dispatch(pass, player, stream);
-        if (pass.sync & kForkAfter)
-            Check(cudaEventRecord(fork_, stream_));
+        for (std::size_t lane = 1; lane < streams_.size(); ++lane)
+            if (used[lane])
+            {
+                Check(cudaEventRecord(join_, streams_[lane]));
+                Check(cudaStreamWaitEvent(stream_, join_, 0));
+            }
+        Check(cudaStreamEndCapture(stream_, &graphs_[player]));
+        Check(cudaGraphInstantiate(&executables_[player], graphs_[player], nullptr, nullptr, 0));
     }
-    void Dispatch(const Pass& pass, U32 player, cudaStream_t stream)
+    void Dispatch(const Pass& pass, cudaStream_t stream)
     {
-        // Backup tiles only the current player's hands; other passes are linear over pass.lanes.
+        if (pass.count == 0)
+            return;
+        // Backup tiles its pass.lanes, two of the current player's hands each; other passes are linear over pass.lanes.
         const bool handTiles = pass.operation == Kernel::Backup;
-        const auto handCount = shape_.hands[player];
-        const auto group = pass.operation == Kernel::Terminal ? 64u : handTiles ? (std::min(handCount, 256u) + 31) / 32 * 32 : 256u;
+        const auto group = pass.operation == Kernel::Terminal ? 64u : handTiles ? (std::min(pass.lanes, 256u) + 31) / 32 * 32 : 256u;
         const auto threads = pass.count * pass.lanes;
-        const dim3 blocks = handTiles ? dim3(pass.count, (handCount + group - 1) / group)
+        const dim3 blocks = handTiles ? dim3(pass.count, (pass.lanes + group - 1) / group)
                                       : dim3(pass.operation == Kernel::Terminal ? pass.count : (threads + group - 1) / group);
         const auto shared = pass.operation == Kernel::Terminal ? TerminalSharedBytes(shape_) : 0;
 #define LAUNCH(name)                                               \
@@ -215,16 +229,19 @@ private:
         DestroyGraph();
         for (std::size_t i = 0; i < buffers_.size(); ++i)
             Free(i);
-        if (stream_)
-            cudaStreamDestroy(stream_);
-        if (lane_)
-            cudaStreamDestroy(lane_);
+        for (auto& stream : streams_)
+            if (stream)
+                cudaStreamDestroy(stream);
         if (fork_)
             cudaEventDestroy(fork_);
         if (join_)
             cudaEventDestroy(join_);
-        stream_ = lane_ = nullptr;
+        for (auto& event : events_)
+            if (event)
+                cudaEventDestroy(event);
+        streams_ = {};
         fork_ = join_ = nullptr;
+        events_.clear();
     }
 };
 } // namespace

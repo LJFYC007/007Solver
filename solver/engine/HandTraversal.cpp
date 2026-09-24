@@ -52,6 +52,39 @@ void AccumulateStrategy(float* sums, const float* increments, std::size_t count,
         if (increments[hand] != 0.0f)
             sums[hand] += weight * increments[hand];
 }
+
+// Regret matching for hands [begin, end) of per-action rows of count hands.
+void MatchHands(
+    const float* regrets,
+    float* current,
+    std::size_t actions,
+    std::size_t count,
+    float uniform,
+    std::size_t begin,
+    std::size_t end
+)
+{
+    std::array<float, HandTraversalData::kMaxHands> positiveRegrets;
+    std::fill_n(positiveRegrets.data() + begin, end - begin, 0.0f);
+    for (std::size_t action = 0; action < actions; ++action)
+    {
+        float* row = current + action * count;
+        const float* regretRow = regrets + action * count;
+        for (std::size_t hand = begin; hand < end; ++hand)
+        {
+            const float regret = regretRow[hand];
+            const float positive = regret > 0.0f ? regret : 0.0f;
+            row[hand] = positive;
+            positiveRegrets[hand] += positive;
+        }
+    }
+    for (std::size_t action = 0; action < actions; ++action)
+    {
+        float* row = current + action * count;
+        for (std::size_t hand = begin; hand < end; ++hand)
+            row[hand] = positiveRegrets[hand] > 0.0f ? row[hand] / positiveRegrets[hand] : uniform;
+    }
+}
 } // namespace
 
 HandTraversal::HandTraversal(const SolveProblem& problem, game::NodeId root, bool prepareTraining)
@@ -71,10 +104,10 @@ HandTraversal::HandTraversal(std::shared_ptr<const HandTraversalData> data)
     , maxDepth(data_->maxDepth)
     , chanceGroups_(data_->chanceGroups_)
     , chanceTasks_(data_->chanceTasks_)
-    , flopOutcomes_(data_->flopOutcomes_)
+    , runoutOutcomes_(data_->runoutOutcomes_)
 {}
 
-void HandTraversal::EvaluateFlopRunout(
+void HandTraversal::EvaluateRunoutOutcomes(
     const Node& node,
     std::size_t player,
     const float* opponentReach,
@@ -83,19 +116,27 @@ void HandTraversal::EvaluateFlopRunout(
 ) const
 {
     const auto [win, tie, loss] = ShowdownUtilities(node, player);
-    const float winScale = (win - tie) / 990.0f;
-    const float lossScale = (loss - tie) / 990.0f;
+    const std::size_t row = HandTraversalData::RunoutRow(node);
+    const float runouts = row == 0 ? 990.0f : 44.0f;
+    const float winScale = (win - tie) / runouts;
+    const float lossScale = (loss - tie) / runouts;
+    const std::size_t count = hands[player].size(), opponentCount = hands[1 - player].size();
+    const std::size_t pairs = hands[0].size() * hands[1].size();
+    // This player's layout of the row keeps its hands contiguous per opponent hand, so the
+    // inner loop vectorizes; player 1's wins are the stored losses.
+    const std::uint32_t* table = runoutOutcomes_.data() + (player == 0 ? runoutOutcomes_.size() / 2 : 0) + row * pairs;
+    const unsigned winShift = player == 0 ? 0 : 16, lossShift = 16 - winShift;
     std::array<float, kMaxHands> wins{}, losses{};
-    // Both orientations read contiguous rows from the same immutable table.
-    for (std::size_t first = 0; first < hands[0].size(); ++first)
-        for (std::size_t second = 0; second < hands[1].size(); ++second)
+    for (std::size_t other = 0; other < opponentCount; ++other)
+    {
+        const float reach = opponentReach[other];
+        const std::uint32_t* entries = table + other * count;
+        for (std::size_t hand = 0; hand < count; ++hand)
         {
-            const auto outcomes = flopOutcomes_[first * hands[1].size() + second];
-            const auto hand = player == 0 ? first : second;
-            const float reach = opponentReach[player == 0 ? second : first];
-            wins[hand] += reach * (player == 0 ? outcomes.wins : outcomes.losses);
-            losses[hand] += reach * (player == 0 ? outcomes.losses : outcomes.wins);
+            wins[hand] += reach * static_cast<float>(static_cast<int>((entries[hand] >> winShift) & 0xffffu));
+            losses[hand] += reach * static_cast<float>(static_cast<int>((entries[hand] >> lossShift) & 0xffffu));
         }
+    }
     const auto masses = tie == 0.0f ? std::vector<float>{} : CompatibleMasses(player, opponentReach);
     for (std::size_t hand = 0; hand < hands[player].size(); ++hand)
     {
@@ -276,7 +317,9 @@ HandTraversal::StorageEstimate HandTraversal::EstimateStorage(
         layout + ranks + 2 * chancePlanBytes,
         SizeWorkspace(size.depth, size.maxActions, handCounts, 0).Bytes(),
         chanceTasks * (maxHands * sizeof(float) + sizeof(std::uint8_t)),
-        prepareTraining ? handCounts[0] * handCounts[1] * sizeof(FlopOutcomes) : 0,
+        // Every runout row in both layouts: the flop row and one row per possible turn
+        // card, an upper bound that spares walking the tree here.
+        prepareTraining ? 2 * 53 * handCounts[0] * handCounts[1] * sizeof(std::uint32_t) : 0,
     };
 }
 
@@ -293,31 +336,50 @@ HandTraversal::Workspace HandTraversal::MakeWorkspace(bool parallel) const
     return workspace;
 }
 
-void HandTraversal::MatchRegrets(const Node& node, const TrainState& train, float* current) const
+void HandTraversal::MatchRegrets(const Node& node, const TrainState& train, float* current, const float* actorReach) const
 {
     const auto count = hands[node.actor].size();
-    std::array<float, kMaxHands> positiveRegrets;
-    std::fill_n(positiveRegrets.data(), count, 0.0f);
+    const auto actions = node.childCount;
     const float* regrets = train.regrets + node.strategyOffset;
-    for (std::size_t action = 0; action < node.childCount; ++action)
+    const float uniform = 1.0f / actions;
+    // Eight-hand chunks without reach skip their regret loads, most of them once play prunes
+    // lines; the zero policy leaves the propagated reach exactly as any policy would.
+    const std::size_t aligned = actorReach ? count / 8 * 8 : 0;
+    for (std::size_t chunk = 0; chunk < aligned; chunk += 8)
     {
-        float* row = current + action * count;
-        const float* regretRow = regrets + action * count;
-        for (std::size_t hand = 0; hand < count; ++hand)
+#if defined(__AVX2__)
+        const __m256 reach = _mm256_loadu_ps(actorReach + chunk);
+        if (_mm256_movemask_ps(_mm256_cmp_ps(reach, _mm256_setzero_ps(), _CMP_NEQ_UQ)) == 0)
         {
-            const float regret = regretRow[hand];
-            const float positive = regret > 0.0f ? regret : 0.0f;
-            row[hand] = positive;
-            positiveRegrets[hand] += positive;
+            for (std::size_t action = 0; action < actions; ++action)
+                _mm256_storeu_ps(current + action * count + chunk, _mm256_setzero_ps());
+            continue;
         }
+        __m256 positive = _mm256_setzero_ps();
+        for (std::size_t action = 0; action < actions; ++action)
+        {
+            const __m256 clipped = _mm256_max_ps(_mm256_loadu_ps(regrets + action * count + chunk), _mm256_setzero_ps());
+            _mm256_storeu_ps(current + action * count + chunk, clipped);
+            positive = _mm256_add_ps(positive, clipped);
+        }
+        const __m256 matched = _mm256_cmp_ps(positive, _mm256_setzero_ps(), _CMP_GT_OQ);
+        for (std::size_t action = 0; action < actions; ++action)
+        {
+            float* row = current + action * count + chunk;
+            _mm256_storeu_ps(row, _mm256_blendv_ps(_mm256_set1_ps(uniform), _mm256_div_ps(_mm256_loadu_ps(row), positive), matched));
+        }
+#else
+        bool any = false;
+        for (int i = 0; i < 8; ++i)
+            any |= actorReach[chunk + i] != 0.0f;
+        if (any)
+            MatchHands(regrets, current, actions, count, uniform, chunk, chunk + 8);
+        else
+            for (std::size_t action = 0; action < actions; ++action)
+                std::fill_n(current + action * count + chunk, 8, 0.0f);
+#endif
     }
-    const float uniform = 1.0f / node.childCount;
-    for (std::size_t action = 0; action < node.childCount; ++action)
-    {
-        float* row = current + action * count;
-        for (std::size_t hand = 0; hand < count; ++hand)
-            row[hand] = positiveRegrets[hand] > 0.0f ? row[hand] / positiveRegrets[hand] : uniform;
-    }
+    MatchHands(regrets, current, actions, count, uniform, aligned, count);
 }
 
 void HandTraversal::WalkTraining(
@@ -359,7 +421,7 @@ void HandTraversal::WalkTraining(
             const Node& node = nodes[nodeIndex];
             float* policy = scratch.strategies.data();
             if (node.kind == Kind::Decision && node.actor == opponent)
-                MatchRegrets(node, train, policy);
+                MatchRegrets(node, train, policy, reach);
             reach = PropagateChild(nodeIndex, action, opponent, policy, reach, scratch.reach.data() + (depth + 1) * stride);
             nodeIndex = children[node.childOffset + action];
             ++depth;
@@ -446,8 +508,8 @@ bool HandTraversal::Walk(
     {
         if (node.kind != Kind::ForcedRunout)
             EvaluateTerminal(node, player, opponentReach, divisors, values);
-        else if (train && node.board.CardCount() == 3 && !flopOutcomes_.empty())
-            EvaluateFlopRunout(node, player, opponentReach, divisors, values);
+        else if (train && !runoutOutcomes_.empty())
+            EvaluateRunoutOutcomes(node, player, opponentReach, divisors, values);
         else
             EvaluateRunout(ShowdownUtilities(node, player), node.board, node.boardMask, player, opponentReach, divisors, values);
         return true;
@@ -462,7 +524,7 @@ bool HandTraversal::Walk(
         {
             // Preserve this entry strategy until reach, backup and average-strategy
             // accumulation finish. Descendants and other workers use separate rows.
-            MatchRegrets(node, *train, current);
+            MatchRegrets(node, *train, current, node.actor == player ? nullptr : opponentReach);
         }
         else if (strategySums)
         {

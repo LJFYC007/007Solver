@@ -50,7 +50,7 @@ public:
         std::uint64_t fixedBytes;
         std::uint64_t workspaceBytes;
         std::uint64_t parallelValuesBytes;
-        std::uint64_t flopOutcomesBytes;
+        std::uint64_t runoutOutcomesBytes;
     };
     static StorageEstimate EstimateStorage(
         const game::CompiledGame& game,
@@ -97,7 +97,6 @@ private:
     using RankOrder = HandTraversalData::RankOrder;
     using ChanceGroup = HandTraversalData::ChanceGroup;
     using ChanceTask = HandTraversalData::ChanceTask;
-    using FlopOutcomes = HandTraversalData::FlopOutcomes;
     struct WorkspaceSize
     {
         std::size_t reach;
@@ -119,8 +118,8 @@ private:
     const std::vector<std::array<RankOrder, 2>>& rankRows;
     const std::size_t& maxDepth;
 
-    // Only the entry points construct policy combinations. Only training uses the flop
-    // runout cache; read-only paths, including checkpoints, use exact runout accumulation.
+    // Only the entry points construct policy combinations. Only training uses the runout
+    // outcome rows; read-only paths, including checkpoints, use exact runout accumulation.
     struct WalkContext
     {
         std::size_t player;
@@ -148,10 +147,18 @@ private:
     ) const;
     const std::vector<ChanceGroup>& chanceGroups_;
     const std::vector<ChanceTask>& chanceTasks_;
-    const std::vector<FlopOutcomes>& flopOutcomes_;
+    const std::vector<std::uint32_t>& runoutOutcomes_;
 
-    void MatchRegrets(const Node& node, const TrainState& train, float* current) const;
-    void EvaluateFlopRunout(const Node& node, std::size_t player, const float* opponentReach, const float* divisors, float* values) const;
+    // Regret matching over the actor's hands. Given the actor's reach at the node, hands
+    // without reach get a zero policy and their regrets are not read.
+    void MatchRegrets(const Node& node, const TrainState& train, float* current, const float* actorReach) const;
+    void EvaluateRunoutOutcomes(
+        const Node& node,
+        std::size_t player,
+        const float* opponentReach,
+        const float* divisors,
+        float* values
+    ) const;
     // Returns parent at another player's decision, whose reach the child shares; otherwise
     // writes and returns child, including the chance probability at chance nodes.
     const float* PropagateChild(
