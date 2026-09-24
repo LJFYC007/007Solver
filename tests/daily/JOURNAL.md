@@ -33,4 +33,19 @@ Newest first. One entry per recorded run: tested commit, results, triage, tests 
 - `gpu-plan-coverage`.
 - Emulated GPU, race and sanitizer stages turned into the repeatable harness.
 
-**Baseline run:** pending.
+**Baseline run `20260924T044018Z`** (harness `bd10afd` with uncommitted edits): 82 PASS, 0 WARN, 0 FAIL, 0 SKIP in 61.5 min.
+
+- All 51 race configurations are bitwise identical per workload.
+- The emulated repository GPU gtests take 725 s (CUDA) and 1804 s (Metal). The GPU sanitizer runs take 1158 s and 2401 s and are the long poles.
+- Catalog parity is within 1.1e-5 of node scale.
+- The benchmark measured 2.61 updates/s at 0.0107% accuracy, but it overlapped harness compiles. The clean measurement from earlier in the day is 3.0 updates/s.
+
+**Independent review of the harness:** it found that replayed lane schedules can't expose overlapping lane scratch. [LaneCheck.h](gpu/LaneCheck.h) now proves the two-lane schedule conflict-free:
+
+| Input | Unordered pass pairs per player | Conflicts |
+|---|---|---|
+| `backend-parity` | 450 | 0 |
+| `btn-bb-srp-*` | 3,234 | 0 |
+| `utg-bb-wide` | 25,250 | 0 |
+
+The no-join, no-fork-wait and overlapping-scratch mutations are all detected. The review also led to stricter emulation, sanitizer logs collected from child processes, and hardened run.py stage and timeout handling (commit `46f2597`).

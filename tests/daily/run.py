@@ -626,6 +626,9 @@ def main():
         tests = [stage for stage in tests if pattern.search(stage.name)]
         final = [stage for stage in final if pattern.search(stage.name)]
     started = time.time()
+    # The harness revision that actually runs; later commits during the run must not relabel it.
+    harness_sha = git("rev-parse", "HEAD")
+    harness_dirty = bool(git("status", "--porcelain", "--", "tests/daily", ":!tests/daily/state.json", ":!tests/daily/history.jsonl"))
     runner.run_sequential(setup)
     runner.run_parallel(tests)
     runner.results.update(race_verdicts(runner.results))
@@ -639,7 +642,7 @@ def main():
         f"# Daily run {stamp}",
         "",
         f"- Tested: `{git('log', '--oneline', '-1', sha) if sha != 'unknown' else sha}`",
-        f"- Harness: `{git('rev-parse', '--short', 'HEAD')}`{' (dirty)' if git('status', '--porcelain', '--', 'tests/daily') else ''}",
+        f"- Harness: `{harness_sha[:7]}`{' with uncommitted changes' if harness_dirty else ''}",
         f"- Host: {host_info()['cpu']}, {CPUS} CPUs; {subprocess.run(['g++', '--version'], capture_output=True, text=True).stdout.splitlines()[0]}; wall time {(time.time() - started) / 60:.1f} min",
         f"- Stages: {counts['PASS']} pass, {counts['WARN']} warn, {counts['FAIL']} fail, {counts['SKIP']} skip"
         f" ({sum(name.startswith('emu-race:') for name in results)} race configurations folded into verdicts)",
@@ -661,7 +664,8 @@ def main():
         entry = {
             "run": stamp,
             "mainSha": sha,
-            "harnessSha": git("rev-parse", "HEAD"),
+            "harnessSha": harness_sha,
+            "harnessDirty": harness_dirty,
             "host": host_info(),
             "counts": counts,
             "failures": sorted(name for name, r in results.items() if r.status == "FAIL"),
