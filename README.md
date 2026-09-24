@@ -17,9 +17,9 @@ The bundled [GTO Wizard catalog](resources/gtowizard-preflop/) contains chip-EV,
 
 On macOS, install Xcode Command Line Tools (`xcode-select --install`) and `brew install cmake ninja libomp`. Build for the Mac's native Apple Silicon or Intel architecture.
 
-On Windows, use **Developer PowerShell for Visual Studio** with Visual Studio 2022+ and **Desktop development with C++** installed. Run `chcp 65001` before building so Ninja can parse localized MSVC dependencies. Running the app requires an AVX2-capable CPU, WebView2 and the Microsoft Visual C++ x64 runtime, including OpenMP (`VCOMP140.DLL`).
+On Windows, use **Developer PowerShell for Visual Studio** with Visual Studio 2022+ and **Desktop development with C++** installed. Run `chcp 65001` before building so Ninja can parse localized MSVC dependencies. The installer downloads WebView2 when missing and bundles the Microsoft Visual C++ x64 runtime, including OpenMP (`VCOMP140.DLL`); CLI services copied elsewhere need that runtime installed. `solver_service` requires AVX2; the app runs `solver_service_sse2` on CPUs without AVX2, FMA or BMI.
 
-GPU support is enabled by default; Intel Macs use CPU. Windows builds use CUDA when CMake finds a Toolkit compatible with MSVC; otherwise they use CPU. CUDA requires compute capability 8.9+ and a compatible NVIDIA driver. Use `-DSOLVER_ENABLE_GPU=OFF` for CPU-only builds or `-DCMAKE_CUDA_COMPILER=<path-to-nvcc>` for a toolkit outside the compiler search path.
+GPU support is enabled by default; Intel Macs use CPU. Windows builds use CUDA when CMake finds a Toolkit compatible with MSVC; otherwise they use CPU. The CUDA build requires Toolkit 12.8+. CUDA requires compute capability 8.6+ (RTX 30 series or newer) and a compatible NVIDIA driver. Use `-DSOLVER_ENABLE_GPU=OFF` for CPU-only builds or `-DCMAKE_CUDA_COMPILER=<path-to-nvcc>` for a toolkit outside the compiler search path.
 
 ## Setup and development
 

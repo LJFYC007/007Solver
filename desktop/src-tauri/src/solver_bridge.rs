@@ -166,6 +166,20 @@ async fn read_solver_events(
     }
 }
 
+// Windows packages add an SSE2 service for CPUs that cannot run the /arch:AVX2 build,
+// which may also use FMA and BMI instructions.
+fn service_sidecar() -> &'static str {
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    if !(std::arch::is_x86_feature_detected!("avx2")
+        && std::arch::is_x86_feature_detected!("fma")
+        && std::arch::is_x86_feature_detected!("bmi1")
+        && std::arch::is_x86_feature_detected!("bmi2"))
+    {
+        return "solver-service-sse2";
+    }
+    "solver-service"
+}
+
 pub(crate) fn start_solver(app: &AppHandle, scenario: Value) -> Result<u64, String> {
     let mut request = serde_json::to_vec(&scenario).map_err(|error| error.to_string())?;
     request.push(b'\n');
@@ -176,7 +190,7 @@ pub(crate) fn start_solver(app: &AppHandle, scenario: Value) -> Result<u64, Stri
     let result = (|| {
         let sidecar = app
             .shell()
-            .sidecar("solver-service")
+            .sidecar(service_sidecar())
             .map_err(|error| error.to_string())?
             .args(["--stdin"]);
         let (receiver, mut child) = sidecar.spawn().map_err(|error| error.to_string())?;

@@ -1,0 +1,8 @@
+{
+    "bundle": {
+        "externalBin": ["binaries/solver-service", "binaries/solver-service-sse2"],
+        "resources": {
+            "binaries/*.dll": "./"
+        }
+    }
+}

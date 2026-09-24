@@ -237,7 +237,7 @@ bool DeviceAvailable()
     if (status != cudaSuccess || count == 0)
         return false;
     cudaDeviceProp properties{};
-    return cudaGetDeviceProperties(&properties, 0) == cudaSuccess && properties.major * 10 + properties.minor >= 89;
+    return cudaGetDeviceProperties(&properties, 0) == cudaSuccess && properties.major * 10 + properties.minor >= 86;
 }
 std::uint64_t DeviceMemoryBudget()
 {
