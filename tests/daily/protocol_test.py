@@ -175,10 +175,12 @@ class ProtocolRobustnessTest(unittest.TestCase):
                 if node["kind"] == "decision":
                     self.check_decision(node, board)
                 elif node["kind"] == "chance":
+                    # AnalysisSession omits cards that every live hand pair blocks, so only a subset is guaranteed.
                     cards = [outcome["card"] for outcome in node["outcomes"]]
                     self.assertEqual(len(set(cards)), len(cards))
                     self.assertFalse(set(cards) & board)
-                    self.assertEqual(len(cards), 52 - len(board))
+                    self.assertTrue(cards)
+                    self.assertLessEqual(len(cards), 52 - len(board))
                 else:
                     self.assertEqual(node["kind"], "terminal")
                     self.assertIn(node["result"]["reason"], ("fold", "showdown"))
@@ -229,17 +231,21 @@ class ProtocolRobustnessTest(unittest.TestCase):
 
     # KI-1 (tests/daily/README.md): nlohmann's parse error quotes the invalid bytes, the reply
     # cannot be serialized, and the exception escapes the per-request handler, so the service
-    # reports "failed" and exits 1. Remove expectedFailure once the service survives this.
-    @unittest.expectedFailure
-    def test_invalid_utf8_inside_string_gets_error_reply(self):
-        self.assert_error_reply(b'{"requestId": 3, "command": "query_node", "nodeId": 0, "x": "\xff\xfe"}')
-        self.query_ok(4, "query_node", 0)
+    # reports "failed" and exits 1. These tests pin that exact shape; once they fail with
+    # "KI-1 appears fixed", replace them with tests expecting an error reply and a live session.
+    def assert_ki1_ends_session(self, raw):
+        self.session.write(raw)
+        message = self.session.receive()
+        self.assertEqual(message.get("event"), "failed", f"KI-1 appears fixed: {message}")
+        self.assertIn("UTF-8", message["message"])
+        replies, code = self.session.finish()
+        self.assertEqual((replies, code), ([], 1))
 
-    @unittest.expectedFailure
-    def test_invalid_utf8_outside_json_gets_error_reply(self):
-        self.assert_error_reply(b"\xff\xfe not json")
-        self.query_ok(4, "query_node", 0)
+    def test_ki1_invalid_utf8_inside_string_ends_session(self):
+        self.assert_ki1_ends_session(b'{"requestId": 3, "command": "query_node", "nodeId": 0, "x": "\xff\xfe"}')
 
+    def test_ki1_invalid_utf8_outside_json_ends_session(self):
+        self.assert_ki1_ends_session(b"\xff\xfe not json")
 
 if __name__ == "__main__":
     unittest.main()

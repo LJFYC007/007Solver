@@ -9,8 +9,10 @@
 //       edge between lanes that share data changes results under one of them.
 #include "Dialect.h"
 #include "FiberRuntime.h"
+#include "LaneCheck.h"
 #include <cstring>
 #include <limits>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 
@@ -59,6 +61,13 @@ std::string Env(const char* name, const char* fallback)
     return value && *value ? value : fallback;
 }
 
+// The dialects keep launch indices and CUDA shared memory in process-wide state.
+std::recursive_mutex& DialectMutex()
+{
+    static std::recursive_mutex mutex;
+    return mutex;
+}
+
 enum class Schedule
 {
     InOrder,
@@ -89,6 +98,14 @@ public:
         else
             throw std::runtime_error("SOLVER_GPU_EMULATION_SCHEDULE must be inorder, lane1-late or lane0-late");
         name_ = std::string(dialect_->Name()) + " emulation (" + order + ", " + schedule + ")";
+        // The lane schedules replay only legal orders of a legal capture (see LaneCheck.h).
+        for (U32 player = 0; player < 2; ++player)
+        {
+            const auto check = emu::CheckLanes(plan, player);
+            if (!check.errors.empty())
+                throw std::runtime_error("GPU plan violates the two-lane CUDA schedule: " + check.errors.front());
+        }
+        std::lock_guard<std::recursive_mutex> lock(DialectMutex());
 
         const auto sources = plan.Buffers();
         for (std::size_t i = 0; i < kBufferCount; ++i)
@@ -104,12 +121,19 @@ public:
         for (const auto index : {RegretsBuffer, SumsBuffer, FlagsBuffer, StampsBuffer})
             std::memset(buffers_.data[index].data(), 0, sources[index].bytes);
         SetState(shape_);
+        // MetalExecutor encodes initialization passes without LaunchPass; CudaExecutor applies it.
         for (const auto& pass : plan.initialization)
-            Execute(pass, 0);
+            dialect_->Dispatch(buffers_, dialect_->LaunchPassOnInitialization() ? LaunchPass(pass, shape_, 0) : pass, 0, shape_, reverse_);
     }
     const char* Name() const override { return name_.c_str(); }
     void Update(const State& state) override
     {
+        std::lock_guard<std::recursive_mutex> lock(DialectMutex());
+        // Hardware keeps the previous update's scratch; poison it so a read before this
+        // update's write shows up as NaN, or as a set flag followed by NaN values.
+        Poison(ScratchBuffer);
+        Poison(ValuesBuffer);
+        std::memset(buffers_.data[FlagsBuffer].data(), 0xff, buffers_.data[FlagsBuffer].size());
         SetState(state);
         std::vector<Pass> deferred;
         std::size_t forked = 0; // deferred lane-0 passes that the latest fork covers
@@ -175,7 +199,7 @@ public:
         const auto* regrets = buffers_.As<const float>(RegretsBuffer);
         const auto* sums = buffers_.As<const float>(SumsBuffer);
         const auto* stamps = buffers_.As<const std::uint32_t>(StampsBuffer);
-        TrainingState state{std::vector<float>(regrets, regrets + entries_), std::vector<float>(sums, sums + entries_)};
+        TrainingState state{std::vector<float>(regrets, regrets + entries_), std::vector<float>(sums, sums + entries_), {}};
         state.stamps = NewestStamps(std::vector<std::uint32_t>(stamps, stamps + 2 * std::size_t(shape_.stampCount)));
         return state;
     }

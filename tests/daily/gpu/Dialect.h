@@ -25,6 +25,7 @@ public:
     virtual ~Dialect() = default;
     virtual const char* Name() const = 0;
     virtual void Dispatch(DeviceBuffers& buffers, const Pass& pass, U32 player, const State& shape, bool reverse) = 0;
+    virtual bool LaunchPassOnInitialization() const { return true; }
 };
 std::unique_ptr<Dialect> MakeCudaDialect();
 std::unique_ptr<Dialect> MakeMetalDialect();

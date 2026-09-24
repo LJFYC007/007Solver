@@ -57,8 +57,11 @@ public:
     unsigned Local() const { return current_->local; }
 
     // Runs body(local) for every local in [0, size); reverse resumes high locals first.
-    void Run(unsigned size, bool reverse, const std::function<void(unsigned)>& body)
+    // allThreadsAtBarriers forbids a thread from exiting before a barrier the others reach,
+    // as Metal requires; CUDA counts exited threads as arrived.
+    void Run(unsigned size, bool reverse, bool allThreadsAtBarriers, const std::function<void(unsigned)>& body)
     {
+        allThreadsAtBarriers_ = allThreadsAtBarriers;
         if (fibers_.size() < size)
         {
             fibers_.resize(size);
@@ -71,7 +74,9 @@ public:
         live_ = size;
         arrived_ = 0;
         generation_ = 0;
+        barrierSite_ = 0;
         warpArrived_.assign(warps, 0);
+        warpSite_.assign(warps, 0);
         warpGeneration_.assign(warps, 0);
         warpLive_.assign(warps, 0);
         exchange_.assign(2 * std::size_t(warps) * kWarp, 0.0f);
@@ -115,10 +120,17 @@ public:
         current_ = nullptr;
     }
 
-    // __syncthreads / threadgroup_barrier; the vote implements __syncthreads_or.
-    bool BarrierOr(bool vote)
+    // __syncthreads / threadgroup_barrier; the vote implements __syncthreads_or. site
+    // identifies the call (its source line) so threads at different barriers abort.
+    bool BarrierOr(bool vote, unsigned site)
     {
         const unsigned generation = generation_;
+        if (allThreadsAtBarriers_ && live_ != size_)
+            Fail("a thread exited before a threadgroup barrier");
+        if (arrived_ == 0)
+            barrierSite_ = site;
+        else if (barrierSite_ != site)
+            Fail("threads arrived at different barriers");
         votes_[current_->local] = vote ? 1 : 0;
         if (++arrived_ == live_)
             ReleaseBarrier();
@@ -126,15 +138,19 @@ public:
             Wait(&generation_, generation);
         return result_[generation & 1];
     }
-    void Barrier() { BarrierOr(false); }
+    void Barrier(unsigned site) { BarrierOr(false, site); }
 
     // Every lane of the caller's warp deposits a value; returns the warp's 32 values.
     // All 32 lanes must be live, as full-mask CUDA shuffles and Metal SIMD ops require.
-    const float* WarpCollect(float value)
+    const float* WarpCollect(float value, unsigned site)
     {
         const unsigned local = current_->local, warp = local / kWarp;
         if (warpLive_[warp] != kWarp)
             Fail("warp collective with inactive lanes");
+        if (warpArrived_[warp] == 0)
+            warpSite_[warp] = site;
+        else if (warpSite_[warp] != site)
+            Fail("lanes of one warp arrived at different collectives");
         const unsigned generation = warpGeneration_[warp];
         float* slot = exchange_.data() + (std::size_t(generation & 1) * warpLive_.size() + warp) * kWarp;
         slot[local % kWarp] = value;
@@ -169,9 +185,10 @@ private:
     Fiber* current_ = nullptr;
     void* scheduler_ = nullptr;
     const std::function<void(unsigned)>* body_ = nullptr;
-    unsigned size_ = 0, live_ = 0, arrived_ = 0, generation_ = 0;
+    unsigned size_ = 0, live_ = 0, arrived_ = 0, generation_ = 0, barrierSite_ = 0;
+    bool allThreadsAtBarriers_ = false;
     bool result_[2] = {false, false};
-    std::vector<unsigned> warpArrived_, warpGeneration_, warpLive_;
+    std::vector<unsigned> warpArrived_, warpGeneration_, warpLive_, warpSite_;
     std::vector<float> exchange_;
     std::vector<unsigned char> votes_;
 

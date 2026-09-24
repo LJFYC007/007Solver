@@ -6,6 +6,9 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#if defined(__SANITIZE_ADDRESS__)
+#include <sanitizer/asan_interface.h>
+#endif
 
 namespace emu_cuda
 {
@@ -20,34 +23,40 @@ inline Dim3 ThreadIdx()
     auto* group = emu::Group::Active();
     return group ? Dim3{group->Local(), 0, 0} : threadValue;
 }
-// Dynamic shared memory; re-poisoned for every block.
+// Dynamic shared memory, re-poisoned for every block; under ASan the bytes past the launch's
+// dynamic size are unaddressable, so overruns are reported.
 constexpr std::size_t kSharedFloats = 1 << 16;
 float groupMemory[kSharedFloats];
 
-inline void __syncthreads()
+// Intrinsics take the kernel source line of their call so mismatched barriers abort.
+inline void SyncThreads(unsigned site)
 {
-    emu::Group::Current().Barrier();
+    emu::Group::Current().Barrier(site);
 }
-inline int __syncthreads_or(int vote)
+inline int SyncThreadsOr(int vote, unsigned site)
 {
-    return emu::Group::Current().BarrierOr(vote != 0) ? 1 : 0;
+    return emu::Group::Current().BarrierOr(vote != 0, site) ? 1 : 0;
 }
-inline float __shfl_up_sync(unsigned mask, float value, unsigned delta)
+inline float ShuffleUp(unsigned mask, float value, unsigned delta, unsigned site)
 {
     if (mask != 0xffffffffu)
         emu::Fail("partial shuffle mask");
-    const float* lanes = emu::Group::Current().WarpCollect(value);
+    const float* lanes = emu::Group::Current().WarpCollect(value, site);
     const unsigned lane = emu::Group::Current().Local() % emu::kWarp;
     return lane >= delta ? lanes[lane - delta] : value;
 }
-inline float __shfl_sync(unsigned mask, float value, int source)
+inline float Shuffle(unsigned mask, float value, int source, unsigned site)
 {
     if (mask != 0xffffffffu)
         emu::Fail("partial shuffle mask");
-    return emu::Group::Current().WarpCollect(value)[unsigned(source) % emu::kWarp];
+    return emu::Group::Current().WarpCollect(value, site)[unsigned(source) % emu::kWarp];
 }
 } // namespace emu_cuda
 
+#define __syncthreads() SyncThreads(__LINE__)
+#define __syncthreads_or(vote) SyncThreadsOr(vote, __LINE__)
+#define __shfl_up_sync(mask, value, delta) ShuffleUp(mask, value, delta, __LINE__)
+#define __shfl_sync(mask, value, source) Shuffle(mask, value, source, __LINE__)
 #define __device__
 #define __forceinline__ inline
 #define __global__
@@ -62,6 +71,10 @@ namespace emu_cuda
 #undef threadIdx
 #undef blockIdx
 #undef blockDim
+#undef __syncthreads
+#undef __syncthreads_or
+#undef __shfl_up_sync
+#undef __shfl_sync
 
 namespace emu
 {
@@ -81,6 +94,9 @@ public:
         const auto handCount = shape.hands[player];
         const unsigned group = pass.operation == Kernel::Terminal ? 64u : handTiles ? (std::min(handCount, 256u) + 31) / 32 * 32 : 256u;
         const std::uint64_t threads = std::uint64_t(pass.count) * pass.lanes;
+        // CudaExecutor computes count * lanes in 32 bits.
+        if (threads >> 32)
+            Fail("launch size overflows the executor's 32-bit arithmetic");
         const unsigned blocksX = handTiles                            ? pass.count
                                  : pass.operation == Kernel::Terminal ? pass.count
                                                                       : unsigned((threads + group - 1) / group);
@@ -90,8 +106,9 @@ public:
         const std::size_t shared = pass.operation == Kernel::Terminal ? TerminalSharedBytes(shape) : 0;
         if (shared > sizeof(groupMemory))
             Fail("dynamic shared memory exceeds emulator capacity");
-        if (shared > 99 * 1024)
-            Fail("dynamic shared memory exceeds the 99 KiB opt-in limit of compute capability 8.9");
+        // CudaExecutor never raises cudaFuncAttributeMaxDynamicSharedMemorySize.
+        if (shared > 48 * 1024)
+            Fail("dynamic shared memory exceeds CUDA's 48 KiB default limit");
         blockDimValue = {group, 1, 1};
         const auto* statePointer = b.As<const State>(StateBuffer);
         const auto call = [&](auto kernel)
@@ -136,8 +153,12 @@ public:
             blockValue = {unsigned(index % blocksX), unsigned(index / blocksX), 0};
             if (pass.operation == Kernel::Terminal)
             {
+#if defined(__SANITIZE_ADDRESS__)
+                ASAN_UNPOISON_MEMORY_REGION(groupMemory, sizeof(groupMemory));
+                ASAN_POISON_MEMORY_REGION(reinterpret_cast<char*>(groupMemory) + shared, sizeof(groupMemory) - shared);
+#endif
                 std::fill_n(groupMemory, shared / sizeof(float), std::numeric_limits<float>::quiet_NaN());
-                group_.Run(group, reverse, [&](unsigned) { call(kernel); });
+                group_.Run(group, reverse, false, [&](unsigned) { call(kernel); });
             }
             else
                 for (unsigned t = 0; t < group; ++t)

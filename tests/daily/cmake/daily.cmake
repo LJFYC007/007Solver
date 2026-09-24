@@ -36,8 +36,9 @@ function(daily_patch)
         set(emulation_sources "${DAILY_DIR}/gpu/EmulatedExecutor.cpp" "${DAILY_DIR}/gpu/CudaDialect.cpp" "${DAILY_DIR}/gpu/MetalDialect.cpp")
         target_sources(solver_lib PRIVATE ${emulation_sources})
         target_include_directories(solver_lib PRIVATE "${DAILY_DIR}/gpu" "${CMAKE_BINARY_DIR}/daily-generated")
-        # The fiber switch is hand-written asm without shadow-stack support.
-        set_source_files_properties(${emulation_sources} TARGET_DIRECTORY solver_lib PROPERTIES COMPILE_OPTIONS "-fcf-protection=none")
+        # The fiber switch is hand-written asm without shadow-stack support; no FMA contraction,
+        # mirroring nvcc --fmad=false.
+        set_source_files_properties(${emulation_sources} TARGET_DIRECTORY solver_lib PROPERTIES COMPILE_OPTIONS "-fcf-protection=none;-ffp-contract=off")
     elseif(DAILY_BACKEND STREQUAL "cuda")
         # Mirror the repository's CUDA settings from the tested revision instead of copying them.
         file(READ "${PROJECT_SOURCE_DIR}/solver/CMakeLists.txt" solver_cmake)
@@ -63,6 +64,7 @@ function(daily_patch)
     foreach(tool fingerprint parity planstats cpu_determinism)
         add_executable(daily_${tool} EXCLUDE_FROM_ALL "${DAILY_DIR}/tools/${tool}.cpp")
         target_link_libraries(daily_${tool} PRIVATE solver_service_support)
+        target_include_directories(daily_${tool} PRIVATE "${DAILY_DIR}/gpu")
     endforeach()
     _message(STATUS "Daily harness backend: ${DAILY_BACKEND}")
 endfunction()

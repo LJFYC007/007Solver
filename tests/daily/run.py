@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import statistics
 import subprocess
 import sys
@@ -28,6 +29,24 @@ HISTORY = HARNESS / "history.jsonl"
 NVCC = BUILD / "toolchains/cuda/nvidia/cu13/bin/nvcc"
 CPUS = os.cpu_count() or 4
 SANITIZER_PATTERN = re.compile(r"ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:")
+
+
+def sanitizer_env(stream, extra=None):
+    """Sanitizer reports from every child process land in <log>.asan.<pid>/.ubsan.<pid>, exit 86."""
+    prefix = stream.name[: -len(".log")]
+    for stale in Path(prefix).parent.glob(Path(prefix).name + ".*san.*"):
+        stale.unlink()
+    return {
+        "ASAN_OPTIONS": f"detect_leaks=1:exitcode=86:log_path={prefix}.asan",
+        "UBSAN_OPTIONS": f"print_stacktrace=1:exitcode=86:log_path={prefix}.ubsan",
+        **(extra or {}),
+    }
+
+
+def sanitizer_reports(stream, output=""):
+    prefix = Path(stream.name[: -len(".log")])
+    files = sorted(prefix.parent.glob(prefix.name + ".*san.*"))
+    return len(files) + (1 if SANITIZER_PATTERN.search(output) else 0)
 EMULATION_CONFIGS = [(d, o, s) for d in ("cuda", "metal") for o in ("forward", "reverse") for s in ("inorder", "lane1-late", "lane0-late")]
 
 
@@ -67,14 +86,18 @@ class Runner:
         if blocked:
             return Result("SKIP", "blocked by " + ", ".join(sorted(blocked)))
         start = time.time()
-        log = self.log_path(stage.name)
-        try:
-            with open(log, "w") as stream:
+        try:  # a harness defect must fail its stage, not hide it or stall the scheduler
+            with open(self.log_path(stage.name), "w") as stream:
                 result = stage.run(stream)
-        except Exception as error:  # a harness defect must not hide other stages
+            if not isinstance(result, Result):
+                raise TypeError(f"stage returned {result!r}")
+        except Exception as error:
             result = Result("FAIL", f"harness error: {error!r}")
         result.metrics["seconds"] = round(time.time() - start, 1)
-        print(f"[{time.strftime('%H:%M:%S')}] {result.status:5} {stage.name} ({result.metrics['seconds']}s) {result.summary}", flush=True)
+        try:
+            print(f"[{time.strftime('%H:%M:%S')}] {result.status:5} {stage.name} ({result.metrics['seconds']}s) {result.summary}", flush=True)
+        except OSError:
+            pass
         return result
 
     def run_sequential(self, stages):
@@ -87,11 +110,14 @@ class Runner:
         threads = []
 
         def worker(stage):
-            result = self.execute(stage)
-            with self.lock:
-                self.results[stage.name] = result
-                self.free += stage.cpus
-                self.lock.notify_all()
+            result = Result("FAIL", "harness error: stage thread died")
+            try:
+                result = self.execute(stage)
+            finally:
+                with self.lock:
+                    self.results[stage.name] = result
+                    self.free += stage.cpus
+                    self.lock.notify_all()
 
         with self.lock:
             while pending:
@@ -106,27 +132,33 @@ class Runner:
                 threads.append(thread)
         for thread in threads:
             thread.join()
+        for stage in stages:
+            self.results.setdefault(stage.name, Result("FAIL", "harness error: no result recorded"))
 
 
 def sh(stream, command, cwd=ROOT, env=None, timeout=7200, check=False):
     """Runs a command, appending its combined output to the stage log; returns (code, output)."""
     stream.write(f"$ {' '.join(map(str, command))}\n")
     stream.flush()
+    # A new session lets a timeout kill grandchildren too (ctest's test binaries, services, npm).
+    process = subprocess.Popen(
+        [str(part) for part in command],
+        cwd=cwd,
+        env={**os.environ, **(env or {})},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        errors="replace",
+        text=True,
+        start_new_session=True,
+    )
     try:
-        process = subprocess.run(
-            [str(part) for part in command],
-            cwd=cwd,
-            env={**os.environ, **(env or {})},
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=timeout,
-            errors="replace",
-            text=True,
-        )
-        code, output = process.returncode, process.stdout
-    except subprocess.TimeoutExpired as error:
-        code, output = -1, (error.stdout or b"").decode(errors="replace") if isinstance(error.stdout, bytes) else (error.stdout or "")
-        output += f"\nTIMEOUT after {timeout}s\n"
+        output, _ = process.communicate(timeout=timeout)
+        code = process.returncode
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        output, _ = process.communicate()
+        code = -1
+        output = (output or "") + f"\nTIMEOUT after {timeout}s\n"
     stream.write(output + f"\n[exit {code}]\n")
     stream.flush()
     if check and code != 0:
@@ -151,7 +183,7 @@ def gtest_report(path):
 
 def prepare(ref):
     def run(stream):
-        sh(stream, ["git", "fetch", "-q", "origin", "main"], check=True)
+        sh(stream, ["git", "fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main"], check=True)
         sha = git("rev-parse", ref)
         if not (SRC / ".git").exists():
             sh(stream, ["git", "worktree", "prune"])
@@ -269,11 +301,14 @@ def cpu_determinism():
 
 def protocol(build_name, env=None, cpus=2, estimate=20):
     def run(stream):
+        environment = sanitizer_env(stream, env) if build_name == "sanitize" else env
         code, output = sh(
-            stream, [sys.executable, HARNESS / "protocol_test.py", BUILD / build_name / "solver/solver_service", SRC / "tests/fixtures", "-v"], env=env
+            stream,
+            [sys.executable, HARNESS / "protocol_test.py", BUILD / build_name / "solver/solver_service", SRC / "tests/fixtures", "-v"],
+            env=environment,
         )
-        if SANITIZER_PATTERN.search(output):
-            return Result("FAIL", "sanitizer report")
+        if build_name == "sanitize" and sanitizer_reports(stream, output):
+            return Result("FAIL", f"{sanitizer_reports(stream, output)} sanitizer reports; see {Path(stream.name).name[:-4]}.*san.*")
         tail = output.strip().splitlines()[-1] if output.strip() else ""
         if code:
             return Result("FAIL", tail)
@@ -284,12 +319,12 @@ def protocol(build_name, env=None, cpus=2, estimate=20):
 
 def sanitize_cpu():
     def run(stream):
-        env = {"SOLVER_GPU_EMULATION": "off", "ASAN_OPTIONS": "detect_leaks=1", "UBSAN_OPTIONS": "print_stacktrace=1"}
+        env = sanitizer_env(stream, {"SOLVER_GPU_EMULATION": "off"})
         report = stream.name + ".gtest.json"
         code1, out1 = sh(stream, [BUILD / "sanitize/007SolverTests", f"--gtest_output=json:{report}"], env=env)
         code2, out2 = sh(stream, [sys.executable, SRC / "tests/cli_e2e.py", BUILD / "sanitize/solver/solver_service"], env=env)
-        if SANITIZER_PATTERN.search(out1 + out2):
-            return Result("FAIL", "sanitizer report")
+        if sanitizer_reports(stream, out1 + out2):
+            return Result("FAIL", f"{sanitizer_reports(stream, out1 + out2)} sanitizer reports")
         if code1 or code2:
             return Result("FAIL", f"gtest exit {code1}, cli exit {code2}")
         return Result("PASS", f"{len(gtest_report(report))} gtest cases + CLI e2e clean under ASan/UBSan/LSan")
@@ -348,8 +383,9 @@ def emulated_cli(dialect, estimate):
 RACE_WORKLOADS = {
     # name: (scenario path, updates, configurations)
     "backend-parity": (SRC / "tests/fixtures/backend-parity.json", 12, EMULATION_CONFIGS),
-    "weighted-flop": (SRC / "tests/fixtures/weighted-flop.json", 8, EMULATION_CONFIGS),
-    "raise-flop": (SRC / "tests/fixtures/raise-flop.json", 8, EMULATION_CONFIGS),
+    # Single-lane plans: lane schedules would repeat inorder.
+    "weighted-flop": (SRC / "tests/fixtures/weighted-flop.json", 8, [c for c in EMULATION_CONFIGS if c[2] == "inorder"]),
+    "raise-flop": (SRC / "tests/fixtures/raise-flop.json", 8, [c for c in EMULATION_CONFIGS if c[2] == "inorder"]),
     "btn-bb-srp-dry": (BUILD / "scenarios/btn-bb-srp-dry.json", 4, EMULATION_CONFIGS[:6] + [EMULATION_CONFIGS[6], EMULATION_CONFIGS[10]]),
     "utg-bb-wide": (SRC / "tests/fixtures/utg-bb-wide.json", 2, EMULATION_CONFIGS[:6] + [EMULATION_CONFIGS[6]]),
 }
@@ -410,35 +446,46 @@ def plan_coverage():
     def run(stream):
         paths = [SRC / f"tests/fixtures/{name}.json" for name in ("backend-parity", "weighted-flop", "raise-flop", "utg-bb-wide")]
         paths += sorted((BUILD / "scenarios").glob("*.json"))
-        coverage = {}
+        coverage, failures = {}, []
         for path in paths:
             code, output = sh(stream, [BUILD / "emulation/daily_planstats", path])
             match = re.search(r"hands (\d+)/(\d+) .* lane-1 passes (\d+), fork (\d+) wait (\d+) join (\d+)", output)
-            if code or not match:
+            if not match:
                 return Result("FAIL", f"planstats failed for {path.name}")
             coverage[path.stem] = dict(zip(("hands0", "hands1", "lane1", "fork", "wait", "join"), map(int, match.groups())))
-        # tests/README.md: the parity input must keep splitting street regions into several GPU batches.
+            coverage[path.stem]["unorderedPairs"] = sum(map(int, re.findall(r"(\d+) unordered pass pairs", output)))
+            if code:  # lane conflicts, capture errors or an undetected mutation (see LaneCheck.h)
+                failures.append(path.stem)
+        if failures:
+            return Result("FAIL", f"two-lane schedule check failed for {failures}", coverage=coverage)
+        # tests/README.md requires several GPU batches; two-lane batching implies it.
         if coverage["backend-parity"]["lane1"] == 0:
-            return Result("FAIL", "backend-parity no longer splits river regions into two lanes", coverage=coverage)
-        wide = [name for name, value in coverage.items() if max(value["hands0"], value["hands1"]) > 256]
-        return Result("PASS", f"backend-parity lane-1 passes {coverage['backend-parity']['lane1']}; >256-hand inputs: {wide}", coverage=coverage)
+            return Result("FAIL", "backend-parity no longer produces two-lane batches", coverage=coverage)
+        narrow = [name for name in coverage if name.startswith("btn-bb-") and max(coverage[name]["hands0"], coverage[name]["hands1"]) <= 256]
+        if narrow:
+            return Result("FAIL", f"parity scenarios no longer exceed 256 hands: {narrow}", coverage=coverage)
+        pairs = sum(value["unorderedPairs"] for value in coverage.values())
+        return Result("PASS", f"{len(coverage)} plans: no lane conflicts in {pairs} unordered pass pairs; mutations detected", coverage=coverage)
 
     return Stage("gpu-plan-coverage", run, cpus=1, estimate=20, needs={"build-emulation"})
 
 
 def sanitize_gpu(dialect, estimate):
     def run(stream):
+        report = stream.name + ".gtest.json"
         code, output = sh(
             stream,
-            [BUILD / "sanitize/007SolverTests", "--gtest_filter=BackendParity*"],
-            env={"SOLVER_GPU_EMULATION": dialect, "UBSAN_OPTIONS": "print_stacktrace=1"},
+            [BUILD / "sanitize/007SolverTests", "--gtest_filter=BackendParity*", f"--gtest_output=json:{report}"],
+            env=sanitizer_env(stream, {"SOLVER_GPU_EMULATION": dialect}),
             timeout=10800,
         )
-        if SANITIZER_PATTERN.search(output):
-            return Result("FAIL", "sanitizer report")
-        if code or "[  PASSED  ] 1 test" not in output:
-            return Result("FAIL", f"exit {code}")
-        return Result("PASS", f"BackendParity clean under ASan/UBSan on {dialect} kernels")
+        if sanitizer_reports(stream, output):
+            return Result("FAIL", f"{sanitizer_reports(stream, output)} sanitizer reports")
+        tests = gtest_report(report) if Path(report).exists() else {}
+        failed = [name for name, (status, _) in tests.items() if status != "COMPLETED"]
+        if code or failed or not tests:
+            return Result("FAIL", f"exit {code}; failed {failed}")
+        return Result("PASS", f"{len(tests)} BackendParity case(s) clean under ASan/UBSan on {dialect} kernels")
 
     return Stage(f"sanitize-gpu-{dialect}", run, cpus=1, estimate=estimate, needs={"build-sanitize"})
 
@@ -566,7 +613,7 @@ def main():
     args = parser.parse_args()
 
     if args.check_new:
-        subprocess.run(["git", "fetch", "-q", "origin", "main"], cwd=ROOT, check=True)
+        subprocess.run(["git", "fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main"], cwd=ROOT, check=True)
         current, last = git("rev-parse", args.ref), load_state().get("lastTestedMainSha")
         print(f"SKIP {current} already tested" if current == last else f"RUN {last or 'none'} -> {current}")
         return 0
@@ -593,7 +640,7 @@ def main():
         "",
         f"- Tested: `{git('log', '--oneline', '-1', sha) if sha != 'unknown' else sha}`",
         f"- Harness: `{git('rev-parse', '--short', 'HEAD')}`{' (dirty)' if git('status', '--porcelain', '--', 'tests/daily') else ''}",
-        f"- Host: {host_info()['cpu']}, {CPUS} CPUs; wall time {(time.time() - started) / 60:.1f} min",
+        f"- Host: {host_info()['cpu']}, {CPUS} CPUs; {subprocess.run(['g++', '--version'], capture_output=True, text=True).stdout.splitlines()[0]}; wall time {(time.time() - started) / 60:.1f} min",
         f"- Stages: {counts['PASS']} pass, {counts['WARN']} warn, {counts['FAIL']} fail, {counts['SKIP']} skip"
         f" ({sum(name.startswith('emu-race:') for name in results)} race configurations folded into verdicts)",
         "",
@@ -610,7 +657,7 @@ def main():
     print(f"Logs: {runner.run_dir / 'logs'}")
 
     # Only complete runs mark a commit as tested; --check-new skips tested commits.
-    if not (args.no_record or args.only or args.quick) and sha != "unknown":
+    if not (args.no_record or args.only or args.quick or args.ref != "origin/main") and sha != "unknown":
         entry = {
             "run": stamp,
             "mainSha": sha,

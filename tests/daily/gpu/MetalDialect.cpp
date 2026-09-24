@@ -18,27 +18,29 @@ enum class mem_flags
     mem_device,
     mem_threadgroup,
 };
-inline void threadgroup_barrier(mem_flags)
+// Intrinsics take the kernel source line of their call so mismatched barriers abort. Every
+// barrier is emulated as a full fence, which is at least as strong as mem_threadgroup.
+inline void ThreadgroupBarrier(mem_flags, unsigned site)
 {
-    emu::Group::Current().Barrier();
+    emu::Group::Current().Barrier(site);
 }
-inline bool simd_any(bool value)
+inline bool SimdAny(bool value, unsigned site)
 {
-    const float* lanes = emu::Group::Current().WarpCollect(value ? 1.0f : 0.0f);
+    const float* lanes = emu::Group::Current().WarpCollect(value ? 1.0f : 0.0f, site);
     for (unsigned i = 0; i < emu::kWarp; ++i)
         if (lanes[i] != 0.0f)
             return true;
     return false;
 }
-inline float simd_shuffle_up(float value, ushort delta)
+inline float SimdShuffleUp(float value, ushort delta, unsigned site)
 {
-    const float* lanes = emu::Group::Current().WarpCollect(value);
+    const float* lanes = emu::Group::Current().WarpCollect(value, site);
     const unsigned lane = emu::Group::Current().Local() % emu::kWarp;
     return lane >= delta ? lanes[lane - delta] : value;
 }
-inline float simd_shuffle(float value, ushort source)
+inline float SimdShuffle(float value, ushort source, unsigned site)
 {
-    return emu::Group::Current().WarpCollect(value)[source % emu::kWarp];
+    return emu::Group::Current().WarpCollect(value, site)[source % emu::kWarp];
 }
 inline float ldexp(float value, int exponent)
 {
@@ -51,6 +53,10 @@ inline float ldexp(float value, int exponent)
 #define kernel
 #define constant const
 #define threadgroup
+#define threadgroup_barrier(flags) ThreadgroupBarrier(flags, __LINE__)
+#define simd_any(value) SimdAny(value, __LINE__)
+#define simd_shuffle_up(value, delta) SimdShuffleUp(value, delta, __LINE__)
+#define simd_shuffle(value, source) SimdShuffle(value, source, __LINE__)
 namespace emu_metal
 {
 #include "MetalKernels.inc"
@@ -59,6 +65,10 @@ namespace emu_metal
 #undef kernel
 #undef constant
 #undef threadgroup
+#undef threadgroup_barrier
+#undef simd_any
+#undef simd_shuffle_up
+#undef simd_shuffle
 #undef __METAL_VERSION__
 
 namespace emu
@@ -69,6 +79,7 @@ class MetalDialect final : public Dialect
 {
 public:
     const char* Name() const override { return "Metal"; }
+    bool LaunchPassOnInitialization() const override { return false; }
     void Dispatch(DeviceBuffers& b, const Pass& pass, U32, const State& shape, bool reverse) override
     {
         if (!pass.count)
@@ -110,6 +121,7 @@ public:
                 group_.Run(
                     group,
                     reverse,
+                    true,
                     [&](unsigned local) {
                         std::apply(
                             emu_metal::Terminal,
@@ -122,6 +134,9 @@ public:
         }
         // dispatchThreads launches exactly count * lanes threads (non-uniform threadgroups).
         const std::uint64_t threads = std::uint64_t(pass.count) * pass.lanes;
+        // MetalExecutor computes count * lanes in 32 bits.
+        if (threads >> 32)
+            emu::Fail("launch size overflows the executor's 32-bit arithmetic");
         for (std::uint64_t k = 0; k < threads; ++k)
         {
             const uint gid = uint(reverse ? threads - 1 - k : k);
