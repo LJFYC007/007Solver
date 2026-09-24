@@ -1,6 +1,7 @@
 import { Fragment } from "react";
-import { type Player, type SolverNode, actionLabel, formatNumber, isForcedRunout } from "../solver";
+import { type Player, type SolverNode, describeActions, formatNumber, isForcedRunout } from "../solver";
 import { BoardCard } from "./PlayingCards";
+import TimelineChoice from "./TimelineChoice";
 
 export function PostflopTimeline({
     path,
@@ -40,9 +41,9 @@ export function PostflopTimeline({
                                 onClick={onFlop}
                                 aria-label={`Change flop ${board.join(" ")}`}
                             >
-                                <span className="path-node-heading">
+                                <span className="timeline-node-title">
                                     <strong>{node.state.street.toUpperCase()}</strong>
-                                    <b>{formatNumber(node.state.pot)}</b>
+                                    <span>{formatNumber(node.state.pot)}</span>
                                 </span>
                                 <span className="stage-cards">
                                     {board.map((c) => (
@@ -52,9 +53,9 @@ export function PostflopTimeline({
                             </button>
                         )}
                         <section
-                            className={`preflop-node postflop-node${active ? " active" : ""}${index > activeIndex && visible ? " future" : ""}`}
+                            className={`timeline-node${active ? " active" : ""}${index > activeIndex && visible ? " future" : ""}`}
                         >
-                            <button type="button" className="preflop-node-title" onClick={() => onPath(index)}>
+                            <button type="button" className="timeline-node-title" onClick={() => onPath(index)}>
                                 <strong>
                                     {isForcedRunout(node)
                                         ? "All-in"
@@ -69,17 +70,23 @@ export function PostflopTimeline({
                                 {node.kind === "decision" && <span>{formatNumber(node.state.stacks[node.actor])}</span>}
                             </button>
                             {node.kind === "decision" ? (
-                                node.actions.map((a) => (
-                                    <button
-                                        type="button"
-                                        key={a.nextNodeId}
-                                        disabled={disabled}
-                                        className={path[index + 1]?.nodeId === a.nextNodeId ? "chosen" : undefined}
-                                        onClick={() => onAction(index, a.nextNodeId)}
-                                    >
-                                        {actionLabel(a)}
-                                    </button>
-                                ))
+                                describeActions(node)
+                                    .slice()
+                                    .reverse()
+                                    .map((a) => {
+                                        const nextNodeId = node.actions[a.index].nextNodeId;
+                                        return (
+                                            <TimelineChoice
+                                                key={nextNodeId}
+                                                label={a.label}
+                                                size={a.size}
+                                                color={a.color}
+                                                chosen={path[index + 1]?.nodeId === nextNodeId}
+                                                disabled={disabled}
+                                                onClick={() => onAction(index, nextNodeId)}
+                                            />
+                                        );
+                                    })
                             ) : isForcedRunout(node) ? (
                                 <span className="history-node-choice">Betting complete</span>
                             ) : node.kind === "chance" ? (

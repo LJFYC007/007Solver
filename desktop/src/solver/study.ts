@@ -2,14 +2,16 @@ import { nodeFor, solutionFor, type PreflopChoice, type PreflopNode, type TableF
 import {
     aggregatePreflopActions,
     comboCount,
+    postflopOrder,
+    preflopActionKind,
     preflopOutcome,
     probabilities,
     replayPreflop,
     type PostflopScenario,
     type PreflopState,
 } from "./preflop";
-import { aggregateActions, handClassCombos, isForcedRunout, orderedActions, type AggregatedAction } from "./strategy";
-import type { DecisionNode, HandStrategy, Player, SolverNode, SolverStatus } from "./types";
+import { aggregateActions, formatNumber, handClassCombos, isForcedRunout, type AggregatedAction } from "./strategy";
+import type { DecisionAction, DecisionNode, HandStrategy, Player, SolverNode, SolverStatus } from "./types";
 
 export interface PreflopEntry {
     node: PreflopNode;
@@ -18,7 +20,9 @@ export interface PreflopEntry {
 }
 export interface DetailAction {
     id: string;
+    kind: DecisionAction["kind"];
     label: string;
+    size?: string;
     color: string;
     probability: number;
 }
@@ -26,7 +30,10 @@ export interface DetailCombo {
     cards: string[];
     weight: number;
     actions: DetailAction[];
-    description?: string;
+    /** Postflop only: the node strategy EV, or null until it is available. */
+    ev?: number | null;
+    /** Shown instead of the strategy when there is none, and as the tile tooltip. */
+    description: string;
 }
 export interface SpotSeat {
     position: string;
@@ -37,6 +44,9 @@ export interface SpotSeat {
     combos?: number;
     ev?: number | null;
 }
+
+export const stopReasonLabel = (reason: "accuracy" | "iterationLimit") =>
+    reason === "accuracy" ? "Target reached" : "Update limit reached";
 
 const handKey = (cards: string[]) => cards.slice().sort().join("");
 const percent = (value: number) => `${(value * 100).toFixed(2)}%`;
@@ -70,6 +80,7 @@ function preflopHandDetails(selected: string, range: Record<string, number>, pre
         preNode && selectedWeights
             ? preNode.actions.map((action, index) => ({
                   id: action.code,
+                  kind: preflopActionKind(action.label),
                   label: action.label,
                   color: action.color,
                   probability: selectedWeights[index],
@@ -101,11 +112,14 @@ function postflopHandDetails(
                 hand && hand.ownReachWeight > 0 && hand.strategy.length === actionCount
                     ? postActions.map((a) => ({
                           id: String(a.index),
+                          kind: a.kind,
                           label: a.label,
+                          size: a.size,
                           color: a.color,
                           probability: hand.strategy[a.index],
                       }))
                     : [],
+            ev: hand ? hand.nodeStrategyEv : undefined,
             description: blocked
                 ? "Blocked by board"
                 : !hand
@@ -114,7 +128,7 @@ function postflopHandDetails(
                     ? "Zero own reach"
                     : hand.marginalReachMass === 0
                       ? "No compatible opponent"
-                      : `EV ${hand.nodeStrategyEv?.toFixed(3) ?? "—"}`,
+                      : `Reach ${percent(hand.ownReachWeight)}`,
         };
     });
 }
@@ -224,12 +238,17 @@ export function buildStudyView({
                     .find((node): node is DecisionNode => node.kind === "decision")
               : undefined;
     const alive = state.seats.filter((seat) => !seat.folded);
+    const order = postflopOrder(solution.positions);
+    const [oop, ip] = fullState.seats
+        .filter((seat) => !seat.folded)
+        .sort((a, b) => order.indexOf(a.position) - order.indexOf(b.position));
+    const raises = history.filter((choice) => preflopActionKind(choice.action) === "raise").length;
     const preActor = state.seats.find((seat) => seat.position === preNode?.actor);
     const range = (preActor ?? alive.find((seat) => seat.position === rangeSeat) ?? alive[0]).range;
     const available = preNode
         ? Object.fromEntries(Object.entries(range).filter(([hand]) => !!preNode.hands[hand]))
         : range;
-    const postActions = decision ? orderedActions(aggregateActions(decision)) : [];
+    const postActions = decision ? aggregateActions(decision) : [];
     const actions: (DetailAction & { combos: number; nextNodeId?: number })[] = showPostflop
         ? postActions.map((action) => ({
               ...action,
@@ -287,6 +306,12 @@ export function buildStudyView({
             complete: fullState.complete,
             pot: fullState.pot,
             canPlayPostflop,
+            matchup: canPlayPostflop
+                ? {
+                      title: `${ip.position} vs ${oop.position}`,
+                      detail: `${raises === 0 ? "Limped pot" : raises === 1 ? "Single-raised pot" : `${raises + 1}-bet pot`} · ${formatNumber(fullState.pot)} pot · ${formatNumber(solution.stack - ip.committed)} behind`,
+                  }
+                : undefined,
             resultLabel:
                 outcome === "fold"
                     ? "Hand complete"

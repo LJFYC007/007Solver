@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import type { SolverStatus } from "../solver";
-import BettingTreeSettings from "./BettingTreeSettings";
+import BettingTreeSettings, { SizePills } from "./BettingTreeSettings";
+import { BoardCard } from "./PlayingCards";
 import type { PostflopScenario } from "../solver/preflop";
-import { STREETS, type BettingTreeDraft } from "../solver/bettingTree";
+import { STREETS, parseBettingTree, type BettingTreeDraft } from "../solver/bettingTree";
+import { stopReasonLabel } from "../solver/study";
 
 export default function SolvePanel({
     board,
@@ -20,10 +22,12 @@ export default function SolvePanel({
     bettingTree,
     onBettingTree,
     scenario,
+    matchup,
     canSolve,
     error,
 }: {
     scenario?: PostflopScenario;
+    matchup?: { title: string; detail: string };
     canSolve: boolean;
     error?: string;
     board: string[];
@@ -63,6 +67,12 @@ export default function SolvePanel({
     const updates = result?.iterations ?? progress?.completedIterations;
     const limit = result ? scenario?.iterations : progress?.totalIterations;
     const target = result?.targetAccuracyPercent ?? progress?.targetAccuracyPercent;
+    let treeError: string | undefined;
+    try {
+        parseBettingTree(bettingTree);
+    } catch (failure) {
+        treeError = failure instanceof Error ? failure.message : String(failure);
+    }
     const phase =
         status.state === "solving"
             ? status.phase === "finalizing"
@@ -79,9 +89,7 @@ export default function SolvePanel({
                 <h2>Postflop solver</h2>
                 <span className={`solve-state${result?.stopReason === "accuracy" ? " reached" : ""}`}>
                     {result
-                        ? result.stopReason === "accuracy"
-                            ? "Target reached"
-                            : "Update limit reached"
+                        ? stopReasonLabel(result.stopReason)
                         : busy
                           ? "Solving"
                           : status.state === "failed"
@@ -89,6 +97,19 @@ export default function SolvePanel({
                             : "Setup"}
                 </span>
             </header>
+            {matchup && (
+                <div className="solve-spot">
+                    <span className="solve-spot-board">
+                        {Array.from({ length: 3 }, (_, i) => (
+                            <BoardCard key={i} card={board[i]} />
+                        ))}
+                    </span>
+                    <span>
+                        <strong>{matchup.title}</strong>
+                        <small>{matchup.detail}</small>
+                    </span>
+                </div>
+            )}
             {(busy || result) && (
                 <div className="solve-report">
                     <dl className="solve-metrics">
@@ -137,15 +158,20 @@ export default function SolvePanel({
                                     {STREETS.map((street) => (
                                         <tr key={street}>
                                             <th>{street}</th>
-                                            <td>{scenario.bettingTree[street].bet.join(", ") || "None"}</td>
-                                            <td>{scenario.bettingTree[street].raise.join(", ") || "None"}</td>
+                                            <td>
+                                                <SizePills sizes={scenario.bettingTree[street].bet} />
+                                            </td>
+                                            <td>
+                                                <SizePills sizes={scenario.bettingTree[street].raise} />
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
                             <p>
-                                {scenario.bettingTree.maxRaises} raises per street <span>·</span> All-in SPR{" "}
-                                {scenario.bettingTree.allInSpr}
+                                {scenario.bettingTree.maxRaises}{" "}
+                                {scenario.bettingTree.maxRaises === 1 ? "raise" : "raises"} per street <span>·</span>{" "}
+                                All-in SPR {scenario.bettingTree.allInSpr}
                             </p>
                         </details>
                     )}
@@ -164,8 +190,8 @@ export default function SolvePanel({
                                     min="0.000001"
                                     step="any"
                                     disabled={changing}
-                                    value={accuracyPercent}
-                                    onChange={(e) => onAccuracyPercent(Number(e.target.value))}
+                                    value={Number.isNaN(accuracyPercent) ? "" : accuracyPercent}
+                                    onChange={(e) => onAccuracyPercent(e.target.valueAsNumber)}
                                 />
                                 <span>%</span>
                             </div>
@@ -180,12 +206,17 @@ export default function SolvePanel({
                                 max="2147483647"
                                 step="1"
                                 disabled={changing}
-                                value={iterations}
-                                onChange={(e) => onIterations(Number(e.target.value))}
+                                value={Number.isNaN(iterations) ? "" : iterations}
+                                onChange={(e) => onIterations(e.target.valueAsNumber)}
                             />
                         </label>
                     </div>
-                    <BettingTreeSettings value={bettingTree} disabled={changing} onChange={onBettingTree} />
+                    <BettingTreeSettings
+                        value={bettingTree}
+                        disabled={changing}
+                        error={treeError}
+                        onChange={onBettingTree}
+                    />
                 </details>
             )}
             {error && (
@@ -218,7 +249,7 @@ export default function SolvePanel({
                         <button
                             type="button"
                             className="solve-button"
-                            disabled={!canSolve || board.length !== 3 || changing}
+                            disabled={!canSolve || board.length !== 3 || changing || !!treeError}
                             onClick={ready ? onResolve : onSolve}
                         >
                             {ready ? "Solve again" : status.state === "failed" ? "Retry solve" : "Solve"}

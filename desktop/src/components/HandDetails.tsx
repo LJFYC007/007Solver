@@ -7,6 +7,11 @@ function frequency(probability: number) {
     return probability > 0 && probability < 0.001 ? "<0.1" : (probability * 100).toFixed(1);
 }
 
+function comboValue(combo: DetailCombo) {
+    if (combo.ev === undefined) return `${(combo.weight * 100).toFixed(combo.weight < 1 ? 1 : 0)}%`;
+    return combo.ev === null ? "EV —" : `EV ${combo.ev.toFixed(2)}`;
+}
+
 export default function HandDetails({ label, combos }: { label: string; combos: DetailCombo[] }) {
     const columns = label.endsWith("s") ? 2 : 3;
     return (
@@ -18,42 +23,49 @@ export default function HandDetails({ label, combos }: { label: string; combos: 
                 </span>
             </div>
             <div className={`combo-grid ${columns === 2 ? "two-columns" : "three-columns"}`}>
-                {combos.map((combo) => {
-                    return (
-                        <article
-                            key={combo.cards.join("")}
-                            className={`combo-tile${combo.weight > 0 ? "" : " inactive"}`}
-                            style={
-                                {
-                                    "--combo-background": strategyGradient(combo.actions) ?? "none",
-                                    "--combo-height": `${Math.min(1, Math.max(0, combo.weight)) * 100}%`,
-                                } as CSSProperties
-                            }
-                            title={combo.description}
-                        >
-                            <div className="combo-tile-heading">
-                                <div className="combo-cards" aria-label={combo.cards.join(" ")}>
-                                    {combo.cards.map((card) => (
-                                        <Card key={card} card={card} />
-                                    ))}
-                                </div>
-                                <span>%</span>
+                {combos.map((combo) => (
+                    <article
+                        key={combo.cards.join("")}
+                        className={`combo-tile${combo.weight > 0 ? "" : " inactive"}`}
+                        style={
+                            {
+                                "--strategy-background": strategyGradient(combo.actions) ?? "none",
+                                "--strategy-height": `${Math.min(1, Math.max(0, combo.weight)) * 100}%`,
+                            } as CSSProperties
+                        }
+                        title={combo.description}
+                    >
+                        <div className="combo-tile-heading">
+                            <div className="combo-cards" aria-label={combo.cards.join(" ")}>
+                                {combo.cards.map((card) => (
+                                    <Card key={card} card={card} />
+                                ))}
                             </div>
-                            {combo.actions.length ? (
-                                <div className="combo-action-list">
-                                    {combo.actions.map((a) => (
-                                        <span key={a.id} title={`${a.label}: ${(a.probability * 100).toFixed(2)}%`}>
-                                            <b>{a.label}</b>
-                                            <strong>{frequency(a.probability)}</strong>
-                                        </span>
-                                    ))}
-                                </div>
-                            ) : (
-                                <small className="combo-reach">{combo.description ?? "No strategy"}</small>
+                            {combo.weight > 0 && (
+                                <span title={combo.ev === undefined ? "Range weight" : "Node strategy EV"}>
+                                    {comboValue(combo)}
+                                </span>
                             )}
-                        </article>
-                    );
-                })}
+                        </div>
+                        {combo.actions.length ? (
+                            <ul className="combo-action-list">
+                                {combo.actions.map((a) => (
+                                    <li
+                                        key={a.id}
+                                        className={a.probability > 0 ? undefined : "unused"}
+                                        title={`${a.label}${a.size ? ` (${a.size} pot)` : ""}: ${(a.probability * 100).toFixed(2)}%`}
+                                    >
+                                        <i style={{ background: a.color }} />
+                                        <b>{a.label}</b>
+                                        <strong>{frequency(a.probability)}%</strong>
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : (
+                            <small className="combo-reach">{combo.description}</small>
+                        )}
+                    </article>
+                ))}
             </div>
         </section>
     );
@@ -79,19 +91,22 @@ export function ActionSummary({
                             <button
                                 type="button"
                                 key={a.id}
-                                style={{ backgroundColor: a.color }}
+                                data-kind={a.kind}
+                                style={{ "--action": a.color } as CSSProperties}
                                 onClick={a.onSelect}
                                 disabled={!a.onSelect}
+                                title={a.size ? `${a.label} · ${a.size} pot` : a.label}
                             >
-                                <h3 title={a.label}>{a.label}</h3>
-                                <div>
+                                <span className="action-card-name">
+                                    <h3>{a.label}</h3>
+                                    {a.size && <small>{a.size} pot</small>}
+                                </span>
+                                <span className="action-card-stats">
                                     <strong>{frequency(a.probability)}%</strong>
                                     <small>
-                                        {a.combos > 0 && a.combos < 0.01 ? "<0.01" : a.combos.toFixed(2)}
-                                        <br />
-                                        {" combos"}
+                                        {a.combos > 0 && a.combos < 0.01 ? "<0.01" : a.combos.toFixed(2)} combos
                                     </small>
-                                </div>
+                                </span>
                             </button>
                         ))}
                     </div>

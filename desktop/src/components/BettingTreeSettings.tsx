@@ -1,12 +1,39 @@
-import { STREETS, type BettingTreeDraft } from "../solver/bettingTree";
+import { sizePosition, spreadSizeColors } from "../solver";
+import { STREETS, parsePercentages, type BettingTreeDraft } from "../solver/bettingTree";
+
+// Previews each size in the color its bet or raise will have in the solution.
+export function SizePills({ sizes }: { sizes: number[] }) {
+    if (!sizes.length) return <span className="size-pills empty">None</span>;
+    const sorted = [...sizes].sort((a, b) => a - b);
+    const colors = spreadSizeColors(sorted.map(sizePosition));
+    return (
+        <span className="size-pills">
+            {sorted.map((size, index) => (
+                <i key={index} style={{ background: colors[index] }}>
+                    {size}%
+                </i>
+            ))}
+        </span>
+    );
+}
+
+function parsed(text: string) {
+    try {
+        return parsePercentages(text, "");
+    } catch {
+        return undefined;
+    }
+}
 
 export default function BettingTreeSettings({
     value,
     disabled,
+    error,
     onChange,
 }: {
     value: BettingTreeDraft;
     disabled: boolean;
+    error?: string;
     onChange: (value: BettingTreeDraft) => void;
 }) {
     return (
@@ -14,30 +41,42 @@ export default function BettingTreeSettings({
             <h3>Bet sizes</h3>
             <fieldset disabled={disabled}>
                 <div className="betting-size-grid">
-                    <span>Street</span>
+                    <span />
                     <span>Bet (% pot)</span>
-                    <span>Raise (% pot)</span>
+                    <span>Raise (% pot after call)</span>
                     {STREETS.map((street) => (
                         <div className="betting-size-row" key={street}>
                             <strong>{street}</strong>
-                            {(["bet", "raise"] as const).map((kind) => (
-                                <input
-                                    key={kind}
-                                    aria-label={`${street} ${kind} percentages`}
-                                    placeholder="None"
-                                    value={value[street][kind]}
-                                    onChange={(event) =>
-                                        onChange({
-                                            ...value,
-                                            [street]: { ...value[street], [kind]: event.target.value },
-                                        })
-                                    }
-                                />
-                            ))}
+                            {(["bet", "raise"] as const).map((kind) => {
+                                const sizes = parsed(value[street][kind]);
+                                return (
+                                    <label key={kind} className="betting-size-field">
+                                        <input
+                                            aria-label={`${street} ${kind} percentages`}
+                                            aria-invalid={!sizes}
+                                            placeholder="None"
+                                            value={value[street][kind]}
+                                            onChange={(event) =>
+                                                onChange({
+                                                    ...value,
+                                                    [street]: { ...value[street], [kind]: event.target.value },
+                                                })
+                                            }
+                                        />
+                                        {sizes && <SizePills sizes={sizes} />}
+                                    </label>
+                                );
+                            })}
                         </div>
                     ))}
                 </div>
-                <small>Separate sizes with commas. Raise % uses the pot after calling.</small>
+                {error ? (
+                    <small className="betting-size-error" role="alert">
+                        {error}
+                    </small>
+                ) : (
+                    <small>Separate sizes with spaces or commas. Each size adds a branch to every matching node.</small>
+                )}
                 <details className="solve-advanced">
                     <summary>Advanced</summary>
                     <label>

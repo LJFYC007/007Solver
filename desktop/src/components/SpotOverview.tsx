@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { type EquityReport, type Player, formatNumber } from "../solver";
+import { postflopOrder } from "../solver/preflop";
 import type { SpotSeat } from "../solver/study";
 import { useSolverEquity } from "../hooks/useSolverEquity";
 import EquityChart from "./EquityChart";
@@ -75,7 +76,7 @@ export default function SpotOverview({ spot, generation }: { spot: SpotSummary; 
     const result = useSolverEquity(generation, spot.nodeId, tab !== "Overview");
     const data = result?.data;
     const potOdds = spot.toCall && spot.toCall > 0 ? spot.toCall / (spot.pot + spot.toCall) : undefined;
-    const blindOrder = ["SB", "BB", ...spot.seats.map((s) => s.position).filter((p) => p !== "SB" && p !== "BB")];
+    const blindOrder = postflopOrder(spot.seats.map((s) => s.position));
     const board = (
         <button
             type="button"

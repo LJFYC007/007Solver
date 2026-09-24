@@ -1,6 +1,7 @@
 import { formatNumber } from "../solver";
 import type { PreflopChoice } from "../solver/catalog";
 import type { PreflopEntry } from "../solver/study";
+import TimelineChoice from "./TimelineChoice";
 
 export default function PreflopTimeline({
     entries,
@@ -20,9 +21,9 @@ export default function PreflopTimeline({
     return entries.map((entry, index) => (
         <section
             key={index}
-            className={`preflop-node${activeIndex === index ? " active" : ""}${index > history.length ? " future" : ""}`}
+            className={`timeline-node${activeIndex === index ? " active" : ""}${index > history.length ? " future" : ""}`}
         >
-            <button type="button" className="preflop-node-title" disabled={disabled} onClick={() => onView(index)}>
+            <button type="button" className="timeline-node-title" disabled={disabled} onClick={() => onView(index)}>
                 <strong>{entry.node.actor}</strong>
                 <span>{formatNumber(entry.stack)}</span>
             </button>
@@ -30,15 +31,14 @@ export default function PreflopTimeline({
                 .slice()
                 .reverse()
                 .map((action) => (
-                    <button
-                        type="button"
+                    <TimelineChoice
                         key={action.code}
+                        label={action.label}
+                        color={action.color}
+                        chosen={history[index]?.action === action.label}
                         disabled={disabled}
-                        className={history[index]?.action === action.label ? "chosen" : undefined}
                         onClick={() => onAction(entry, action.label)}
-                    >
-                        {action.label}
-                    </button>
+                    />
                 ))}
         </section>
     ));

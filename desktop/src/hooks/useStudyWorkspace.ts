@@ -220,12 +220,7 @@ export function useStudyWorkspace({
                       ? () => void actPost(navigation.activeIndex, nodeId)
                       : undefined
                   : preNode
-                    ? () =>
-                          void choose(
-                              view.preflop.shownHistory,
-                              preNode.actor,
-                              preNode.actions.find((candidate) => candidate.code === action.id)!.label,
-                          )
+                    ? () => void choose(view.preflop.shownHistory, preNode.actor, action.label)
                     : undefined,
         };
     });

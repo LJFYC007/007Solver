@@ -3,13 +3,18 @@ import type { DecisionAction, DecisionNode, HandStrategy, SolverNode } from "./t
 export const isForcedRunout = (node?: SolverNode) =>
     node?.kind === "chance" && (node.state.stacks.hero === 0 || node.state.stacks.villain === 0);
 
-export interface AggregatedAction {
-    combos: number;
+export interface ActionInfo {
     color: string;
     index: number;
     isAllIn: boolean;
     kind: DecisionAction["kind"];
     label: string;
+    /** Rounded % pot (after calling, for raises) of sized bets and raises that are not all-in. */
+    size?: string;
+}
+
+export interface AggregatedAction extends ActionInfo {
+    combos: number;
     probability: number;
 }
 
@@ -34,52 +39,102 @@ function actionPotPercent(action: DecisionAction, node: DecisionNode): number {
     return ((action.chipsCommitted - toCall) / (node.state.pot + toCall)) * 100;
 }
 
-export function actionLabel(action: DecisionAction): string {
+function actionLabel(action: DecisionAction): string {
     if (action.kind === "fold") return "Fold";
     if (action.kind === "check") return "Check";
     if (action.kind === "call") return "Call";
-    return `${action.kind === "bet" ? "Bet" : "Raise"} ${formatNumber(action.amountTo)}${action.isAllIn ? " · All-in" : ""}`;
+    // Matches the catalog's preflop labels, such as "Allin 100".
+    return `${action.isAllIn ? "Allin" : action.kind === "bet" ? "Bet" : "Raise"} ${formatNumber(action.amountTo)}`;
 }
 
-function aggressionBand(action: DecisionAction, node: DecisionNode): number {
-    if (action.isAllIn) return 3;
-    const percent = actionPotPercent(action, node);
-    if (percent < 36) return 0;
-    if (percent < 67) return 1;
-    return action.kind === "raise" || percent < 101 ? 2 : 3;
+// GTO Wizard's Tadara theme colors anchored at pot percentages; sizes between anchors blend.
+const SIZE_STOPS: readonly (readonly [number, string])[] = [
+    [25, "var(--action-smallest)"],
+    [33, "var(--action-small)"],
+    [50, "var(--action-medium)"],
+    [100, "var(--action-large)"],
+    [150, "var(--action-overbet)"],
+];
+const LAST_STOP = SIZE_STOPS.length - 1;
+// Minimum ramp distance between sizes of one node, so each size keeps a distinct shade.
+const SIZE_GAP = 0.6;
+const PASSIVE_COLORS: Partial<Record<DecisionAction["kind"], string>> = {
+    fold: "var(--action-fold)",
+    check: "var(--action-check)",
+    call: "var(--action-call)",
+};
+
+/** Position of a pot percentage on the size ramp, from 0 to the last stop. */
+export function sizePosition(percent: number): number {
+    for (let i = 1; i <= LAST_STOP; i++) {
+        const [lower] = SIZE_STOPS[i - 1];
+        const [upper] = SIZE_STOPS[i];
+        if (percent <= upper) return Math.max(0, i - 1 + (percent - lower) / (upper - lower));
+    }
+    return LAST_STOP;
 }
 
-export function actionColor(action: DecisionAction, node: DecisionNode): string {
-    if (action.kind === "fold") return "var(--action-fold)";
-    if (action.kind === "call") return "var(--action-call)";
-    if (action.kind === "check") return "var(--action-check)";
-    // GTO Wizard's Tadara theme: size bands, with a narrow gradient inside each band.
-    const band = aggressionBand(action, node);
-    const colors = ["small", "medium", "large", "overbet"];
-    const sizes = [
-        ...new Set(
-            node.actions
-                .filter((a) => a.kind === action.kind && aggressionBand(a, node) === band)
-                .map((a) => a.amountTo),
-        ),
-    ].sort((a, b) => a - b);
-    const start = `var(--action-${colors[band]})`;
-    if (sizes.length < 2) return start;
-    const shade = (sizes.indexOf(action.amountTo) / (sizes.length - 1)) * 100;
-    return `color-mix(in srgb, ${start} ${100 - shade}%, var(--action-${colors[band]}-end))`;
+function rampColor(position: number): string {
+    const index = Math.min(Math.floor(position), LAST_STOP - 1);
+    const share = Math.round((position - index) * 100);
+    return share === 0
+        ? SIZE_STOPS[index][1]
+        : `color-mix(in srgb, ${SIZE_STOPS[index + 1][1]} ${share}%, ${SIZE_STOPS[index][1]})`;
 }
 
-function actionDisplayOrder(action: Pick<DecisionAction, "isAllIn" | "kind">): number {
-    if (action.isAllIn) return 0;
-    if (action.kind === "bet" || action.kind === "raise") return 1;
-    if (action.kind === "call" || action.kind === "check") return 2;
-    return 3;
+/** Colors for ascending size positions, pushed apart where sizes are too close to tell apart. */
+export function spreadSizeColors(positions: number[]): string[] {
+    const spread = positions.slice();
+    for (let i = 1; i < spread.length; i++) spread[i] = Math.max(spread[i], spread[i - 1] + SIZE_GAP);
+    if (spread.length) spread[spread.length - 1] = Math.min(spread[spread.length - 1], LAST_STOP);
+    for (let i = spread.length - 2; i >= 0; i--) spread[i] = Math.min(spread[i], spread[i + 1] - SIZE_GAP);
+    return spread.map((position) => rampColor(Math.max(0, position)));
 }
 
-export function orderedActions(actions: readonly AggregatedAction[]): AggregatedAction[] {
-    return [...actions].sort(
-        (first, second) => actionDisplayOrder(first) - actionDisplayOrder(second) || first.index - second.index,
-    );
+function actionColors(node: DecisionNode): string[] {
+    const colors = node.actions.map((action) => PASSIVE_COLORS[action.kind] ?? "");
+    for (const kind of ["bet", "raise"] as const) {
+        const sized = node.actions
+            .map((action, index) => ({ action, index }))
+            .filter(({ action }) => action.kind === kind)
+            .sort((first, second) => first.action.amountTo - second.action.amountTo);
+        const shades = spreadSizeColors(
+            sized.map(({ action }) => (action.isAllIn ? LAST_STOP : sizePosition(actionPotPercent(action, node)))),
+        );
+        sized.forEach(({ index }, i) => (colors[index] = shades[i]));
+    }
+    return colors;
+}
+
+const passivity = (kind: DecisionAction["kind"]) =>
+    kind === "bet" || kind === "raise" ? 0 : kind === "call" || kind === "check" ? 1 : 2;
+const nodeActions = new WeakMap<DecisionNode, readonly ActionInfo[]>();
+
+/** Node actions from most to least aggressive: larger bets and raises first, then call or check, then fold. */
+export function describeActions(node: DecisionNode): readonly ActionInfo[] {
+    let actions = nodeActions.get(node);
+    if (!actions) {
+        const colors = actionColors(node);
+        actions = node.actions
+            .map((action, index) => ({
+                color: colors[index],
+                index,
+                isAllIn: action.isAllIn,
+                kind: action.kind,
+                label: actionLabel(action),
+                size:
+                    (action.kind === "bet" || action.kind === "raise") && !action.isAllIn
+                        ? `${Math.round(actionPotPercent(action, node))}%`
+                        : undefined,
+            }))
+            .sort(
+                (first, second) =>
+                    passivity(first.kind) - passivity(second.kind) ||
+                    node.actions[second.index].amountTo - node.actions[first.index].amountTo,
+            );
+        nodeActions.set(node, actions);
+    }
+    return actions;
 }
 
 export function aggregateActions(node: DecisionNode, hands: HandStrategy[] = node.hands): AggregatedAction[] {
@@ -87,19 +142,15 @@ export function aggregateActions(node: DecisionNode, hands: HandStrategy[] = nod
     const totalOwnReachWeight = handsWithStrategy.reduce((sum, hand) => sum + Math.max(0, hand.ownReachWeight), 0);
     if (totalOwnReachWeight <= 0) return [];
 
-    return node.actions.map((action, index) => {
+    return describeActions(node).map((action) => {
         const weightedProbability = handsWithStrategy.reduce(
-            (sum, hand) => sum + Math.max(0, hand.ownReachWeight) * hand.strategy[index],
+            (sum, hand) => sum + Math.max(0, hand.ownReachWeight) * hand.strategy[action.index],
             0,
         );
 
         return {
+            ...action,
             combos: weightedProbability,
-            color: actionColor(action, node),
-            index,
-            isAllIn: action.isAllIn,
-            kind: action.kind,
-            label: actionLabel(action),
             probability: weightedProbability / totalOwnReachWeight,
         };
     });
@@ -129,7 +180,9 @@ export function groupHands(node: DecisionNode): Map<string, HandGroup> {
 
     for (const hand of node.hands) {
         const label = toHandClass(hand.cards);
-        rawGroups.set(label, [...(rawGroups.get(label) ?? []), hand]);
+        const group = rawGroups.get(label);
+        if (group) group.push(hand);
+        else rawGroups.set(label, [hand]);
     }
 
     return new Map(

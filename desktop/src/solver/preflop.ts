@@ -1,4 +1,5 @@
 import { HAND_CLASSES, handClassCombos } from "./strategy";
+import type { DecisionAction } from "./types";
 import type { BettingTree } from "./bettingTree";
 import { nodeFor, solutionFor, type PreflopChoice, type PreflopNode, type TableFormat } from "./catalog";
 
@@ -9,6 +10,14 @@ export const probabilities = (node: PreflopNode, hand: string) => {
 };
 export const comboCount = (range: Record<string, number>) =>
     Object.entries(range).reduce((sum, [hand, weight]) => sum + weight * handClassCombos(hand).length, 0);
+/** Seats in postflop acting order: the blinds first, then the other positions in table order. */
+export const postflopOrder = (positions: string[]) => [
+    "SB",
+    "BB",
+    ...positions.filter((position) => position !== "SB" && position !== "BB"),
+];
+export const preflopActionKind = (label: string): DecisionAction["kind"] =>
+    label === "Fold" ? "fold" : label === "Call" ? "call" : label === "Check" ? "check" : "raise";
 
 export function aggregatePreflopActions(node: PreflopNode, range: Record<string, number>) {
     const totals = node.actions.map(() => 0);
@@ -24,6 +33,7 @@ export function aggregatePreflopActions(node: PreflopNode, range: Record<string,
     }
     return node.actions.map((action, index) => ({
         id: action.code,
+        kind: preflopActionKind(action.label),
         label: action.label,
         color: action.color,
         probability: total > 0 ? totals[index] / total : 0,
@@ -145,7 +155,7 @@ export function postflopScenario(
         throw new Error("Iterations must be a positive integer.");
     if (!Number.isFinite(accuracyPercent) || accuracyPercent <= 0)
         throw new Error("Accuracy must be a positive percentage of the pot.");
-    const order = ["SB", "BB", ...solution.positions.filter((position) => position !== "SB" && position !== "BB")];
+    const order = postflopOrder(solution.positions);
     alive.sort((a, b) => order.indexOf(a.position) - order.indexOf(b.position));
     const [villain, hero] = alive;
     for (const seat of alive) {

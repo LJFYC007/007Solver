@@ -1,4 +1,19 @@
 {
+    "app": {
+        "windows": [
+            {
+                "label": "main",
+                "title": "007 Solver",
+                "width": 1440,
+                "height": 900,
+                "minWidth": 1120,
+                "minHeight": 720,
+                "center": true,
+                "titleBarStyle": "Overlay",
+                "hiddenTitle": true
+            }
+        ]
+    },
     "bundle": {
         "targets": ["app", "dmg"],
         "macOS": {

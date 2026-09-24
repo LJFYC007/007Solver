@@ -102,7 +102,12 @@ export function useSolverNavigation(root?: SolverNode, generation?: number) {
         selectPath: (index: number) => {
             navigationRequest.current++;
             setPending(undefined);
-            setStored({ ...current, activeIndex: index });
+            // Build on the latest state so an EV-enriched path queued in the same tick is kept.
+            setStored((previous) =>
+                previous.root === root && previous.generation === generation
+                    ? { ...previous, activeIndex: index }
+                    : { ...current, activeIndex: index },
+            );
         },
         suspend: () => {
             navigationRequest.current++;

@@ -1,12 +1,5 @@
-import { type CSSProperties, useMemo } from "react";
-import {
-    type DecisionNode,
-    HAND_CLASSES,
-    groupHands,
-    handClassCombos,
-    orderedActions,
-    strategyGradient,
-} from "../solver";
+import { type CSSProperties, memo, useMemo } from "react";
+import { type DecisionNode, HAND_CLASSES, groupHands, handClassCombos, strategyGradient } from "../solver";
 import type { PreflopNode } from "../solver/catalog";
 import { probabilities } from "../solver/preflop";
 
@@ -22,30 +15,44 @@ interface Selection {
     onSelect: (label: string) => void;
 }
 
+// Memoized so hovering a cell re-renders only the cells whose selection changed.
+const RangeCell = memo(function RangeCell({
+    cell,
+    selected,
+    onSelect,
+}: {
+    cell: MatrixCell;
+    selected: boolean;
+    onSelect: (label: string) => void;
+}) {
+    return (
+        <button
+            type="button"
+            role="gridcell"
+            aria-label={cell.description}
+            aria-selected={selected}
+            className={`range-cell${cell.included ? " in-range" : ""}${cell.included && cell.weight === 0 ? " zero-own-reach" : ""}`}
+            onMouseEnter={() => onSelect(cell.label)}
+            onFocus={() => onSelect(cell.label)}
+            onClick={() => onSelect(cell.label)}
+            style={
+                {
+                    "--strategy-background": cell.background,
+                    "--strategy-height": `${Math.min(1, Math.max(0, cell.weight)) * 100}%`,
+                } as CSSProperties
+            }
+            title={cell.description}
+        >
+            <strong>{cell.label}</strong>
+        </button>
+    );
+});
+
 function RangeMatrix({ cells, selected, onSelect }: Selection & { cells: MatrixCell[] }) {
     return (
         <div className="range-grid" aria-label="13 by 13 strategy matrix" role="grid">
             {cells.map((cell) => (
-                <button
-                    type="button"
-                    role="gridcell"
-                    key={cell.label}
-                    aria-label={cell.description}
-                    aria-selected={selected === cell.label}
-                    className={`range-cell${cell.included ? " in-range" : ""}${cell.included && cell.weight === 0 ? " zero-own-reach" : ""}`}
-                    onMouseEnter={() => onSelect(cell.label)}
-                    onFocus={() => onSelect(cell.label)}
-                    onClick={() => onSelect(cell.label)}
-                    style={
-                        {
-                            "--strategy-background": cell.background,
-                            "--strategy-height": `${Math.min(1, Math.max(0, cell.weight)) * 100}%`,
-                        } as CSSProperties
-                    }
-                    title={cell.description}
-                >
-                    <strong>{cell.label}</strong>
-                </button>
+                <RangeCell key={cell.label} cell={cell} selected={selected === cell.label} onSelect={onSelect} />
             ))}
         </div>
     );
@@ -86,17 +93,26 @@ export function PostflopRangeMatrix({ node, ...selection }: Selection & { node: 
         const groups = groupHands(node);
         return HAND_CLASSES.map((label) => {
             const group = groups.get(label);
-            const blocked = !handClassCombos(label).some((cards) =>
-                cards.every((card) => !node.state.board.includes(card)),
-            );
+            if (!group) {
+                const blocked = !handClassCombos(label).some((cards) =>
+                    cards.every((card) => !node.state.board.includes(card)),
+                );
+                return {
+                    label,
+                    included: false,
+                    weight: 0,
+                    description: `${label}, ${blocked ? "blocked by board" : "not in input range"}`,
+                };
+            }
             return {
                 label,
-                included: !!group,
-                weight: group?.ownReachWeight ?? 0,
-                description: group
-                    ? `${label}, ${group.hands.length} combinations${group.ownReachWeight === 0 ? ", zero own reach" : ""}`
-                    : `${label}, ${blocked ? "blocked by board" : "not in input range"}`,
-                background: group ? strategyGradient(orderedActions(group.actions)) : undefined,
+                included: true,
+                weight: group.ownReachWeight,
+                description:
+                    group.ownReachWeight === 0
+                        ? `${label}, ${group.hands.length} combinations, zero own reach`
+                        : `${label}, ${group.actions.map((action) => `${action.label} ${(action.probability * 100).toFixed(1)}%`).join(", ")}`,
+                background: strategyGradient(group.actions),
             };
         });
     }, [node]);

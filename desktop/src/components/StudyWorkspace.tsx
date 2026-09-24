@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { formatNumber } from "../solver";
+import { stopReasonLabel } from "../solver/study";
 import { useStudyWorkspace, type StudyWorkspaceProps } from "../hooks/useStudyWorkspace";
 import BoardPicker from "./BoardPicker";
 import { BoardCard } from "./PlayingCards";
@@ -10,6 +11,12 @@ import SolvePanel from "./SolvePanel";
 import SolutionSettings from "./SolutionSettings";
 import PreflopTimeline from "./PreflopTimeline";
 import { PostflopTimeline } from "./PostflopTimeline";
+import WindowControls from "./WindowControls";
+
+// macOS draws its traffic lights over the header; other platforms use the custom caption buttons.
+const isMac = navigator.userAgent.includes("Mac OS");
+// The Vite page also renders in a plain browser, which has no window to control.
+const captionButtons = !isMac && "__TAURI_INTERNALS__" in window;
 
 export default function StudyWorkspace(props: StudyWorkspaceProps) {
     const { root, status, generation, changing } = props;
@@ -58,11 +65,15 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
     }, [preIndex, navigation.activeIndex, navigation.path.length, history.length, root]);
     return (
         <main className="app-shell">
-            <header className="app-header">
-                <div className="brand">
-                    <div className="brand-mark">007</div>
-                    <strong>007 Solver</strong>
-                    <span className="preflop-nav-label">Study</span>
+            <header className={`app-header${isMac ? " mac" : ""}`} data-tauri-drag-region>
+                <div className="brand" data-tauri-drag-region>
+                    <div className="brand-mark" data-tauri-drag-region>
+                        007
+                    </div>
+                    <strong data-tauri-drag-region>007 Solver</strong>
+                    <span className="preflop-nav-label" data-tauri-drag-region>
+                        Study
+                    </span>
                 </div>
                 <div className="solver-menu">
                     <button
@@ -78,7 +89,7 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                             {busy
                                 ? "Solving…"
                                 : status.state === "ready"
-                                  ? `${Math.round(status.elapsedSeconds)}s · ${status.stopReason === "accuracy" ? "Target reached" : "Update limit reached"}`
+                                  ? `${Math.round(status.elapsedSeconds)}s · ${stopReasonLabel(status.stopReason)}`
                                   : status.state === "failed"
                                     ? "Failed"
                                     : "Settings"}
@@ -104,7 +115,7 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                                 onIterations={setIterations}
                                 onAccuracyPercent={setAccuracyPercent}
                                 bettingTree={bettingTree}
-                                onBettingTree={(value) => void changeBettingTree(value)}
+                                onBettingTree={changeBettingTree}
                                 onSolve={() => {
                                     if (root) {
                                         viewPost(navigation.activeIndex);
@@ -114,12 +125,14 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                                 onResolve={() => void solve()}
                                 onCancel={cancel}
                                 scenario={props.scenario}
+                                matchup={preflop.matchup}
                                 canSolve={preflop.canPlayPostflop}
                                 error={error}
                             />
                         </div>
                     )}
                 </div>
+                {captionButtons && <WindowControls />}
             </header>
             <div className="study-browser">
                 <SolutionSettings
@@ -141,7 +154,7 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                         <section className={`board-stage${preIndex === history.length ? " active" : ""}`}>
                             <button
                                 type="button"
-                                className="preflop-node-title"
+                                className="timeline-node-title"
                                 onClick={() => viewPre(history.length)}
                             >
                                 <strong>{preflop.canPlayPostflop ? "FLOP" : "Result"}</strong>
