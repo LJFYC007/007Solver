@@ -33,9 +33,9 @@ npm --prefix desktop run dev
 
 Restart `dev` after C++ changes; React edits reload automatically. Use `npm --prefix desktop run build` to package the app. Both commands build and stage the C++ service; `npm --prefix desktop run build:solver` does only that step.
 
-Packages appear under `desktop/src-tauri/target/release/bundle/`: `macos/` and `dmg/` on macOS, or `nsis/` on Windows.
+Packages appear under `desktop/src-tauri/target/release/bundle/`: `macos/` and `dmg/` on macOS, or `nsis/` on Windows. Every push also builds a CUDA-enabled Windows installer and an Apple Silicon `.dmg` as [workflow](.github/workflows/package.yml) artifacts.
 
-Mac packages link to the build machine's Homebrew `libomp` path without bundling it. Another Mac needs a compatible runtime at that path; the linked runtime can require a newer OS than the configured deployment target.
+Packages are not signed with a developer certificate, so users must allow them past Windows SmartScreen or macOS Gatekeeper (Privacy & Security → Open Anyway). Mac builds link Homebrew's static `libomp`, which can require a newer OS than the configured deployment target.
 
 For a small CLI solve after building the service:
 

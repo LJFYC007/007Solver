@@ -1,0 +1,64 @@
+name: Package desktop app
+
+on: push
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            package: desktop/src-tauri/target/release/bundle/nsis/*.exe
+          - os: macos-15
+            package: desktop/src-tauri/target/release/bundle/dmg/*.dmg
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+
+      - name: Install CUDA compiler
+        if: runner.os == 'Windows'
+        run: |
+          $installer = "$env:RUNNER_TEMP\cuda.exe"
+          Invoke-WebRequest https://developer.download.nvidia.com/compute/cuda/13.2.1/network_installers/cuda_13.2.1_windows_network.exe -OutFile $installer
+          Start-Process $installer -ArgumentList '-s nvcc_13.2 nvvm_13.2 crt_13.2 cudart_13.2 thrust_13.2' -Wait
+          $bin = "$env:ProgramFiles\NVIDIA GPU Computing Toolkit\CUDA\v13.2\bin"
+          & "$bin\nvcc.exe" --version
+          $bin >> $env:GITHUB_PATH
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install ninja libomp
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install desktop dependencies
+        run: npm --prefix desktop ci
+
+      - name: Build packages
+        run: npm --prefix desktop run build
+
+      # CMake falls back to a CPU-only service when it cannot use nvcc.
+      - name: Require the CUDA backend
+        if: runner.os == 'Windows'
+        run: |
+          if (-not (Select-String -Path build/release/CMakeCache.txt -Pattern '^CMAKE_CUDA_COMPILER:\w+=.*nvcc' -Quiet)) {
+            throw 'The Windows package was built without CUDA'
+          }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: ${{ matrix.package }}
+          archive: false
+          if-no-files-found: error

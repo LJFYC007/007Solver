@@ -29,7 +29,8 @@ elseif(SOLVER_ENABLE_GPU AND WIN32)
 endif()
 message(STATUS "DCFR backend: ${SOLVER_GPU_BACKEND} (recursive CPU always available)")
 if(APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-    # Homebrew's libomp is keg-only; let FindOpenMP see its headers and runtime.
+    # Homebrew's libomp is keg-only; let FindOpenMP see its headers and link its
+    # static runtime so packages do not depend on a Homebrew installation.
     find_program(SOLVER_BREW_EXECUTABLE brew)
     if(SOLVER_BREW_EXECUTABLE)
         execute_process(
@@ -41,6 +42,7 @@ if(APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
         )
         if(SOLVER_LIBOMP_RESULT EQUAL 0)
             list(APPEND CMAKE_PREFIX_PATH "${SOLVER_LIBOMP_PREFIX}")
+            set(OpenMP_libomp_LIBRARY "${SOLVER_LIBOMP_PREFIX}/lib/libomp.a" CACHE FILEPATH "OpenMP runtime" FORCE)
         endif()
     endif()
 endif()

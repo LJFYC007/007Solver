@@ -30,5 +30,6 @@ jobs:
       - name: Build tests
         run: cmake --build --preset Release --target 007SolverTests
 
+      # Verbose macOS output shows whether the runner's GPU runs or skips the Metal tests.
       - name: Run tests
-        run: ctest --test-dir build/release --output-on-failure
+        run: ctest --test-dir build/release --output-on-failure ${{ runner.os == 'macOS' && '--verbose' || '' }}
