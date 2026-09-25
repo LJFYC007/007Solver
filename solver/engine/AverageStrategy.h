@@ -1,13 +1,15 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 namespace solver::engine
 {
-// Normalize one hand across actions. Strides support both traversal's action-major
-// rows and snapshot's hand-major rows without changing accumulation order.
+// Normalize one hand's quantized sums (see gpu/GpuQuantize.h) across actions. Strides
+// support both traversal's action-major rows and snapshot's hand-major rows without
+// changing accumulation order.
 inline void NormalizeAverageStrategy(
-    const float* sums,
+    const std::uint16_t* sums,
     std::size_t stride,
     std::size_t actionCount,
     float* output,
@@ -16,8 +18,8 @@ inline void NormalizeAverageStrategy(
 {
     float total = 0.0f;
     for (std::size_t action = 0; action < actionCount; ++action)
-        total += sums[action * stride];
+        total += static_cast<float>(sums[action * stride]);
     for (std::size_t action = 0; action < actionCount; ++action)
-        output[action * outputStride] = total > 0.0f ? sums[action * stride] / total : 1.0f / actionCount;
+        output[action * outputStride] = total > 0.0f ? static_cast<float>(sums[action * stride]) / total : 1.0f / actionCount;
 }
 } // namespace solver::engine

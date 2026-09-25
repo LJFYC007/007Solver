@@ -14,8 +14,12 @@ if(SOLVER_ENABLE_GPU AND APPLE)
     enable_language(OBJCXX)
     set_source_files_properties(engine/gpu/MetalExecutor.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/engine/gpu/GpuTypes.h" GPU_TYPES)
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/engine/gpu/GpuQuantize.h" GPU_QUANTIZE)
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/engine/gpu/GpuKernels.inc" GPU_KERNELS)
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS engine/gpu/GpuTypes.h engine/gpu/GpuKernels.inc)
+    set_property(
+        DIRECTORY APPEND
+        PROPERTY CMAKE_CONFIGURE_DEPENDS engine/gpu/GpuTypes.h engine/gpu/GpuQuantize.h engine/gpu/GpuKernels.inc
+    )
     configure_file(engine/gpu/MetalSource.h.in "${CMAKE_CURRENT_BINARY_DIR}/MetalSource.h" @ONLY)
     set(SOLVER_GPU_BACKEND "Metal")
 elseif(SOLVER_ENABLE_GPU AND WIN32)

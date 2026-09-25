@@ -22,8 +22,14 @@ struct SolveSize
     std::array<std::size_t, 2> hands{};
     std::uint64_t strategyEntries = 0;
     std::uint64_t infoSets = 0;
+    std::uint64_t stateUnits = 0; // 16-bit units of the regrets or the strategy sums (HandTraversalData::StateUnits)
 };
 SolveSize MeasureSolveSize(const SolveProblem& problem);
+// Resident regrets and strategy sums together.
+inline std::uint64_t TrainingStateBytes(const SolveSize& size)
+{
+    return 2 * sizeof(std::uint16_t) * size.stateUnits;
+}
 // Adds headroom for allocator/runtime costs to a combined allocation peak.
 MemoryEstimate MakeMemoryEstimate(const SolveSize& size, std::uint64_t peakBytes, int workers);
 

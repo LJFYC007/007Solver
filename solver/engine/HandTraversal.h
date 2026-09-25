@@ -29,13 +29,14 @@ public:
         std::vector<std::uint8_t> parallelLive; // whether each chance task's subtree carried opponent reach
         std::vector<float> strategies;
     };
-    // Training Walk inlines regret matching and updates from these buffers. The
-    // opponent's strategy sums accumulate averageWeight * reach * policy at its
-    // decisions; consumers normalize per hand. Stamps hold each node's last unpruned update.
+    // Training Walk inlines regret matching and updates from these quantized buffers
+    // (HandTraversalData's layout). The opponent's strategy sums accumulate
+    // averageWeight * reach * policy at its decisions; consumers normalize per hand.
+    // Stamps hold each node's last unpruned update.
     struct TrainState
     {
-        float* regrets = nullptr;
-        float* strategySums = nullptr;
+        std::int16_t* regrets = nullptr;
+        std::uint16_t* strategySums = nullptr;
         std::uint32_t* stamps = nullptr;
         UpdateWeights weights{};
     };
@@ -86,7 +87,7 @@ public:
         Evaluation evaluation
     ) const;
     std::vector<float> EvaluateAverageBestResponse(
-        const float* strategySums,
+        const std::uint16_t* strategySums,
         std::size_t player,
         const std::vector<float>& opponentReach,
         const std::vector<float>& divisors
@@ -125,7 +126,7 @@ private:
         std::size_t player;
         const float* divisors;
         const StrategySnapshot* strategy = nullptr;
-        const float* strategySums = nullptr;
+        const std::uint16_t* strategySums = nullptr;
         TrainState* train = nullptr;
         bool bestResponse = false;
     };

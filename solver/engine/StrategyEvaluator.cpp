@@ -7,7 +7,11 @@ namespace solver::engine
 {
 namespace
 {
-ExploitabilityMetrics EvaluateBestResponses(const HandTraversal& traversal, const StrategySnapshot* strategy, const float* strategySums)
+ExploitabilityMetrics EvaluateBestResponses(
+    const HandTraversal& traversal,
+    const StrategySnapshot* strategy,
+    const std::uint16_t* strategySums
+)
 {
     const auto values = [&](std::size_t player)
     {
@@ -50,7 +54,7 @@ ExploitabilityMetrics EvaluateExploitability(const SolveProblem& problem, const 
     return EvaluateBestResponses(HandTraversal(problem, problem.game->Root()), &strategy, nullptr);
 }
 
-ExploitabilityMetrics EvaluateAverageStrategy(const HandTraversal& traversal, const float* strategySums)
+ExploitabilityMetrics EvaluateAverageStrategy(const HandTraversal& traversal, const std::uint16_t* strategySums)
 {
     return EvaluateBestResponses(traversal, nullptr, strategySums);
 }

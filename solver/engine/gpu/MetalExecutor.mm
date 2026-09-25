@@ -11,6 +11,10 @@ namespace solver::engine::gpu
 {
 namespace
 {
+std::size_t BlitBytes(std::size_t bytes)
+{
+    return (bytes + 3) / 4 * 4;
+}
 void Check(id object, NSError* error, const char* fallback)
 {
     if (!object)
@@ -83,26 +87,26 @@ public:
         Update(state);
         return Read<float>(buffers_[ValuesBuffer], state.hands[state.player]);
     }
-    std::vector<float> DownloadSums(bool releaseTraining) override
+    std::vector<std::uint16_t> DownloadSums(bool releaseTraining) override
     {
         if (releaseTraining)
             for (std::size_t i = 0; i < buffers_.size(); ++i)
                 if (i != SumsBuffer)
                     buffers_[i] = nil;
-        auto result = Read<float>(buffers_[SumsBuffer], entries_);
+        auto result = Read<std::uint16_t>(buffers_[SumsBuffer], entries_);
         if (releaseTraining)
             buffers_[SumsBuffer] = nil;
         return result;
     }
-    TrainingState DownloadTraining() override
+    QuantizedState DownloadTraining() override
     {
         return {
-            Read<float>(buffers_[RegretsBuffer], entries_),
-            Read<float>(buffers_[SumsBuffer], entries_),
+            Read<std::int16_t>(buffers_[RegretsBuffer], entries_),
+            Read<std::uint16_t>(buffers_[SumsBuffer], entries_),
             NewestStamps(Read<std::uint32_t>(buffers_[StampsBuffer], 2 * std::size_t(shape_.stampCount)))
         };
     }
-    void UploadTraining(const TrainingState& state) override
+    void UploadTraining(const QuantizedState& state) override
     {
         Write(buffers_[RegretsBuffer], state.regrets, 0);
         Write(buffers_[SumsBuffer], state.strategySums, 0);
@@ -120,7 +124,8 @@ private:
     std::size_t entries_;
     void Upload(std::size_t i, const BufferData& source)
     {
-        const auto bytes = source.AllocationBytes();
+        // Whole 4-byte words, so Stage's word-sized blits stay inside the buffer.
+        const auto bytes = BlitBytes(source.AllocationBytes());
         if (bytes > device_.maxBufferLength)
             throw std::runtime_error("A DCFR buffer exceeds Metal maxBufferLength");
         const bool upload = source.data && source.bytes;
@@ -178,6 +183,7 @@ private:
         Stage(target, targetOffset, source.size() * sizeof(T), source.data(), nullptr);
     }
     // Copies host input into buffer at base, or buffer into host output, through a shared staging buffer.
+    // Base is 4-byte aligned; a partial final word spills into the padding Upload allocates.
     void Stage(id<MTLBuffer> buffer, std::size_t base, std::size_t total, const void* input, void* output)
     {
         if (!total)
@@ -185,20 +191,21 @@ private:
         @autoreleasepool
         {
             // Bounded staging avoids duplicating the full strategy buffer in unified memory.
-            const auto capacity = std::min<std::size_t>(total, kReadbackBytes);
+            const auto capacity = std::min(BlitBytes(total), kReadbackBytes);
             id<MTLBuffer> staging = [device_ newBufferWithLength:capacity options:MTLResourceStorageModeShared];
             Check(staging, nil, "Cannot allocate Metal staging buffer");
             for (std::size_t offset = 0; offset < total; offset += capacity)
             {
                 const auto bytes = std::min(capacity, total - offset);
+                const auto blitBytes = BlitBytes(bytes);
                 if (input)
                     std::memcpy(staging.contents, static_cast<const char*>(input) + offset, bytes);
                 id<MTLCommandBuffer> command = [queue_ commandBuffer];
                 id<MTLBlitCommandEncoder> blit = [command blitCommandEncoder];
                 if (input)
-                    [blit copyFromBuffer:staging sourceOffset:0 toBuffer:buffer destinationOffset:base + offset size:bytes];
+                    [blit copyFromBuffer:staging sourceOffset:0 toBuffer:buffer destinationOffset:base + offset size:blitBytes];
                 else
-                    [blit copyFromBuffer:buffer sourceOffset:base + offset toBuffer:staging destinationOffset:0 size:bytes];
+                    [blit copyFromBuffer:buffer sourceOffset:base + offset toBuffer:staging destinationOffset:0 size:blitBytes];
                 [blit endEncoding];
                 Finish(command);
                 if (output)

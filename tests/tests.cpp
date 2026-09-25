@@ -195,10 +195,11 @@ TEST(BackendParityTest, GpuUpdatesMatchCpuFromSharedState)
         cpu.Run(1);
         gpu.Run(1);
         expected = cpu.ReadTrainingState();
-        const auto actual = gpu.ReadTrainingState();
-        ExpectNodesNear(layout, expected.regrets, actual.regrets, "regrets");
-        ExpectNodesNear(layout, expected.strategySums, actual.strategySums, "strategy sums");
-        EXPECT_EQ(actual.stamps, expected.stamps) << "node stamps";
+        const auto reference = layout.Decode(expected);
+        const auto actual = layout.Decode(gpu.ReadTrainingState());
+        ExpectNodesNear(layout, reference.regrets, actual.regrets, "regrets");
+        ExpectNodesNear(layout, reference.strategySums, actual.strategySums, "strategy sums");
+        EXPECT_EQ(actual.stamps, reference.stamps) << "node stamps";
         ASSERT_FALSE(HasFailure());
     }
 }

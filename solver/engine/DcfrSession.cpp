@@ -80,12 +80,12 @@ StrategySnapshot DcfrSession::ExportStrategy() &&
     exported_ = true;
     return gpu_ ? std::move(*gpu_).ExportStrategy() : std::move(*cpu_).ExportStrategy();
 }
-TrainingState DcfrSession::ReadTrainingState() const
+QuantizedState DcfrSession::ReadTrainingState() const
 {
     CheckActive();
     return gpu_ ? gpu_->ReadTrainingState() : cpu_->ReadTrainingState();
 }
-void DcfrSession::WriteTrainingState(const TrainingState& state)
+void DcfrSession::WriteTrainingState(const QuantizedState& state)
 {
     CheckActive();
     if (gpu_)

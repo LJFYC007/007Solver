@@ -11,7 +11,7 @@ GpuDcfrSession::GpuDcfrSession(const SolveProblem& problem)
     const auto counts = MeasureSolveSize(problem);
     const auto& size = counts.tree;
     const auto budget = gpu::DeviceMemoryBudget();
-    if (counts.strategyEntries > budget / (2 * sizeof(float)))
+    if (TrainingStateBytes(counts) > budget)
         throw std::runtime_error("Regret and cumulative strategy alone exceed GPU memory; reduce the tree or use CPU");
     data_ = std::make_shared<const HandTraversalData>(problem, problem.game->Root());
     const gpu::Plan plan(*data_);
@@ -31,10 +31,11 @@ GpuDcfrSession::GpuDcfrSession(const SolveProblem& problem)
     const auto checkpointDownload = device + sumsBytes + staging;
     const auto certification = device + sumsBytes + fixed.workspaceBytes + evaluationVectors;
     const auto snapshot =
-        StrategySnapshot::EstimateStorageBytes(size.decisionNodes[0] + size.decisionNodes[1], data_->infoSetCount, plan.entries);
-    // Download releases other device buffers first; compaction reuses the host sums.
+        StrategySnapshot::EstimateStorageBytes(size.decisionNodes[0] + size.decisionNodes[1], data_->infoSetCount, data_->probabilityCount);
+    // Download releases other device buffers first; the snapshot's probabilities are
+    // normalized from the downloaded sums.
     const auto exportDownload = 2 * sumsBytes + staging;
-    const auto exportSnapshot = snapshot + data_->maxActions * maxHands * sizeof(float);
+    const auto exportSnapshot = sumsBytes + snapshot;
     const auto peak = host + std::max<std::uint64_t>({initialization, checkpointDownload, certification, exportDownload, exportSnapshot});
     memory_ = MakeMemoryEstimate(counts, peak, 0);
     executor_ = gpu::MakeExecutor(plan);
@@ -75,7 +76,7 @@ ExploitabilityMetrics GpuDcfrSession::EvaluateExploitabilityOnCpu() const
     return EvaluateAverageStrategy(HandTraversal(data_), sums.data());
 }
 
-void GpuDcfrSession::WriteTrainingState(const TrainingState& state)
+void GpuDcfrSession::WriteTrainingState(const QuantizedState& state)
 {
     if (state.regrets.size() != data_->strategySize || state.strategySums.size() != data_->strategySize ||
         state.stamps.size() != data_->nodes.size())

@@ -24,8 +24,10 @@ SolveSize MeasureSolveSize(const SolveProblem& problem)
         for (const auto& [hand, weight] : problem.ranges.For(core::PlayerId(player)).Entries())
             if (weight > 0.0f && !core::Overlaps(hand, board))
                 ++size.hands[player];
-        size.strategyEntries += size.tree.actionEntries[player] * size.hands[player];
+        const auto entries = size.tree.actionEntries[player] * size.hands[player];
+        size.strategyEntries += entries;
         size.infoSets += size.tree.decisionNodes[player] * size.hands[player];
+        size.stateUnits += entries + size.tree.decisionNodes[player] * HandTraversalData::ExponentUnits(size.hands[player]);
     }
     return size;
 }
@@ -58,15 +60,15 @@ MemoryEstimate EstimateCpuMemory(const SolveProblem& problem, int workers)
     // Include the bounded runout/regret scratch and per-team runtime overhead.
     const std::uint64_t workspace = storage.workspaceBytes * (count > 1 ? count + 1 : 1) + (count > 1 ? storage.parallelValuesBytes : 0) +
                                     (count + 1) * 128 * 1024 + rootVectors;
-    // Training retains regrets, strategy sums and node stamps; current policies live in depth rows.
+    // Training retains quantized regrets and strategy sums and node stamps; current policies live in depth rows.
     const std::uint64_t trainingPeak =
-        2 * sizeof(float) * entries + sizeof(std::uint32_t) * size.traversalNodes + workspace + storage.runoutOutcomesBytes;
+        TrainingStateBytes(counts) + sizeof(std::uint32_t) * size.traversalNodes + workspace + storage.runoutOutcomesBytes;
     // Checkpoints borrow sums while all training allocations remain resident.
     const auto checkpointPeak = trainingPeak + storage.workspaceBytes + rootVectors;
-    // Final export releases regrets and workspaces before allocating the snapshot.
-    // Snapshot probabilities reuse the strategy-sum allocation; indices are built directly.
+    // Final export releases regrets and workspaces before allocating the snapshot, whose
+    // probabilities are normalized from the still resident quantized sums.
     const std::uint64_t snapshot = StrategySnapshot::EstimateStorageBytes(decisions, infosets, entries);
-    const std::uint64_t exportPeak = snapshot + sizeof(float) * size.maxActions * maxHands + storage.runoutOutcomesBytes;
+    const std::uint64_t exportPeak = sizeof(std::uint16_t) * counts.stateUnits + snapshot + storage.runoutOutcomesBytes;
     const std::uint64_t evaluationPeak = snapshot + storage.workspaceBytes + rootVectors;
     const std::uint64_t peak = size.storageBytes + storage.fixedBytes + std::max({checkpointPeak, exportPeak, evaluationPeak});
     return MakeMemoryEstimate(counts, peak, count);

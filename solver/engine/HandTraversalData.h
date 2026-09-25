@@ -6,10 +6,39 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 namespace solver::engine
 {
+// Resident DCFR state in the 16-bit layout both backends share (gpu/GpuQuantize.h): per
+// decision, action-major rows of the actor's hands, int16 regrets or uint16 cumulative
+// strategies, then one exponent byte per hand; and per traversal node the update index
+// of the actor's last unpruned update (zero before the first), which discounts regrets lazily.
+struct QuantizedState
+{
+    std::vector<std::int16_t> regrets;
+    std::vector<std::uint16_t> strategySums;
+    std::vector<std::uint32_t> stamps;
+};
+
+// The decoded state for lockstep parity checks: one float per unit of the quantized
+// layout, with the exponent slots zero.
+struct TrainingState
+{
+    std::vector<float> regrets;
+    std::vector<float> strategySums;
+    std::vector<std::uint32_t> stamps;
+};
+
+// The exponent bytes of a decision's hands, following its action rows from units.
+template<typename Unit>
+inline auto ExponentBytes(Unit* units, std::size_t actions, std::size_t hands)
+{
+    using Byte = std::conditional_t<std::is_const_v<Unit>, const std::uint8_t, std::uint8_t>;
+    return reinterpret_cast<Byte*>(units + actions * hands);
+}
+
 // Immutable, range-specific tables shared by recursive CPU and batched GPU execution.
 struct HandTraversalData
 {
@@ -35,8 +64,13 @@ struct HandTraversalData
     };
     std::shared_ptr<const HandBoardData> tables;
     std::vector<Node> nodes;
-    std::size_t strategySize = 0;
+    // 16-bit units of one decision's regrets or strategy sums: its action rows, then its
+    // hands' exponent bytes in whole units.
+    static std::size_t ExponentUnits(std::size_t hands) { return (hands + 1) / 2; }
+    static std::size_t StateUnits(std::size_t actions, std::size_t hands) { return actions * hands + ExponentUnits(hands); }
+    std::size_t strategySize = 0; // units of the whole tree
     std::size_t maxActions = 1;
+    std::size_t probabilityCount = 0; // exported probabilities: board-compatible hands times actions
     float rootHalfPot = 0.0f;
 
     std::vector<std::uint32_t> children;
@@ -71,21 +105,13 @@ struct HandTraversalData
 
     HandTraversalData(const SolveProblem& problem, game::NodeId root, bool prepareTraining = false);
     HandTraversalData(std::shared_ptr<const HandBoardData> tables, game::NodeId root, bool prepareTraining = false);
-    StrategySnapshot ExportStrategy(std::vector<float> sums) const;
+    StrategySnapshot ExportStrategy(std::vector<std::uint16_t> sums) const;
+    // Compare states by these values: re-encoding can store equal values differently.
+    TrainingState Decode(const QuantizedState& state) const;
 
 private:
     void PrepareChanceTasks();
     void PrepareRunoutOutcomes();
-};
-
-// Resident DCFR state in the layouts shared by both backends: regrets and cumulative
-// strategies in the strategySize layout, and per traversal node the update index of the
-// actor's last unpruned update (zero before the first), which discounts regrets lazily.
-struct TrainingState
-{
-    std::vector<float> regrets;
-    std::vector<float> strategySums;
-    std::vector<std::uint32_t> stamps;
 };
 
 // One player update's DCFR weights. Positive regrets are stored divided by positiveScale,

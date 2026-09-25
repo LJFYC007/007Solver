@@ -82,7 +82,7 @@ struct Plan
     // the graph edges a parallel executor needs beyond stream order.
     std::vector<std::vector<U32>> predecessors;
     State state{};
-    std::size_t entries = 0;
+    std::size_t entries = 0; // 16-bit units of the regrets or sums buffer (HandTraversalData::strategySize)
     std::size_t slots = 0;
     std::size_t outcomeEntries = 0;
     std::array<BufferData, kBufferCount> Buffers() const;
@@ -99,9 +99,9 @@ public:
     virtual void Update(const State& state) = 0;
     virtual void Synchronize() = 0;
     virtual std::vector<float> RootValues(const State& state) = 0;
-    virtual std::vector<float> DownloadSums(bool releaseTraining) = 0;
-    virtual TrainingState DownloadTraining() = 0;
-    virtual void UploadTraining(const TrainingState& state) = 0;
+    virtual std::vector<std::uint16_t> DownloadSums(bool releaseTraining) = 0;
+    virtual QuantizedState DownloadTraining() = 0;
+    virtual void UploadTraining(const QuantizedState& state) = 0;
     virtual const char* Name() const = 0;
 };
 std::unique_ptr<Executor> MakeExecutor(const Plan& plan);

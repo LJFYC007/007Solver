@@ -1,4 +1,5 @@
 #include "engine/gpu/GpuPlan.h"
+#include "engine/gpu/GpuQuantize.h"
 #include <cuda_runtime.h>
 #include <array>
 #include <stdexcept>
@@ -72,7 +73,7 @@ public:
         Copy(values.data(), buffers_[ValuesBuffer], values.size() * sizeof(float), cudaMemcpyDeviceToHost);
         return values;
     }
-    std::vector<float> DownloadSums(bool releaseTraining) override
+    std::vector<std::uint16_t> DownloadSums(bool releaseTraining) override
     {
         if (releaseTraining)
         {
@@ -82,26 +83,26 @@ public:
                 if (i != SumsBuffer)
                     Free(i);
         }
-        std::vector<float> result(entries_);
-        Copy(result.data(), buffers_[SumsBuffer], result.size() * sizeof(float), cudaMemcpyDeviceToHost);
+        std::vector<std::uint16_t> result(entries_);
+        Copy(result.data(), buffers_[SumsBuffer], result.size() * sizeof(std::uint16_t), cudaMemcpyDeviceToHost);
         if (releaseTraining)
             Free(SumsBuffer);
         return result;
     }
-    TrainingState DownloadTraining() override
+    QuantizedState DownloadTraining() override
     {
-        TrainingState state{std::vector<float>(entries_), std::vector<float>(entries_)};
-        Copy(state.regrets.data(), buffers_[RegretsBuffer], entries_ * sizeof(float), cudaMemcpyDeviceToHost);
-        Copy(state.strategySums.data(), buffers_[SumsBuffer], entries_ * sizeof(float), cudaMemcpyDeviceToHost);
+        QuantizedState state{std::vector<std::int16_t>(entries_), std::vector<std::uint16_t>(entries_)};
+        Copy(state.regrets.data(), buffers_[RegretsBuffer], entries_ * sizeof(std::int16_t), cudaMemcpyDeviceToHost);
+        Copy(state.strategySums.data(), buffers_[SumsBuffer], entries_ * sizeof(std::uint16_t), cudaMemcpyDeviceToHost);
         std::vector<std::uint32_t> halves(2 * std::size_t(shape_.stampCount));
         Copy(halves.data(), buffers_[StampsBuffer], halves.size() * sizeof(U32), cudaMemcpyDeviceToHost);
         state.stamps = NewestStamps(halves);
         return state;
     }
-    void UploadTraining(const TrainingState& state) override
+    void UploadTraining(const QuantizedState& state) override
     {
-        Copy(buffers_[RegretsBuffer], state.regrets.data(), entries_ * sizeof(float), cudaMemcpyHostToDevice);
-        Copy(buffers_[SumsBuffer], state.strategySums.data(), entries_ * sizeof(float), cudaMemcpyHostToDevice);
+        Copy(buffers_[RegretsBuffer], state.regrets.data(), entries_ * sizeof(std::int16_t), cudaMemcpyHostToDevice);
+        Copy(buffers_[SumsBuffer], state.strategySums.data(), entries_ * sizeof(std::uint16_t), cudaMemcpyHostToDevice);
         for (std::size_t half = 0; half < 2; ++half)
             Copy(
                 static_cast<U32*>(buffers_[StampsBuffer]) + half * shape_.stampCount,
@@ -194,8 +195,8 @@ private:
         static_cast<const U32*>(buffers_[OrderBuffer]),            \
         static_cast<const U32*>(buffers_[CardsBuffer]),            \
         static_cast<U32*>(buffers_[OutcomesBuffer]),               \
-        static_cast<float*>(buffers_[RegretsBuffer]),              \
-        static_cast<float*>(buffers_[SumsBuffer]),                 \
+        static_cast<short*>(buffers_[RegretsBuffer]),              \
+        static_cast<unsigned short*>(buffers_[SumsBuffer]),        \
         static_cast<float*>(buffers_[ScratchBuffer]),              \
         static_cast<float*>(buffers_[ValuesBuffer]),               \
         static_cast<U32*>(buffers_[FlagsBuffer]),                  \

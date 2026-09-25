@@ -3,6 +3,7 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <string>
 
 namespace solver::engine::gpu
 {
@@ -23,6 +24,10 @@ BufferData Table(const std::vector<T>& values)
 
 Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
 {
+    if (data.maxActions > kMaxActions)
+        throw std::runtime_error(
+            "The GPU supports at most " + std::to_string(kMaxActions) + " actions per decision; reduce bet or raise sizes or use CPU"
+        );
     const auto& tables = *data.tables;
     static_assert(sizeof(Node) == 96 && sizeof(Hand) == 32 && sizeof(State) == 56 && sizeof(Pass) == 32);
     state.board = data.nodes.front().boardMask;
@@ -494,7 +499,7 @@ std::array<BufferData, kBufferCount> Plan::Buffers() const
     buffers[OrderBuffer] = Table(order);
     buffers[CardsBuffer] = Table(cards);
     buffers[OutcomesBuffer] = {nullptr, outcomeEntries * sizeof(U32)};
-    buffers[RegretsBuffer] = {nullptr, entries * sizeof(float)};
+    buffers[RegretsBuffer] = {nullptr, entries * sizeof(std::uint16_t)};
     buffers[SumsBuffer] = buffers[RegretsBuffer];
     buffers[ScratchBuffer] = {nullptr, slots * state.stride * sizeof(float)};
     buffers[ValuesBuffer] = {nullptr, slots * state.stride * sizeof(float)};

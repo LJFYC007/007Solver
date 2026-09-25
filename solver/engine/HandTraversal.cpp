@@ -2,9 +2,11 @@
 #include "engine/AverageStrategy.h"
 #include "engine/HandEvaluation.h"
 #include "engine/ChanceGroups.h"
+#include "engine/gpu/GpuQuantize.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <type_traits>
 #include <utility>
 #include <omp.h>
 #if defined(__AVX2__)
@@ -21,41 +23,256 @@ std::array<float, 3> ShowdownUtilities(const HandTraversalData::Node& node, std:
     return player == 0 ? node.utilities : std::array<float, 3>{-node.utilities[2], -node.utilities[1], -node.utilities[0]};
 }
 
-// Adds weight * increments to sums, skipping 8-wide chunks that are all zero, which is
-// most entries once play prunes lines; the skipped update is exact. MSVC does not
-// vectorize the chunk test, so AVX2 builds spell it out.
-void AccumulateStrategy(float* sums, const float* increments, std::size_t count, float weight)
-{
-    const std::size_t aligned = count / 8 * 8;
 #if defined(__AVX2__)
-    const __m256 scale = _mm256_set1_ps(weight);
-    for (std::size_t chunk = 0; chunk < aligned; chunk += 8)
+// Eight-hand vectors of GpuQuantize.h's arithmetic, matching its scalar results.
+namespace vector
+{
+inline __m256i LoadExponents(const std::uint8_t* bytes)
+{
+    return _mm256_cvtepu8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(bytes)));
+}
+inline __m256 PowerOfTwo(__m256i exponent)
+{
+    return _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_add_epi32(exponent, _mm256_set1_epi32(127)), 23));
+}
+// 2^(byte - bias) and its inverse.
+inline __m256 Scale(__m256i exponentBytes)
+{
+    return PowerOfTwo(_mm256_sub_epi32(exponentBytes, _mm256_set1_epi32(gpu::kExponentBias)));
+}
+inline __m256 InverseScale(__m256i exponentBytes)
+{
+    return PowerOfTwo(_mm256_sub_epi32(_mm256_set1_epi32(gpu::kExponentBias), exponentBytes));
+}
+// Eight 16-bit integers as floats.
+inline __m256 Load(const std::int16_t* row)
+{
+    return _mm256_cvtepi32_ps(_mm256_cvtepi16_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(row))));
+}
+inline __m256 Load(const std::uint16_t* row)
+{
+    return _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(row))));
+}
+inline __m256i ExponentByte(__m256 magnitude, int bits)
+{
+    const __m256i biased = _mm256_and_si256(_mm256_srli_epi32(_mm256_castps_si256(magnitude), 23), _mm256_set1_epi32(0xff));
+    __m256i exponent = _mm256_max_epi32(_mm256_sub_epi32(biased, _mm256_set1_epi32(126 + bits)), _mm256_set1_epi32(-126));
+    const __m256 scaled = _mm256_mul_ps(magnitude, PowerOfTwo(_mm256_sub_epi32(_mm256_setzero_si256(), exponent)));
+    // A magnitude beyond the limit takes the next exponent (the compare is all ones there).
+    const __m256 beyond = _mm256_cmp_ps(scaled, _mm256_set1_ps(static_cast<float>((1 << bits) - 1)), _CMP_GT_OQ);
+    exponent = _mm256_sub_epi32(exponent, _mm256_castps_si256(beyond));
+    return _mm256_add_epi32(exponent, _mm256_set1_epi32(gpu::kExponentBias));
+}
+// The dithers of eight consecutive hands from index at an update (GpuQuantize.h's Dither).
+inline __m256 Dither(std::size_t index, std::uint32_t update)
+{
+    const __m256i lanes =
+        _mm256_add_epi32(_mm256_set1_epi32(static_cast<int>(static_cast<std::uint32_t>(index))), _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
+    __m256i hash = _mm256_xor_si256(lanes, _mm256_set1_epi32(static_cast<int>(update * gpu::kDitherSpread)));
+    hash = _mm256_xor_si256(hash, _mm256_srli_epi32(hash, 16));
+    hash = _mm256_mullo_epi32(hash, _mm256_set1_epi32(static_cast<int>(gpu::kDitherMix1)));
+    hash = _mm256_xor_si256(hash, _mm256_srli_epi32(hash, 13));
+    hash = _mm256_mullo_epi32(hash, _mm256_set1_epi32(static_cast<int>(gpu::kDitherMix2)));
+    hash = _mm256_xor_si256(hash, _mm256_srli_epi32(hash, 16));
+    return _mm256_mul_ps(_mm256_cvtepi32_ps(_mm256_srli_epi32(hash, 8)), _mm256_set1_ps(1.0f / 16777216.0f));
+}
+inline __m256i Quantize(__m256 values, __m256 inverseScale, __m256 dither)
+{
+    const __m256 scaled = _mm256_mul_ps(values, inverseScale);
+    const __m256i base = _mm256_cvttps_epi32(scaled);
+    const __m256 fraction = _mm256_sub_ps(scaled, _mm256_cvtepi32_ps(base));
+    // fraction < -dither is the scalar dither < -fraction with the negation hoisted out of
+    // the callers' loops.
+    const __m256 roundUp = _mm256_cmp_ps(fraction, _mm256_sub_ps(_mm256_set1_ps(1.0f), dither), _CMP_GE_OQ);
+    const __m256 roundDown = _mm256_cmp_ps(fraction, _mm256_sub_ps(_mm256_setzero_ps(), dither), _CMP_LT_OQ);
+    return _mm256_add_epi32(_mm256_sub_epi32(base, _mm256_castps_si256(roundUp)), _mm256_castps_si256(roundDown));
+}
+// Eight 32-bit integers packed to 16 bits; the encoded ranges never reach the saturation.
+inline __m128i Pack(__m256i values, bool unsignedRange)
+{
+    const __m128i low = _mm256_castsi256_si128(values), high = _mm256_extracti128_si256(values, 1);
+    return unsignedRange ? _mm_packus_epi32(low, high) : _mm_packs_epi32(low, high);
+}
+inline void StoreExponents(std::uint8_t* bytes, __m256i exponentBytes)
+{
+    const __m128i words = Pack(exponentBytes, false);
+    _mm_storel_epi64(reinterpret_cast<__m128i*>(bytes), _mm_packus_epi16(words, words));
+}
+inline __m256 Abs(__m256 values)
+{
+    return _mm256_andnot_ps(_mm256_set1_ps(-0.0f), values);
+}
+// Re-encodes eight hands of per-action rows of count units from the float rows at the
+// same positions, at the scales of the hands' magnitudes.
+template<typename Unit>
+inline void Encode(
+    Unit* units,
+    std::uint8_t* exponents,
+    const float* rows,
+    std::size_t actions,
+    std::size_t count,
+    __m256 magnitude,
+    std::size_t index,
+    std::uint32_t update
+)
+{
+    constexpr bool isSigned = std::is_signed_v<Unit>;
+    const __m256i next = ExponentByte(magnitude, isSigned ? gpu::kRegretBits : gpu::kSumBits);
+    const __m256 inverse = InverseScale(next), dither = Dither(index, update);
+    for (std::size_t action = 0; action < actions; ++action)
     {
-        const __m256 values = _mm256_loadu_ps(increments + chunk);
-        if (_mm256_movemask_ps(_mm256_cmp_ps(values, _mm256_setzero_ps(), _CMP_NEQ_UQ)) == 0)
-            continue;
-        _mm256_storeu_ps(sums + chunk, _mm256_add_ps(_mm256_loadu_ps(sums + chunk), _mm256_mul_ps(scale, values)));
+        const __m128i packed = Pack(Quantize(_mm256_loadu_ps(rows + action * count), inverse, dither), !isSigned);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(units + action * count), packed);
     }
-#else
-    for (std::size_t chunk = 0; chunk < aligned; chunk += 8)
-    {
-        bool any = false;
-        for (int i = 0; i < 8; ++i)
-            any |= increments[chunk + i] != 0.0f;
-        if (!any)
-            continue;
-        for (int i = 0; i < 8; ++i)
-            sums[chunk + i] += weight * increments[chunk + i];
-    }
+    StoreExponents(exponents, next);
+}
+} // namespace vector
 #endif
-    for (std::size_t hand = aligned; hand < count; ++hand)
-        if (increments[hand] != 0.0f)
-            sums[hand] += weight * increments[hand];
+
+// Re-encodes one hand of per-action rows of count units from the float rows at the same
+// positions, at the scale of its magnitude.
+template<typename Unit>
+void Encode(
+    Unit* units,
+    std::uint8_t* exponent,
+    const float* rows,
+    std::size_t actions,
+    std::size_t count,
+    float magnitude,
+    std::size_t index,
+    std::uint32_t update
+)
+{
+    const auto next = gpu::ExponentByte(magnitude, std::is_signed_v<Unit> ? gpu::kRegretBits : gpu::kSumBits);
+    const float dither = gpu::Dither(static_cast<std::uint32_t>(index), update);
+    for (std::size_t action = 0; action < actions; ++action)
+        units[action * count] = static_cast<Unit>(gpu::Quantize(rows[action * count], next, dither));
+    *exponent = static_cast<std::uint8_t>(next);
 }
 
-// Regret matching for hands [begin, end) of per-action rows of count hands.
+// Adds weight * reach * policy to the cumulative strategy of one decision at layout
+// offset (action-major rows of count hands), as the GPU's Reach does, re-encoding every
+// hand with reach (see GpuQuantize.h) through rows (actions * count floats of scratch).
+// Hands without reach keep their entries, so the skipped update is exact; AVX2 builds
+// skip eight-hand chunks without reach and re-encode a whole chunk otherwise, which
+// keeps the values of its hands without reach exactly.
+void AccumulateNodeStrategy(
+    std::uint16_t* sums,
+    std::size_t offset,
+    std::size_t actions,
+    std::size_t count,
+    const float* reach,
+    const float* policy,
+    float* rows,
+    float weight,
+    std::uint32_t update
+)
+{
+    std::uint8_t* exponents = ExponentBytes(sums, actions, count);
+    std::size_t hand = 0;
+#if defined(__AVX2__)
+    const __m256 weights = _mm256_set1_ps(weight);
+    for (; hand + 8 <= count; hand += 8)
+    {
+        const __m256 reaches = _mm256_loadu_ps(reach + hand);
+        if (_mm256_movemask_ps(_mm256_cmp_ps(reaches, _mm256_setzero_ps(), _CMP_NEQ_UQ)) == 0)
+            continue;
+        const __m256 scale = vector::Scale(vector::LoadExponents(exponents + hand));
+        __m256 magnitude = _mm256_setzero_ps();
+        for (std::size_t action = 0; action < actions; ++action)
+        {
+            const std::size_t i = action * count + hand;
+            const __m256 increment = _mm256_mul_ps(weights, _mm256_mul_ps(reaches, _mm256_loadu_ps(policy + i)));
+            const __m256 updated = _mm256_add_ps(_mm256_mul_ps(vector::Load(sums + i), scale), increment);
+            _mm256_storeu_ps(rows + i, updated);
+            magnitude = _mm256_max_ps(magnitude, updated);
+        }
+        vector::Encode(sums + hand, exponents + hand, rows + hand, actions, count, magnitude, offset + hand, update);
+    }
+#endif
+    for (; hand < count; ++hand)
+    {
+        // Locals, because stores to rows may alias the inputs as far as the compiler knows.
+        const float handReach = reach[hand];
+        if (handReach == 0.0f)
+            continue;
+        const unsigned int exponent = exponents[hand];
+        float magnitude = 0.0f;
+        for (std::size_t action = 0; action < actions; ++action)
+        {
+            const std::size_t i = action * count + hand;
+            rows[i] = gpu::Dequantize(static_cast<float>(sums[i]), exponent) + weight * (handReach * policy[i]);
+            magnitude = std::max(magnitude, rows[i]);
+        }
+        Encode(sums + hand, exponents + hand, rows + hand, actions, count, magnitude, offset + hand, update);
+    }
+}
+
+// The regret update of one acting decision at layout offset from its child value rows
+// (actions * count floats, overwritten with the stored regrets) and its values. Positive
+// regrets are stored divided by positiveScale, so the discounts of the updates the node
+// skipped are already in place; negative regrets halve once per skipped update. Each
+// hand is then re-encoded (see GpuQuantize.h).
+void UpdateNodeRegrets(
+    std::int16_t* regrets,
+    std::size_t offset,
+    std::size_t actions,
+    std::size_t count,
+    float* rows,
+    const float* values,
+    float scale,
+    float inverse,
+    float halving,
+    std::uint32_t update
+)
+{
+    std::uint8_t* exponents = ExponentBytes(regrets, actions, count);
+    std::size_t hand = 0;
+#if defined(__AVX2__)
+    const __m256 zero = _mm256_setzero_ps(), half = _mm256_set1_ps(0.5f);
+    const __m256 scales = _mm256_set1_ps(scale), inverses = _mm256_set1_ps(inverse), halvings = _mm256_set1_ps(halving);
+    for (; hand + 8 <= count; hand += 8)
+    {
+        const __m256 value = _mm256_loadu_ps(values + hand);
+        const __m256 decode = vector::Scale(vector::LoadExponents(exponents + hand));
+        __m256 magnitude = zero;
+        for (std::size_t action = 0; action < actions; ++action)
+        {
+            const std::size_t i = action * count + hand;
+            const __m256 old = _mm256_mul_ps(vector::Load(regrets + i), decode);
+            const __m256 discounted =
+                _mm256_blendv_ps(_mm256_mul_ps(old, halvings), _mm256_mul_ps(old, scales), _mm256_cmp_ps(old, zero, _CMP_GT_OQ));
+            const __m256 regret = _mm256_add_ps(discounted, _mm256_sub_ps(_mm256_loadu_ps(rows + i), value));
+            const __m256 stored =
+                _mm256_blendv_ps(_mm256_mul_ps(regret, half), _mm256_mul_ps(regret, inverses), _mm256_cmp_ps(regret, zero, _CMP_GT_OQ));
+            _mm256_storeu_ps(rows + i, stored);
+            magnitude = _mm256_max_ps(magnitude, vector::Abs(stored));
+        }
+        vector::Encode(regrets + hand, exponents + hand, rows + hand, actions, count, magnitude, offset + hand, update);
+    }
+#endif
+    for (; hand < count; ++hand)
+    {
+        // Locals, because stores to rows may alias the inputs as far as the compiler knows.
+        const unsigned int exponent = exponents[hand];
+        const float value = values[hand];
+        float magnitude = 0.0f;
+        for (std::size_t action = 0; action < actions; ++action)
+        {
+            const std::size_t i = action * count + hand;
+            const float old = gpu::Dequantize(static_cast<float>(regrets[i]), exponent);
+            const float regret = (old > 0.0f ? old * scale : old * halving) + (rows[i] - value);
+            rows[i] = regret > 0.0f ? regret * inverse : regret * 0.5f;
+            magnitude = std::max(magnitude, std::fabs(rows[i]));
+        }
+        Encode(regrets + hand, exponents + hand, rows + hand, actions, count, magnitude, offset + hand, update);
+    }
+}
+
+// Regret matching for hands [begin, end) of per-action rows of count hands, on the
+// quantized regrets (see GpuQuantize.h).
 void MatchHands(
-    const float* regrets,
+    const std::int16_t* regrets,
     float* current,
     std::size_t actions,
     std::size_t count,
@@ -69,10 +286,10 @@ void MatchHands(
     for (std::size_t action = 0; action < actions; ++action)
     {
         float* row = current + action * count;
-        const float* regretRow = regrets + action * count;
+        const std::int16_t* regretRow = regrets + action * count;
         for (std::size_t hand = begin; hand < end; ++hand)
         {
-            const float regret = regretRow[hand];
+            const float regret = static_cast<float>(regretRow[hand]);
             const float positive = regret > 0.0f ? regret : 0.0f;
             row[hand] = positive;
             positiveRegrets[hand] += positive;
@@ -340,7 +557,7 @@ void HandTraversal::MatchRegrets(const Node& node, const TrainState& train, floa
 {
     const auto count = hands[node.actor].size();
     const auto actions = node.childCount;
-    const float* regrets = train.regrets + node.strategyOffset;
+    const std::int16_t* regrets = train.regrets + node.strategyOffset;
     const float uniform = 1.0f / actions;
     // Eight-hand chunks without reach skip their regret loads, most of them once play prunes
     // lines; the zero policy leaves the propagated reach exactly as any policy would.
@@ -358,7 +575,7 @@ void HandTraversal::MatchRegrets(const Node& node, const TrainState& train, floa
         __m256 positive = _mm256_setzero_ps();
         for (std::size_t action = 0; action < actions; ++action)
         {
-            const __m256 clipped = _mm256_max_ps(_mm256_loadu_ps(regrets + action * count + chunk), _mm256_setzero_ps());
+            const __m256 clipped = _mm256_max_ps(vector::Load(regrets + action * count + chunk), _mm256_setzero_ps());
             _mm256_storeu_ps(current + action * count + chunk, clipped);
             positive = _mm256_add_ps(positive, clipped);
         }
@@ -456,7 +673,7 @@ std::vector<float> HandTraversal::EvaluateSnapshot(
 }
 
 std::vector<float> HandTraversal::EvaluateAverageBestResponse(
-    const float* strategySums,
+    const std::uint16_t* strategySums,
     std::size_t player,
     const std::vector<float>& opponentReach,
     const std::vector<float>& divisors
@@ -528,7 +745,7 @@ bool HandTraversal::Walk(
         }
         else if (strategySums)
         {
-            const float* sums = strategySums + node.strategyOffset;
+            const std::uint16_t* sums = strategySums + node.strategyOffset;
             for (std::size_t hand = 0; hand < actorCount; ++hand)
                 NormalizeAverageStrategy(sums + hand, actorCount, node.childCount, current + hand, actorCount);
         }
@@ -563,17 +780,11 @@ bool HandTraversal::Walk(
         *parallelCursor += node.childCount;
     float* accumulated = workspace.accumulated.data() + depth * stride;
     std::fill_n(accumulated, count, acting && bestResponse ? -std::numeric_limits<float>::infinity() : 0.0f);
-    // The opponent's decisions accumulate its cumulative strategy from the reach they propagate.
-    const bool accumulate = train && node.kind == Kind::Decision && !acting;
     const auto descend = [&](std::size_t action, float* output)
     {
         const auto childIndex = children[node.childOffset + action];
         const float* childReach =
             PropagateChild(nodeIndex, action, 1 - player, nodeStrategy, opponentReach, workspace.reach.data() + (depth + 1) * stride);
-        if (accumulate)
-            AccumulateStrategy(
-                train->strategySums + node.strategyOffset + action * opponentCount, childReach, opponentCount, train->weights.averageWeight
-            );
         return Walk(childIndex, context, workspace, depth + 1, childReach, output, parallelCursor);
     };
     bool live = false;
@@ -597,27 +808,37 @@ bool HandTraversal::Walk(
     }
     for (std::size_t hand = 0; hand < count; ++hand)
         values[hand] = accumulated[hand];
+    // The opponent's decisions accumulate its cumulative strategy from the reach they
+    // propagate, reusing the finished child value rows as scratch.
+    if (train && node.kind == Kind::Decision && !acting)
+        AccumulateNodeStrategy(
+            train->strategySums + node.strategyOffset,
+            node.strategyOffset,
+            node.childCount,
+            opponentCount,
+            opponentReach,
+            nodeStrategy,
+            childrenValues,
+            train->weights.averageWeight,
+            train->weights.update
+        );
     if (acting && train && live)
     {
         const auto& weights = train->weights;
-        // Positive regrets are stored divided by positiveScale, so the discounts of the
-        // updates this node skipped are already in place; negative regrets halve once per
-        // skipped update.
         const std::uint32_t skipped = weights.update - 1 - train->stamps[nodeIndex];
         const float halving = std::ldexp(1.0f, -static_cast<int>(std::min<std::uint32_t>(skipped, 200)));
-        const float scale = weights.positiveScale, inverse = weights.positiveInverse;
-        float* regrets = train->regrets + node.strategyOffset;
-        for (std::size_t action = 0; action < node.childCount; ++action)
-        {
-            const float* childValues = childrenValues + action * count;
-            float* regretRow = regrets + action * count;
-            for (std::size_t hand = 0; hand < count; ++hand)
-            {
-                const float old = regretRow[hand];
-                const float regret = (old > 0.0f ? old * scale : old * halving) + (childValues[hand] - values[hand]);
-                regretRow[hand] = regret > 0.0f ? regret * inverse : regret * 0.5f;
-            }
-        }
+        UpdateNodeRegrets(
+            train->regrets + node.strategyOffset,
+            node.strategyOffset,
+            node.childCount,
+            count,
+            childrenValues,
+            values,
+            weights.positiveScale,
+            weights.positiveInverse,
+            halving,
+            weights.update
+        );
         train->stamps[nodeIndex] = weights.update;
     }
     return live;

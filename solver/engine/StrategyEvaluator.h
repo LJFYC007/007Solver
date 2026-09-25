@@ -2,6 +2,7 @@
 
 #include "engine/SolveResult.h"
 #include <array>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <vector>
@@ -18,8 +19,8 @@ struct ExploitabilityMetrics
 struct HandTraversal;
 struct HandBoardData;
 ExploitabilityMetrics EvaluateExploitability(const SolveProblem& problem, const StrategySnapshot& strategy);
-// Borrows action-major cumulative strategies for the duration of this call. The traversal must start at the game root.
-ExploitabilityMetrics EvaluateAverageStrategy(const HandTraversal& traversal, const float* strategySums);
+// Borrows quantized action-major cumulative strategies for the duration of this call. The traversal must start at the game root.
+ExploitabilityMetrics EvaluateAverageStrategy(const HandTraversal& traversal, const std::uint16_t* strategySums);
 // Weights each player's game-root best-response hand values by range weight and compatible opponent mass.
 ExploitabilityMetrics RootExploitability(const HandBoardData& tables, const std::array<std::vector<float>, 2>& bestResponseValues);
 

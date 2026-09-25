@@ -24,8 +24,8 @@ enum BufferIndex : U32
     OrderBuffer,
     CardsBuffer,
     OutcomesBuffer, // runout win/loss counts per hand pair: player-0-major rows, then player-1-major copies
-    RegretsBuffer,
-    SumsBuffer,
+    RegretsBuffer,  // int16 units in the HandTraversalData::StateUnits layout (see GpuQuantize.h)
+    SumsBuffer,     // uint16 units in the same layout
     ScratchBuffer,
     ValuesBuffer,
     FlagsBuffer,  // per slot: whether the subtree carries opponent reach
@@ -41,8 +41,9 @@ enum : U32
 {
     kCardListStride = 53,
     kCardListHeader = 2 * kCardListStride,
-    kGroupFlags = 8, // leading Terminal group memory floats for the group-wide reach test: one per SIMD group
-    kLaneCount = 3,  // Pass::lane values: two alternating leaf-batch lanes, then the spine
+    kGroupFlags = 8,  // leading Terminal group memory floats for the group-wide reach test: one per SIMD group
+    kLaneCount = 3,   // Pass::lane values: two alternating leaf-batch lanes, then the spine
+    kMaxActions = 16, // actions per decision the kernels' per-hand entry arrays hold
     kNoIndex = 0xffffffffu,
 };
 // Also the CPU traversal node kind. Fold, Showdown and ForcedRunout are leaves.

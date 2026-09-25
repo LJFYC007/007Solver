@@ -12,9 +12,9 @@ CpuDcfrSession::CpuDcfrSession(const SolveProblem& problem, int workers)
 {
     if (workerCount_ <= 0)
         throw std::invalid_argument("CPU DCFR worker count must be positive");
-    regrets_.resize(traversal_.strategySize, 0.0f);
-    strategySums_.resize(traversal_.strategySize, 0.0f);
-    stamps_.resize(traversal_.nodes.size(), 0);
+    state_.regrets.resize(traversal_.strategySize, 0);
+    state_.strategySums.resize(traversal_.strategySize, 0);
+    state_.stamps.resize(traversal_.nodes.size(), 0);
     for (std::size_t player = 0; player < 2; ++player)
         for (const auto& hand : traversal_.hands[player])
             divisors_[player].push_back(hand.opponentMass);
@@ -31,37 +31,35 @@ void CpuDcfrSession::Update(std::size_t updatingPlayer, const UpdateWeights& wei
     for (std::size_t hand = 0; hand < opponentHands.size(); ++hand)
         workspace_.reach[hand] = opponentHands[hand].weight;
 
-    HandTraversal::TrainState train{regrets_.data(), strategySums_.data(), stamps_.data(), weights};
+    HandTraversal::TrainState train{state_.regrets.data(), state_.strategySums.data(), state_.stamps.data(), weights};
     traversal_.WalkTraining(updatingPlayer, divisors_[updatingPlayer].data(), workspace_, rootValues_.data(), workers_, train);
 }
 
 ExploitabilityMetrics CpuDcfrSession::EvaluateExploitability() const
 {
-    return EvaluateAverageStrategy(traversal_, strategySums_.data());
+    return EvaluateAverageStrategy(traversal_, state_.strategySums.data());
 }
 
-void CpuDcfrSession::WriteTrainingState(const TrainingState& state)
+void CpuDcfrSession::WriteTrainingState(const QuantizedState& state)
 {
     if (state.regrets.size() != traversal_.strategySize || state.strategySums.size() != traversal_.strategySize ||
         state.stamps.size() != traversal_.nodes.size())
         throw std::invalid_argument("Training state does not match the CPU strategy layout");
-    regrets_ = state.regrets;
-    strategySums_ = state.strategySums;
-    stamps_ = state.stamps;
+    state_ = state;
 }
 
 StrategySnapshot CpuDcfrSession::ExportStrategy() &&
 {
     // Only the cumulative strategy and traversal layout are needed below. Release
     // training allocations before the snapshot probability and index arrays coexist.
-    std::vector<float>().swap(regrets_);
-    std::vector<std::uint32_t>().swap(stamps_);
+    std::vector<std::int16_t>().swap(state_.regrets);
+    std::vector<std::uint32_t>().swap(state_.stamps);
     workspace_ = {};
     std::vector<HandTraversal::Workspace>().swap(workers_);
     std::vector<float>().swap(rootValues_);
     for (auto& divisors : divisors_)
         std::vector<float>().swap(divisors);
 
-    return traversal_.Data().ExportStrategy(std::move(strategySums_));
+    return traversal_.Data().ExportStrategy(std::move(state_.strategySums));
 }
 } // namespace solver::engine

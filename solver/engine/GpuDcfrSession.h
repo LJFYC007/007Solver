@@ -25,8 +25,8 @@ private:
     // Independent CPU certification of the resident average policy.
     ExploitabilityMetrics EvaluateExploitabilityOnCpu() const;
     StrategySnapshot ExportStrategy() &&;
-    TrainingState ReadTrainingState() const { return executor_->DownloadTraining(); }
-    void WriteTrainingState(const TrainingState& state);
+    QuantizedState ReadTrainingState() const { return executor_->DownloadTraining(); }
+    void WriteTrainingState(const QuantizedState& state);
     std::shared_ptr<const HandTraversalData> data_;
     std::unique_ptr<gpu::Executor> executor_;
     gpu::State state_{};

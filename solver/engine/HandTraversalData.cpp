@@ -1,6 +1,7 @@
 #include "engine/HandTraversalData.h"
 #include "engine/AverageStrategy.h"
 #include "engine/ChanceGroups.h"
+#include "engine/gpu/GpuQuantize.h"
 #include "game/TerminalSettlement.h"
 #include <algorithm>
 #include <stdexcept>
@@ -39,9 +40,12 @@ HandTraversalData::HandTraversalData(std::shared_ptr<const HandBoardData> tables
         if (kind == Kind::Decision)
         {
             node.childCount = source.BettingEdgeCount();
-            strategySize += node.childCount * hands[node.actor].size();
+            strategySize += StateUnits(node.childCount, hands[node.actor].size());
+            std::size_t compatible = 0;
             for (const auto& hand : hands[node.actor])
-                infoSetCount += !(hand.mask & boardMask);
+                compatible += !(hand.mask & boardMask);
+            infoSetCount += compatible;
+            probabilityCount += node.childCount * compatible;
             maxActions = std::max(maxActions, node.childCount);
         }
         else if (kind == Kind::Chance)
@@ -148,22 +152,20 @@ void HandTraversalData::PrepareRunoutOutcomes()
                 transposed[row * pairs + hand1 * hands[0].size() + hand0] = runoutOutcomes_[row * pairs + hand0 * hands[1].size() + hand1];
 }
 
-StrategySnapshot HandTraversalData::ExportStrategy(std::vector<float> sums) const
+StrategySnapshot HandTraversalData::ExportStrategy(std::vector<std::uint16_t> sums) const
 {
     std::vector<StrategySnapshot::NodeBlock> snapshotNodes;
     std::vector<core::HoleCards> snapshotHands;
     snapshotHands.reserve(infoSetCount);
-    const auto maxHands = std::max(tables->hands[0].size(), tables->hands[1].size());
-    std::vector<float> nodeSums(maxActions * maxHands);
+    std::vector<float> probabilities(probabilityCount);
     std::size_t writeOffset = 0;
-    // Copy each action-major node before writing its compact hand-major output.
-    // Output never extends beyond the original node block, so later inputs survive.
+    // Action-major sums normalize into the compact hand-major output.
     for (const Node& node : nodes)
     {
         if (node.kind != Kind::Decision)
             continue;
         const auto& hands = tables->hands[node.actor];
-        std::copy_n(sums.data() + node.strategyOffset, node.childCount * hands.size(), nodeSums.data());
+        const std::uint16_t* nodeSums = sums.data() + node.strategyOffset;
         const auto handOffset = snapshotHands.size();
         const auto probabilityOffset = writeOffset;
         for (std::size_t hand = 0; hand < hands.size(); ++hand)
@@ -171,14 +173,42 @@ StrategySnapshot HandTraversalData::ExportStrategy(std::vector<float> sums) cons
             if (hands[hand].mask & node.boardMask)
                 continue;
             snapshotHands.push_back(hands[hand].cards);
-            NormalizeAverageStrategy(nodeSums.data() + hand, hands.size(), node.childCount, sums.data() + writeOffset, 1);
+            NormalizeAverageStrategy(nodeSums + hand, hands.size(), node.childCount, probabilities.data() + writeOffset, 1);
             writeOffset += node.childCount;
         }
         if (snapshotHands.size() != handOffset)
             snapshotNodes.push_back({node.id, handOffset, probabilityOffset, snapshotHands.size() - handOffset, node.childCount});
     }
-    // Keep the allocation: shrinking capacity would require another large buffer.
-    sums.resize(writeOffset);
-    return StrategySnapshot(tables->game, std::move(snapshotNodes), std::move(snapshotHands), std::move(sums));
+    return StrategySnapshot(tables->game, std::move(snapshotNodes), std::move(snapshotHands), std::move(probabilities));
+}
+
+namespace
+{
+// One buffer of the quantized layout as floats, its exponent slots zero.
+template<typename Unit>
+std::vector<float> DecodeUnits(const HandTraversalData& data, const std::vector<Unit>& units)
+{
+    std::vector<float> values(data.strategySize);
+    for (const auto& node : data.nodes)
+    {
+        if (node.kind != HandTraversalData::Kind::Decision)
+            continue;
+        const auto hands = data.tables->hands[node.actor].size();
+        const Unit* nodeUnits = units.data() + node.strategyOffset;
+        const auto* exponents = ExponentBytes(nodeUnits, node.childCount, hands);
+        for (std::size_t action = 0; action < node.childCount; ++action)
+            for (std::size_t hand = 0; hand < hands; ++hand)
+            {
+                const auto i = action * hands + hand;
+                values[node.strategyOffset + i] = gpu::Dequantize(static_cast<float>(nodeUnits[i]), exponents[hand]);
+            }
+    }
+    return values;
+}
+} // namespace
+
+TrainingState HandTraversalData::Decode(const QuantizedState& state) const
+{
+    return {DecodeUnits(*this, state.regrets), DecodeUnits(*this, state.strategySums), state.stamps};
 }
 } // namespace solver::engine
