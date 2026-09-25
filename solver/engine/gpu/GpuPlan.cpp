@@ -115,18 +115,43 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         n.count = static_cast<U32>(source.childCount);
         n.actor = static_cast<U32>(source.actor);
         n.kind = source.kind;
-        n.rankRow = static_cast<U32>(source.rankRow);
+        n.row = source.kind == NodeKind::ForcedRunout ? static_cast<U32>(HandTraversalData::RunoutRow(source))
+                                                      : static_cast<U32>(source.rankRow);
         n.stamp = i;
+        n.fold = kNoIndex;
         if (source.rankRow >= 0)
             for (U32 p = 0; p < 2; ++p)
-                n.rankCounts[p] = static_cast<U32>(tables.rankRows[source.rankRow][p].hands.size());
+                n.rankCounts |= static_cast<U32>(tables.rankRows[source.rankRow][p].hands.size()) << (16 * p);
         std::copy(source.utilities.begin(), source.utilities.end(), n.utility);
-        if (source.kind == NodeKind::ForcedRunout)
-            n.outcomeRow = static_cast<U32>(HandTraversalData::RunoutRow(source));
     }
     for (U32 i = 0; i < layout.size(); ++i)
         for (U32 a = 0; a < layout[i].count; ++a)
             layout[edges[layout[i].edge + a]].parent = i;
+    // A fold and a showdown under one decision share the showdown's Terminal block; when
+    // they are the decision's only children, that block also backs the decision up, so
+    // neither the fold nor the decision is a Terminal or Backup work item. (Propagating the
+    // decision's reach there too, instead of in Reach, measured 4% slower.) A showdown's fold
+    // holds the fold's traversal index until slots are allocated.
+    std::vector<std::uint8_t> fused(layout.size());
+    for (U32 i = 0; i < layout.size(); ++i)
+    {
+        U32 fold = kNoIndex, showdown = kNoIndex;
+        for (U32 a = 0; a < layout[i].count; ++a)
+        {
+            const U32 child = edges[layout[i].edge + a];
+            if (layout[child].kind == NodeKind::Fold)
+                fold = child;
+            else if (layout[child].kind == NodeKind::Showdown)
+                showdown = child;
+        }
+        if (fold == kNoIndex || showdown == kNoIndex)
+            continue;
+        layout[showdown].fold = fold;
+        layout[showdown].foldUtility = layout[fold].utility[0];
+        fused[fold] = 1;
+        if (layout[i].count == 2)
+            fused[i] = 1;
+    }
     state.stampCount = static_cast<U32>(layout.size());
     state.outcomeRows = static_cast<U32>(data.runoutRows);
     // Both hand-major layouts of every runout row, so either player's Terminal loop reads
@@ -212,25 +237,29 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
     // A region's passes run in one stream: leaf batches (no chance node below) alternate
     // lanes 0 and 1 with disjoint scratch, everything above them uses lane 2. Batches with
     // chance nodes below alternate between two scratch copies and are emitted
-    // software-pipelined, a batch's Reach and Terminal passes before the previous batch's
-    // Backup passes, so the graph overlaps both with the leaf batches (Plan::predecessors).
+    // software-pipelined, a batch's Reach passes before the previous batch's Backup passes,
+    // so the graph overlaps both with the leaf batches (Plan::predecessors). A region's
+    // Terminal pass follows its first batch's Reach passes, so batches sharing its stream
+    // are not queued behind it.
     constexpr U32 kSpineLane = kLaneCount - 1;
     struct Region
     {
         std::vector<std::vector<U32>> levels;
-        std::vector<U32> boundary;
-        Ranges own, roots, parents; // own slots; root slots and the reach slots their derivation reads, in the parent region
-        std::size_t below;          // first slot this region's batches may use
+        std::vector<U32> boundary, terminals;
+        // Own slots less the chance children, which their own boundary Reach passes write and
+        // only Backup reads; root slots and the reach slots their derivation reads, in the
+        // parent region; every own slot, for Backup.
+        Ranges inner, roots, parents, own;
+        std::size_t below; // first slot this region's batches may use
         U32 lane;
     };
     layout[0].slot = layout[0].reachSlot[0] = layout[0].reachSlot[1] = 0;
-    // Visits a region, allocating its nodes' children from base, and emits its Reach levels
-    // and Terminal pass; the caller emits its batches and, later, its Backup passes.
+    // Visits a region, allocating its nodes' children from base, and emits its Reach levels;
+    // the caller emits its Terminal pass, its batches and, later, its Backup passes.
     const auto reach = [&](const std::vector<U32>& roots, std::size_t base, std::size_t below, U32 lane) -> Region
     {
         Region region;
         region.lane = lane;
-        std::vector<U32> terminals;
         std::size_t next = base;
         const auto visit = [&](const auto& walk, U32 index, std::size_t depth) -> void
         {
@@ -238,8 +267,8 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
                 region.levels.resize(depth + 1);
             region.levels[depth].push_back(index);
             auto& n = layout[index];
-            if (n.kind != NodeKind::Decision && n.kind != NodeKind::Chance)
-                terminals.push_back(index);
+            if (n.kind != NodeKind::Decision && n.kind != NodeKind::Chance && !fused[index])
+                region.terminals.push_back(index);
             for (U32 a = 0; a < n.count; ++a)
             {
                 const U32 child = edges[n.edge + a];
@@ -249,6 +278,8 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
                 // A decision rewrites only its actor's reach; the other player's stays with its ancestor.
                 for (U32 p = 0; p < 2; ++p)
                     layout[child].reachSlot[p] = n.kind == NodeKind::Chance || p == n.actor ? layout[child].slot : n.reachSlot[p];
+                // Chance children are not walked here, so their slots are consecutive, which
+                // BackupChance relies on.
                 if (n.kind == NodeKind::Chance)
                     region.boundary.push_back(child);
                 else
@@ -260,16 +291,30 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         slots = std::max(slots, next);
         region.below = below ? below : next;
         region.own = {{static_cast<U32>(base), static_cast<U32>(next)}};
-        std::vector<U32> rootSlots, parentSlots;
+        std::vector<U32> rootSlots, parentSlots, boundarySlots;
         for (U32 root : roots)
         {
+            // Streets open without a bet to fold to; the dependency intervals rely on it.
+            if (fused[root])
+                throw std::logic_error("GPU plan fuses a region root");
             rootSlots.push_back(layout[root].slot);
             if (layout[root].parent != kNoIndex)
                 for (U32 p = 0; p < 2; ++p)
                     parentSlots.push_back(layout[layout[root].parent].reachSlot[p]);
         }
+        for (U32 child : region.boundary)
+            boundarySlots.push_back(layout[child].slot);
         region.roots = coalesce(rootSlots);
         region.parents = coalesce(parentSlots);
+        U32 begin = static_cast<U32>(base);
+        for (const auto& [holeBegin, holeEnd] : coalesce(boundarySlots))
+        {
+            if (holeBegin > begin)
+                region.inner.emplace_back(begin, holeBegin);
+            begin = holeEnd;
+        }
+        if (next > begin)
+            region.inner.emplace_back(begin, static_cast<U32>(next));
         // Region roots derive the opponent's reach; deeper decisions are grouped by
         // actor so each player's launch covers only the opponent's (see LaunchPass).
         for (std::size_t depth = 0; depth < region.levels.size(); ++depth)
@@ -284,19 +329,23 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
                     std::stable_partition(list.begin(), list.end(), [&](U32 index) { return layout[index].actor == 0; }) - list.begin()
                 );
             std::vector<Interval> intervals;
-            access(intervals, region.own, false, true);
+            access(intervals, region.inner, false, true);
             access(intervals, region.roots, false, true);
             access(intervals, region.parents, false, false);
             emit(Kernel::Reach, list, lane, depth == 0, split, std::move(intervals));
         }
-        // Terminals read reach rows up to the region root and write their own values;
-        // roots are chance children and therefore decisions, never terminals.
-        std::vector<Interval> intervals;
-        access(intervals, region.own, false, false);
-        access(intervals, region.roots, false, false);
-        access(intervals, region.own, true, true);
-        emit(Kernel::Terminal, terminals, lane, false, 0, std::move(intervals));
         return region;
+    };
+    // Terminals read reach rows up to the region root, a showdown also its fold sibling's,
+    // and write their own values, the sibling's and a fused parent's; roots are chance
+    // children and therefore decisions, never terminals or fused parents (see reach).
+    const auto terminal = [&](const Region& region)
+    {
+        std::vector<Interval> intervals;
+        access(intervals, region.inner, false, false);
+        access(intervals, region.roots, false, false);
+        access(intervals, region.inner, true, true);
+        emit(Kernel::Terminal, region.terminals, region.lane, false, 0, std::move(intervals));
     };
     const auto backup = [&](const Region& region)
     {
@@ -304,7 +353,7 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         {
             std::vector<U32> decisions;
             for (U32 index : *level)
-                if (layout[index].kind == NodeKind::Decision || layout[index].kind == NodeKind::Chance)
+                if ((layout[index].kind == NodeKind::Decision || layout[index].kind == NodeKind::Chance) && !fused[index])
                     decisions.push_back(index);
             std::vector<Interval> intervals;
             access(intervals, region.own, true, true);
@@ -331,20 +380,23 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         }
         const auto roots = [&](std::size_t b)
         { return std::vector<U32>(region.boundary.begin() + ranges[b].first, region.boundary.begin() + ranges[b].second); };
-        if (std::none_of(region.boundary.begin(), region.boundary.end(), [&](U32 root) { return chanceBelow[root]; }))
-        {
-            for (std::size_t b = 0; b < ranges.size(); ++b)
-            {
-                const U32 lane = ranges.size() > 1 && (b & 1) ? 1u : 0u;
-                const Region leaf = reach(roots(b), region.below + (lane ? laneStride : 0), 0, lane);
-                backup(leaf);
-            }
-            return;
-        }
+        if (ranges.empty())
+            terminal(region);
+        const bool leaves = std::none_of(region.boundary.begin(), region.boundary.end(), [&](U32 root) { return chanceBelow[root]; });
         std::optional<Region> pending;
         for (std::size_t b = 0; b < ranges.size(); ++b)
         {
-            Region sub = reach(roots(b), region.below + (b % 2) * copy, region.below + 2 * copy, kSpineLane);
+            const U32 lane = !leaves ? kSpineLane : ranges.size() > 1 && (b & 1) ? 1u : 0u;
+            Region sub = leaves ? reach(roots(b), region.below + (lane ? laneStride : 0), 0, lane)
+                                : reach(roots(b), region.below + (b % 2) * copy, region.below + 2 * copy, lane);
+            if (b == 0)
+                terminal(region);
+            if (leaves)
+            {
+                terminal(sub);
+                backup(sub);
+                continue;
+            }
             if (pending)
                 backup(*pending);
             self(self, sub);
@@ -400,14 +452,25 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
     for (U32 child : edges)
         childSlots.push_back(layout[child].slot);
     for (auto& n : layout)
+    {
         for (U32 a = 0; a < n.count && a < 3; ++a)
             n.childSlot[a] = childSlots[n.edge + a];
-    // Kernels index nodes by work position, so parents name their Backup entry.
+        if (n.fold != kNoIndex)
+            n.fold = layout[n.fold].slot;
+    }
+    // Kernels index nodes by work position, so parents name their Backup entry; decisions a
+    // showdown's block backs up get a record after the work items instead.
     std::vector<U32> backupPosition(layout.size(), kNoIndex);
     for (const auto& pass : passes)
         if (pass.operation == Kernel::Backup)
             for (U32 i = 0; i < pass.count; ++i)
                 backupPosition[work[pass.offset + i]] = pass.offset + i;
+    for (U32 i = 0; i < layout.size(); ++i)
+        if (fused[i] && layout[i].kind == NodeKind::Decision)
+        {
+            backupPosition[i] = static_cast<U32>(work.size());
+            work.push_back(i);
+        }
     nodes.resize(work.size());
     for (std::size_t i = 0; i < work.size(); ++i)
     {

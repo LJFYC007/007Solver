@@ -59,6 +59,9 @@ void DcfrSession::Run(int iterations, const std::function<void(int)>& callback)
             }
         }
     }
+    // GPU updates are submitted ahead of the device; the run ends when they have finished.
+    if (gpu_)
+        gpu_->Synchronize();
     trainingTimeSeconds_ += std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count();
 }
 ExploitabilityMetrics DcfrSession::EvaluateCheckpoint(bool final, std::optional<double> stoppingTarget) const

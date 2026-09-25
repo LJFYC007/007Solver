@@ -71,7 +71,7 @@ function(add_solver_service suffix arch)
             solver_lib${suffix}
             PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON CUDA_RUNTIME_LIBRARY Static CUDA_ARCHITECTURES "86;89-real;120"
         )
-        target_compile_options(solver_lib${suffix} PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:--fmad=false;-Xcompiler=/utf-8>")
+        target_compile_options(solver_lib${suffix} PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>")
     else()
         target_sources(solver_lib${suffix} PRIVATE engine/gpu/GpuUnavailable.cpp)
     endif()

@@ -29,6 +29,9 @@ public:
             events_.resize(plan.passes.size());
             for (auto& event : events_)
                 Check(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
+            for (auto& event : done_)
+                Check(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
+            Check(cudaHostAlloc(reinterpret_cast<void**>(&staging_), done_.size() * sizeof(State), cudaHostAllocDefault));
             const auto sources = plan.Buffers();
             for (std::size_t i = 0; i < buffers_.size(); ++i)
                 Upload(i, sources[i]);
@@ -50,11 +53,18 @@ public:
     const char* Name() const override { return "CUDA"; }
     void Update(const State& state) override
     {
-        Check(cudaMemcpyAsync(buffers_[StateBuffer], &state, sizeof(State), cudaMemcpyHostToDevice, stream_));
+        // Updates queue behind each other in the origin stream, at most two in flight, so
+        // the host submits the next graph while the device runs the current one instead of
+        // idling the device for the submission. The pinned staging slot is reused once the
+        // update that copied from it has finished; an unrecorded event has nothing to wait for.
+        Check(cudaEventSynchronize(done_[slot_]));
+        staging_[slot_] = state;
+        Check(cudaMemcpyAsync(buffers_[StateBuffer], &staging_[slot_], sizeof(State), cudaMemcpyHostToDevice, stream_));
         Check(cudaGraphLaunch(executables_[state.player], stream_));
-        // One synchronization per player update, never per node or batch.
-        Check(cudaStreamSynchronize(stream_));
+        Check(cudaEventRecord(done_[slot_], stream_));
+        slot_ = (slot_ + 1) % done_.size();
     }
+    void Synchronize() override { Check(cudaStreamSynchronize(stream_)); }
     std::vector<float> RootValues(const State& state) override
     {
         Update(state);
@@ -66,6 +76,7 @@ public:
     {
         if (releaseTraining)
         {
+            Synchronize();
             DestroyGraph();
             for (std::size_t i = 0; i < buffers_.size(); ++i)
                 if (i != SumsBuffer)
@@ -111,6 +122,10 @@ private:
     cudaEvent_t fork_ = nullptr; // the origin's state at the start of a capture
     cudaEvent_t join_ = nullptr; // each other stream's end, joined into the origin
     std::vector<cudaEvent_t> events_;
+    // Pinned State copies of the updates in flight and the events ending them.
+    State* staging_ = nullptr;
+    std::array<cudaEvent_t, 2> done_{};
+    std::size_t slot_ = 0;
     std::array<cudaGraph_t, 2> graphs_{};
     std::array<cudaGraphExec_t, 2> executables_{};
     void Upload(std::size_t index, const BufferData& source)
@@ -226,6 +241,8 @@ private:
     }
     void Release()
     {
+        if (stream_)
+            cudaStreamSynchronize(stream_);
         DestroyGraph();
         for (std::size_t i = 0; i < buffers_.size(); ++i)
             Free(i);
@@ -239,9 +256,16 @@ private:
         for (auto& event : events_)
             if (event)
                 cudaEventDestroy(event);
+        for (auto& event : done_)
+            if (event)
+                cudaEventDestroy(event);
+        if (staging_)
+            cudaFreeHost(staging_);
         streams_ = {};
         fork_ = join_ = nullptr;
         events_.clear();
+        done_ = {};
+        staging_ = nullptr;
     }
 };
 } // namespace

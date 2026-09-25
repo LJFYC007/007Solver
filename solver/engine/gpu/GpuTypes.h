@@ -69,11 +69,18 @@ struct Node
     U32 count;
     U32 actor;
     NodeKind kind;
-    U32 rankRow;
-    U32 rankCounts[2];
-    U32 outcomeRow;   // zero for flop, card index + 1 for turn
-    U32 stamp;        // index of this node's update stamp
-    U32 childSlot[3]; // leading entries of childSlots, so small decisions skip that lookup
+    U32 row;        // Showdown: rank row of its board; ForcedRunout: zero for flop, card index + 1 for turn
+    U32 rankCounts; // Showdown: legal hands of player 0 | player 1 << 16 in its rank row
+    U32 stamp;      // index of this node's update stamp
+    // Showdown with a Fold sibling: that fold's slot, whose values this showdown's Terminal
+    // block writes, and its player-0 utility; kNoIndex without one. When the two are the
+    // parent's only children, the block also backs the parent up and parent names the
+    // parent's record after the work items (see Plan::nodes).
+    U32 fold;
+    float foldUtility;
+    // Leading entries of childSlots, so small decisions skip that lookup; a chance node's
+    // children occupy consecutive slots from childSlot[0].
+    U32 childSlot[3];
     float utility[3];
 };
 // Two 16-byte halves: Terminal loads the first for every hand and the second only at

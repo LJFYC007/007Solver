@@ -62,7 +62,8 @@ struct Plan
 {
     explicit Plan(const HandTraversalData& data);
     // One entry per scheduled work item, in pass order, so kernels index nodes by
-    // pass offset. A node repeats at each of its passes; parents name a Backup entry.
+    // pass offset, then one per decision a showdown's Terminal block backs up. A node
+    // repeats at each of its passes; parents name a Backup entry or a trailing record.
     // Node stamps are indexed by the traversal node index, shared with the CPU layout.
     std::vector<Node> nodes;
     // Reach writes and Backup reads child slots without a dependent Node lookup.
@@ -89,12 +90,14 @@ struct Plan
     std::uint64_t HostBytes() const;
 };
 
-// Both concrete implementations own their resident training state and scratch.
+// Both concrete implementations own their resident training state and scratch. Update
+// may return before the device finishes; downloads, RootValues and Synchronize wait.
 class Executor
 {
 public:
     virtual ~Executor() = default;
     virtual void Update(const State& state) = 0;
+    virtual void Synchronize() = 0;
     virtual std::vector<float> RootValues(const State& state) = 0;
     virtual std::vector<float> DownloadSums(bool releaseTraining) = 0;
     virtual TrainingState DownloadTraining() = 0;

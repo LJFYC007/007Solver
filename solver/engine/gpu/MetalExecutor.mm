@@ -76,6 +76,8 @@ public:
             Finish(command);
         }
     }
+    // Update waits for its command buffer, so nothing is pending.
+    void Synchronize() override {}
     std::vector<float> RootValues(const State& state) override
     {
         Update(state);

@@ -18,7 +18,9 @@ public:
 
 private:
     friend class DcfrSession;
+    // Update may return before the device finishes; Synchronize waits for every update.
     void Update(std::size_t player, const UpdateWeights& weights);
+    void Synchronize() { executor_->Synchronize(); }
     ExploitabilityMetrics EvaluateExploitability() const;
     // Independent CPU certification of the resident average policy.
     ExploitabilityMetrics EvaluateExploitabilityOnCpu() const;
