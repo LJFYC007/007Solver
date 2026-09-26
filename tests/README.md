@@ -32,7 +32,7 @@ cmake --build --preset RelWithDebInfo --target 007SolverBenchmark
 
 Direct invocation accepts `--report=<new-json-path>`, `--iterations=<count>`, `--workers=<count>` and `--device=cpu|gpu|auto`. It defaults to CPU; `--workers` affects only CPU training. See [benchmark.cpp](benchmark.cpp) for workload and report definitions.
 
-The [workload](fixtures/utg-bb-wide.json) uses full 8-max UTG open / BB call single-raised-pot ranges, pot 5.5bb, stacks 97.5bb, three-street bets of 33%/125%, raises of 50%, and 1000 player updates. `maxRaises: 2` and `allInSpr: 0` preserve larger branches.
+The [workload](fixtures/utg-bb-wide.json) uses full 8-max UTG open / BB call single-raised-pot ranges, pot 5.5bb, stacks 97.5bb, three-street bets of 33%/125%, raises of 50%, and 1000 player updates. `maxRaises: 2` and `allInSpr: 0` preserve larger branches. Its ranges hold 172 and 291 hands on its flop (the report's `legal_hands`); GPU kernels take other paths and batch differently for wider ranges, so also time GPU performance changes on a scenario with wider catalog ranges, such as both players' full ranges from the catalog's root node.
 
 Passing checks the independent uniform reference (`2e-6` initial-pot tolerance), training improvement and root queries; it **does not require convergence**. Reports include the tree size, updates per second, achieved accuracy and `target_reached`.
 

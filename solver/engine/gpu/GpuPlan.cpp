@@ -21,6 +21,121 @@ BufferData Table(const std::vector<T>& values)
 {
     return {values.data(), values.size() * sizeof(T)};
 }
+
+// The plan's working record of a traversal node: Node's fields unpacked, with the parent's
+// index and the first child's index in HandTraversalData::children for walking the tree.
+struct LayoutNode
+{
+    U64 strategy = 0;
+    U64 board = 0;
+    U32 parent = kNoIndex;
+    U32 slot = 0;
+    U32 reachSlot[2] = {};
+    U32 edge = 0; // first child's index in the edges
+    U32 link = 0; // first child's slot; for a showdown with a fold sibling, its parent's slot (see Node)
+    U32 count = 0;
+    U32 actor = 0;
+    NodeKind kind = NodeKind::Decision;
+    U32 row = 0;
+    U32 rankCounts = 0;
+    U32 stamp = 0;
+    U32 fold = kNoIndex;
+    float foldUtility = 0.0f;
+    float utility[3] = {};
+};
+
+Node Pack(const LayoutNode& layout)
+{
+    Node n{};
+    n.strategy = layout.strategy;
+    n.board = layout.board;
+    n.slot = layout.slot;
+    std::copy(layout.reachSlot, layout.reachSlot + 2, n.reachSlot);
+    n.link = layout.link;
+    n.info = PackInfo(layout.kind, layout.actor, layout.parent == kNoIndex, layout.count, layout.row);
+    n.rankCounts = layout.rankCounts;
+    n.stamp = layout.stamp;
+    n.fold = layout.fold;
+    n.foldUtility = layout.foldUtility;
+    std::copy(layout.utility, layout.utility + 3, n.utility);
+    return n;
+}
+
+// One rank row's Terminal section for opponent q's hands (see Plan::order), in U32 words: a
+// header uint4 (the run groups of warps 2 and 3 in x's two low bytes; y and z, the lane table's
+// and the run tokens' offsets in uint4 units), the scan tokens, the lane table and the run
+// tokens. Tokens are 16-bit byte offsets of opponent hands in the staged reach, four per uint2;
+// unused ones hold the zero slot's, just past the hands. Scan group g of warp segment s
+// (LaneSegment) is uint2 g * kWarpSize + s after the header. Warps 2 and 3 have a lane per card
+// that some hand of the updating player holds, longest ranked-holder run first, whose table
+// entry holds that run's byte offset from the runs' start | its length << 16 | the card << 24
+// (0xff << 24 without a card); its group g is run-token uint2 g * 2 * kWarpSize + lane.
+struct Section
+{
+    std::vector<U32> words;
+    std::array<U32, 52> runOffset{}, runLength{}; // in floats from the runs' start
+};
+Section BuildSection(const HandBoardData& tables, std::size_t row, U32 q, U32 hands)
+{
+    Section section;
+    const auto& ranked = tables.rankRows[row][q];
+    const U32 zero = U32(sizeof(float)) * hands;
+    const U32 rankCount = static_cast<U32>(ranked.hands.size()), span = (rankCount + kWarpSize - 1) / kWarpSize;
+    const U32 scanGroups = (span + 3) / 4;
+    const auto& mine = tables.holders[1 - q];
+    std::vector<U32> lanes;
+    for (U32 card = 0; card < 52; ++card)
+    {
+        section.runLength[card] = ranked.holders.cardOffsets[card + 1] - ranked.holders.cardOffsets[card];
+        if (mine.cardOffsets[card + 1] > mine.cardOffsets[card])
+            lanes.push_back(card);
+    }
+    static_assert(52 <= 2 * kWarpSize);
+    std::stable_sort(lanes.begin(), lanes.end(), [&](U32 a, U32 b) { return section.runLength[a] > section.runLength[b]; });
+    U32 offset = 0, longest[2] = {};
+    for (std::size_t k = 0; k < lanes.size(); ++k)
+    {
+        section.runOffset[lanes[k]] = offset;
+        offset += section.runLength[lanes[k]];
+        longest[k / kWarpSize] = std::max(longest[k / kWarpSize], section.runLength[lanes[k]]);
+    }
+    const U32 groups[2] = {(longest[0] + 3) / 4, (longest[1] + 3) / 4};
+    const U32 laneTable = 1 + 16 * scanGroups, tokens = laneTable + 16;
+    section.words.assign(4 * (tokens + 32 * std::max(groups[0], groups[1])), zero | zero << 16);
+    // Token k of a uint2 of words.
+    const auto token = [&](std::size_t uint2, U32 k, U32 value)
+    {
+        U32& word = section.words[2 * uint2 + k / 2];
+        word = k % 2 ? (word & 0xffffu) | value << 16 : (word & 0xffff0000u) | value;
+    };
+    section.words[0] = groups[0] | groups[1] << 8;
+    section.words[1] = laneTable;
+    section.words[2] = tokens;
+    section.words[3] = 0;
+    for (U32 segment = 0; segment < kWarpSize; ++segment)
+    {
+        const auto [begin, end] = LaneSegment(rankCount, segment);
+        for (U32 j = 0; j < end - begin; ++j)
+            token(2 + (j / 4) * kWarpSize + segment, j % 4, U32(sizeof(float)) * ranked.hands[begin + j]);
+    }
+    for (U32 k = 0; k < 2 * kWarpSize; ++k)
+    {
+        U32 lane = 0xffu << 24;
+        if (k < lanes.size())
+        {
+            const U32 card = lanes[k];
+            lane = U32(sizeof(float)) * section.runOffset[card] | section.runLength[card] << 16 | card << 24;
+            for (U32 j = 0; j < section.runLength[card]; ++j)
+                token(
+                    2 * std::size_t(tokens) + (j / 4) * 2 * kWarpSize + k,
+                    j % 4,
+                    U32(sizeof(float)) * ranked.holders.cardLists[ranked.holders.cardOffsets[card] + j]
+                );
+        }
+        section.words[4 * laneTable + k] = lane;
+    }
+    return section;
+}
 } // namespace
 
 Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
@@ -30,7 +145,7 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             "The GPU supports at most " + std::to_string(kMaxActions) + " actions per decision; reduce bet or raise sizes or use CPU"
         );
     const auto& tables = data.tables;
-    static_assert(sizeof(Node) == 96 && sizeof(Hand) == 32 && sizeof(State) == 56 && sizeof(Pass) == 40);
+    static_assert(sizeof(Node) == 64 && sizeof(Hand) == 32 && sizeof(State) == 64 && sizeof(Pass) == 40);
     state.board = data.nodes.front().boardMask;
     for (U32 p = 0; p < 2; ++p)
     {
@@ -44,9 +159,9 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
                  {}}
             );
     }
-    state.stride = std::max(state.hands[0], state.hands[1]);
+    // Rows are padded to whole float4 groups so the kernels move them as 8- and 16-byte vectors.
+    state.stride = TerminalLayout::Padded(std::max(state.hands[0], state.hands[1]));
     const U32 total = state.hands[0] + state.hands[1];
-    state.orderPitch = (5 * total + 3) / 4 * 4;
     runouts.assign(tables.rowsByRunout.begin(), tables.rowsByRunout.end());
     cards.resize(kCardListHeader);
     for (U32 p = 0; p < 2; ++p)
@@ -56,8 +171,18 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             cards[p * kCardListStride + card] = static_cast<U32>(cards.size() + holders.cardOffsets[card]);
         cards.insert(cards.end(), holders.cardLists.begin(), holders.cardLists.end());
     }
-    const auto rankPitch = 3 * std::size_t(total);
-    ranks.resize(tables.rankRows.size() * rankPitch, 0xffff);
+    ranks.resize(tables.rankRows.size() * std::size_t(total), 0xffff);
+    // Each rank row's section per opponent, then the rows at a pitch that fits the largest.
+    std::vector<std::array<Section, 2>> sections(tables.rankRows.size());
+    std::size_t sectionWords[2] = {};
+    for (std::size_t row = 0; row < tables.rankRows.size(); ++row)
+        for (U32 q = 0; q < 2; ++q)
+        {
+            sections[row][q] = BuildSection(tables, row, q, state.hands[q]);
+            sectionWords[q] = std::max(sectionWords[q], sections[row][q].words.size());
+        }
+    state.orderSection = static_cast<U32>(4 * total + sectionWords[0]);
+    state.orderPitch = static_cast<U32>(state.orderSection + sectionWords[1]);
     order.resize(tables.rankRows.size() * state.orderPitch, kNoIndex);
     // Order entries pack two byte offsets from Terminal's staged reach (see TerminalLayout),
     // which fit 16 bits up to the run tables' end.
@@ -65,64 +190,47 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
     const auto pack = [](U32 low, U32 high) { return U32(sizeof(float)) * low | U32(sizeof(float)) * high << 16; };
     for (std::size_t row = 0; row < tables.rankRows.size(); ++row)
     {
-        const auto rowBase = row * rankPitch, orderBase = row * std::size_t(state.orderPitch);
+        const auto rowBase = row * std::size_t(total), orderBase = row * std::size_t(state.orderPitch);
         for (U32 p = 0; p < 2; ++p)
         {
             const auto& source = tables.rankRows[row][p];
             const auto base = p ? state.hands[0] : 0;
-            const U32 legal = static_cast<U32>(tables.rankRows[row][1 - p].hands.size());
+            const U32 zero = state.hands[1 - p];
             const TerminalLayout staged(state.hands[1 - p]);
-            const auto& holders = tables.holders[1 - p];
+            const Section& section = sections[row][1 - p];
+            // The summed reach of a card's first k ranked holders, the zero slot for none.
+            const auto run = [&](U32 card, U32 k) { return k ? staged.runs + section.runOffset[card] + k - 1 : zero; };
             for (std::size_t i = 0; i < source.hands.size(); ++i)
             {
                 const auto hand = base + source.hands[i];
                 ranks[rowBase + hand] = source.ranks[i];
-                // A hand's win and loss masses; the run table's first entry, card 0's leading
-                // zero, stands for an empty one.
+                // A hand's win mass and the ranked mass not stronger than it, which the kernel
+                // subtracts from the ranked total for the loss mass; the zero slot stands for none.
                 const U32 lower = source.lowerBounds[i], upper = source.upperBounds[i];
-                U32 entry[4] = {
-                    pack(lower ? staged.forward + lower - 1 : staged.runs, upper < legal ? staged.reverse + upper : staged.runs), 0, 0, 0
-                };
-                // Per held card, its run over the opponent's holders leads with a zero entry, so
-                // it starts at the card offset plus the card index; the blocker positions (at
-                // most 51) index it for the blocked reach below and through the hand's rank,
-                // and the run's end holds its total.
+                U32 entry[4] = {pack(lower ? staged.forward + lower - 1 : zero, upper ? staged.forward + upper - 1 : zero), 0, 0, 0};
+                // Per held card, the blocker positions (at most 51) count its ranked holders below
+                // and through the hand's rank, and the run's last entry holds its total.
                 U32 totals[2];
                 for (U32 c = 0; c < 2; ++c)
                 {
                     const auto card = tables.hands[p][source.hands[i]].cardIndices[c];
-                    const U32 run = staged.runs + holders.cardOffsets[card] + card;
                     const U32 positions = source.blockers[i] >> (16 * c);
-                    entry[1 + c] = pack(run + (positions & 0xffu), run + ((positions >> 8) & 0xffu));
-                    totals[c] = staged.runs + holders.cardOffsets[card + 1] + card;
+                    entry[1 + c] = pack(run(card, positions & 0xffu), run(card, (positions >> 8) & 0xffu));
+                    totals[c] = run(card, section.runLength[card]);
                 }
                 entry[3] = pack(totals[0], totals[1]);
                 std::copy(entry, entry + 4, order.begin() + (orderBase + 4 * hand));
-                order[orderBase + 4 * total + base + i] = source.hands[i];
             }
         }
-        // Each card's hands in rank order (RankOrder::holders, which the CPU evaluator's
-        // blocker positions index) share the card list layout; board-blocked hands trail.
         for (U32 q = 0; q < 2; ++q)
-        {
-            const auto& ranked = tables.rankRows[row][q].holders;
-            const auto& all = tables.holders[q];
-            const auto base = rowBase + (q ? state.hands[0] : 0);
-            for (U32 card = 0; card < 52; ++card)
-            {
-                auto list = std::copy(
-                    ranked.cardLists.begin() + ranked.cardOffsets[card],
-                    ranked.cardLists.begin() + ranked.cardOffsets[card + 1],
-                    ranks.begin() + (rowBase + total + cards[q * kCardListStride + card] - kCardListHeader)
-                );
-                for (auto e = all.cardOffsets[card]; e < all.cardOffsets[card + 1]; ++e)
-                    if (ranks[base + all.cardLists[e]] == 0xffff)
-                        *list++ = all.cardLists[e];
-            }
-        }
+            std::copy(
+                sections[row][q].words.begin(),
+                sections[row][q].words.end(),
+                order.begin() + (orderBase + (q ? state.orderSection : 4 * total))
+            );
     }
     // Traversal-ordered layout; the uploaded array repeats each node at its work positions.
-    std::vector<Node> layout(data.nodes.size());
+    std::vector<LayoutNode> layout(data.nodes.size());
     const auto& edges = data.children;
     for (U32 i = 0; i < layout.size(); ++i)
     {
@@ -130,15 +238,14 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         auto& n = layout[i];
         n.strategy = source.strategyOffset;
         n.board = source.boardMask;
-        n.parent = kNoIndex;
         n.edge = static_cast<U32>(source.childOffset);
         n.count = static_cast<U32>(source.childCount);
         n.actor = static_cast<U32>(source.actor);
         n.kind = source.kind;
         n.row = source.kind == NodeKind::ForcedRunout ? static_cast<U32>(HandTraversalData::RunoutRow(source))
-                                                      : static_cast<U32>(source.rankRow);
+                : source.rankRow >= 0                 ? static_cast<U32>(source.rankRow)
+                                                      : 0u;
         n.stamp = i;
-        n.fold = kNoIndex;
         if (source.rankRow >= 0)
             for (U32 p = 0; p < 2; ++p)
                 n.rankCounts |= static_cast<U32>(tables.rankRows[source.rankRow][p].hands.size()) << (16 * p);
@@ -309,8 +416,9 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             auto& n = layout[index];
             if (n.kind != NodeKind::Decision && n.kind != NodeKind::Chance && !fused[index])
                 region.terminals.push_back(index);
-            // A node's children take consecutive slots before any is walked, which BackupChance
-            // and the Backup of a decision inlining a child rely on.
+            // A node's children take consecutive slots before any is walked; its record links
+            // only the first (see Node).
+            n.link = static_cast<U32>(next);
             for (U32 a = 0; a < n.count; ++a)
             {
                 const U32 child = edges[n.edge + a];
@@ -390,10 +498,10 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             {
                 const auto skippable = [&](U32 root)
                 {
-                    const Node& n = layout[root];
+                    const LayoutNode& n = layout[root];
                     for (U32 a = 0; a < n.count; ++a)
                     {
-                        const Node& child = layout[edges[n.edge + a]];
+                        const LayoutNode& child = layout[edges[n.edge + a]];
                         if (child.kind != NodeKind::Decision || child.actor == q)
                             return false;
                     }
@@ -445,13 +553,13 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             std::vector<U32> own[2], both;
             for (U32 index : *level)
             {
-                const Node& n = layout[index];
+                const LayoutNode& n = layout[index];
                 if ((n.kind != NodeKind::Decision && n.kind != NodeKind::Chance) || fused[index])
                     continue;
                 // The parent's record describes the child by its first child slot (see Node).
                 inlined[index] = n.kind == NodeKind::Decision && n.count <= 3 && n.parent != kNoIndex &&
                                  layout[n.parent].kind == NodeKind::Decision && layout[n.parent].actor != n.actor &&
-                                 layout[n.parent].count >= 2 && layout[n.parent].count <= 3 && layout[edges[n.edge]].slot < (1u << 30);
+                                 layout[n.parent].count >= 2 && layout[n.parent].count <= 3 && n.link < (1u << 30);
                 (inlined[index] ? own[n.actor] : both).push_back(index);
             }
             std::vector<U32> list = own[0];
@@ -553,32 +661,25 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         clock[lane] = static_cast<U32>(i + 1);
         reached[i] = latest[lane] = clock;
     }
-    childSlots.reserve(edges.size());
-    for (U32 child : edges)
-        childSlots.push_back(layout[child].slot);
+    // A showdown's Terminal block takes what it needs of its parent from its own record; the
+    // fold's action follows from the siblings' consecutive slots (see Node).
     for (auto& n : layout)
-    {
-        for (U32 a = 0; a < n.count && a < 3; ++a)
-            n.childSlot[a] = childSlots[n.edge + a];
-        // A showdown's Terminal block takes what it needs of its parent from its own record.
         if (n.fold != kNoIndex)
         {
-            const Node& parent = layout[n.parent];
+            const LayoutNode& parent = layout[n.parent];
             n.fold = layout[n.fold].slot;
             n.strategy = parent.strategy;
-            n.edge = parent.slot;
+            n.link = parent.slot;
             n.count = parent.count;
             n.actor = parent.actor;
             n.stamp = parent.stamp;
-            n.childSlot[0] = childSlots[parent.edge];
         }
-    }
     // Kernels index nodes by work position, so each pass's items get records in order.
     nodes.reserve(work.size());
     for (const auto& pass : passes)
         for (U32 i = pass.offset; i < pass.offset + pass.count; ++i)
         {
-            Node n = layout[work[i]];
+            LayoutNode n = layout[work[i]];
             if (pass.operation == Kernel::Backup && n.kind == NodeKind::Decision)
             {
                 // A decision's Backup record describes its inlined children (see Node).
@@ -587,10 +688,9 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
                 {
                     const U32 child = edges[n.edge + a];
                     if (inlined[child])
-                        descriptors[a] = layout[child].childSlot[0] | layout[child].count << 30;
+                        descriptors[a] = layout[child].link | layout[child].count << 30;
                 }
-                n.row = descriptors[0];
-                n.rankCounts = descriptors[1];
+                n.board = U64(descriptors[0]) | U64(descriptors[1]) << 32;
                 n.fold = descriptors[2];
             }
             else if (pass.operation == Kernel::Reach)
@@ -601,13 +701,13 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
                 const U32 root = derived[work[i]] ? n.parent : work[i], parent = layout[root].parent;
                 if (parent != kNoIndex && layout[parent].kind == NodeKind::Chance)
                 {
-                    const Node& chance = layout[parent];
+                    const LayoutNode& chance = layout[parent];
                     std::copy(chance.reachSlot, chance.reachSlot + 2, n.reachSlot);
                     n.board = layout[root].board & ~chance.board;
                     n.foldUtility = 1.0f / float(chance.count - 4);
                 }
             }
-            nodes.push_back(n);
+            nodes.push_back(Pack(n));
         }
 }
 
@@ -615,7 +715,6 @@ std::array<BufferData, kBufferCount> Plan::Buffers() const
 {
     std::array<BufferData, kBufferCount> buffers{};
     buffers[NodesBuffer] = Table(nodes);
-    buffers[ChildSlotsBuffer] = Table(childSlots);
     buffers[HandsBuffer] = Table(hands);
     buffers[RanksBuffer] = Table(ranks);
     buffers[RunoutsBuffer] = Table(runouts);

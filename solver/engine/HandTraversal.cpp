@@ -840,8 +840,7 @@ bool HandTraversal::Walk(
     if (acting && train && live)
     {
         const auto& weights = train->weights;
-        const std::uint32_t skipped = weights.update - 1 - train->stamps[nodeIndex];
-        const float halving = std::ldexp(1.0f, -static_cast<int>(std::min<std::uint32_t>(skipped, 200)));
+        const float halving = gpu::Halving(weights.update - 1 - train->stamps[nodeIndex]);
         UpdateNodeRegrets(
             train->regrets + node.strategyOffset,
             node.strategyOffset,

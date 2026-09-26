@@ -59,9 +59,9 @@ void EvaluateFoldHands(
         values[index] = scales[index] > 0.0f ? (masses[index] * scales[index]) * utility : 0.0f;
 }
 
-// Prefix sums over the opponent's rank order give each hand's strictly weaker and
-// stronger mass in one lookup each; per-card runs remove the holders of its own cards.
-// Independent forward/reverse sums avoid subtracting nearly equal cumulative totals.
+// Prefix sums over the opponent's rank order give each hand's strictly weaker mass in one
+// lookup and its strictly stronger mass as the total less another; per-card runs remove the
+// holders of its own cards.
 void EvaluateShowdownHands(
     const HandBoardData& data,
     std::size_t player,
@@ -76,18 +76,10 @@ void EvaluateShowdownHands(
     const auto& opponent = ranks[1 - player];
     const auto myCount = mine.hands.size(), opponentCount = opponent.hands.size(), count = data.hands[player].size();
     const float tie = utilities[1], winDelta = utilities[0] - tie, lossDelta = utilities[2] - tie;
-    std::array<float, HandBoardData::kMaxHands> ranked;
-    for (std::size_t i = 0; i < opponentCount; ++i)
-        ranked[i] = opponentReach[opponent.hands[i]];
-    // Both dependent chains advance in one loop so their latencies overlap.
-    std::array<float, HandBoardData::kMaxHands + 1> forward, reverse;
+    std::array<float, HandBoardData::kMaxHands + 1> forward;
     forward[0] = 0.0f;
-    reverse[opponentCount] = 0.0f;
     for (std::size_t i = 0; i < opponentCount; ++i)
-    {
-        forward[i + 1] = forward[i] + ranked[i];
-        reverse[opponentCount - 1 - i] = reverse[opponentCount - i] + ranked[opponentCount - 1 - i];
-    }
+        forward[i + 1] = forward[i] + opponentReach[opponent.hands[i]];
     // Each card's run starts with a zero entry at cardOffsets[card] + card.
     std::array<float, 2 * HandBoardData::kMaxHands + 52> runs;
     for (int card = 0; card < 52; ++card)
@@ -120,7 +112,7 @@ void EvaluateShowdownHands(
             blockedLosses += run[length] - run[through];
         }
         wins[hand] = forward[mine.lowerBounds[i]] - blockedWins;
-        losses[hand] = reverse[mine.upperBounds[i]] - blockedLosses;
+        losses[hand] = (forward[opponentCount] - forward[mine.upperBounds[i]]) - blockedLosses;
         if (needMass)
         {
             const int matching = data.hands[player][hand].matchingOpponent;

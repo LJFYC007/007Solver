@@ -180,12 +180,12 @@ private:
     {
         if (pass.count == 0)
             return;
-        // Backup tiles its pass.lanes, two of the current player's hands each, and Terminal runs one group per item; other
+        // Reach and Backup tile each item's pass.lanes, two hands per lane, and Terminal runs one group per item; other
         // passes are linear over pass.lanes.
-        const bool handTiles = pass.operation == Kernel::Backup;
+        const bool handTiles = pass.operation == Kernel::Backup || pass.operation == Kernel::Reach;
         const U32 group = pass.operation == Kernel::Terminal ? kTerminalGroup
-                          : handTiles                        ? (std::min(pass.lanes, 256u) + kWarpSize - 1) / kWarpSize * kWarpSize
-                                                             : 256u;
+                          : handTiles ? (std::min<U32>(pass.lanes, kTileGroup) + kWarpSize - 1) / kWarpSize * kWarpSize
+                                      : 256u;
         const auto threads = pass.count * pass.lanes;
         const dim3 blocks = handTiles ? dim3(pass.count, (pass.lanes + group - 1) / group)
                                       : dim3(pass.operation == Kernel::Terminal ? pass.count : (threads + group - 1) / group);
@@ -211,7 +211,6 @@ private:
             &config,
             kernel,
             static_cast<const Node*>(buffers_[NodesBuffer]),
-            static_cast<const U32*>(buffers_[ChildSlotsBuffer]),
             static_cast<const Hand*>(buffers_[HandsBuffer]),
             static_cast<const unsigned short*>(buffers_[RanksBuffer]),
             static_cast<const int*>(buffers_[RunoutsBuffer]),

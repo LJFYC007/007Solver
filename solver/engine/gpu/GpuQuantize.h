@@ -11,12 +11,8 @@
 // increments below one quantum still accumulate. Every device computes the same dither
 // and rounding, so equal float inputs quantize identically, and encoding a decoded state
 // reproduces its values.
+#include "engine/gpu/GpuTypes.h"
 #include <cstring>
-#if defined(__CUDACC__)
-#define GPU_QUANTIZE_INLINE __host__ __device__ __forceinline__
-#else
-#define GPU_QUANTIZE_INLINE inline
-#endif
 
 namespace solver::engine::gpu
 {
@@ -29,7 +25,7 @@ enum : int
     kSumBits = 16,    // magnitudes up to 65535
 };
 
-GPU_QUANTIZE_INLINE unsigned int FloatBits(float value)
+GPU_TYPES_INLINE unsigned int FloatBits(float value)
 {
 #if defined(__CUDA_ARCH__)
     return __float_as_uint(value);
@@ -40,7 +36,7 @@ GPU_QUANTIZE_INLINE unsigned int FloatBits(float value)
 #endif
 }
 
-GPU_QUANTIZE_INLINE float BitsFloat(unsigned int bits)
+GPU_TYPES_INLINE float BitsFloat(unsigned int bits)
 {
 #if defined(__CUDA_ARCH__)
     return __uint_as_float(bits);
@@ -52,9 +48,16 @@ GPU_QUANTIZE_INLINE float BitsFloat(unsigned int bits)
 }
 
 // 2^exponent for exponents -126 to 127, every one a normal float.
-GPU_QUANTIZE_INLINE float PowerOfTwo(int exponent)
+GPU_TYPES_INLINE float PowerOfTwo(int exponent)
 {
     return BitsFloat((unsigned int)(exponent + 127) << 23);
+}
+
+// 2^-skipped, the halving of negative regrets over skipped updates, rounded to nearest: a
+// normal power of two, a denormal one, or zero below 2^-149.
+GPU_TYPES_INLINE float Halving(unsigned int skipped)
+{
+    return skipped < 127u ? PowerOfTwo(-int(skipped)) : skipped < 150u ? BitsFloat(1u << (149u - skipped)) : 0.0f;
 }
 
 enum : unsigned int
@@ -66,7 +69,7 @@ enum : unsigned int
 
 // A hand's dither in [0, 1) at an update: MurmurHash3's finalizer over the index of
 // the hand's first entry and the spread update index.
-GPU_QUANTIZE_INLINE float Dither(unsigned int index, unsigned int update)
+GPU_TYPES_INLINE float Dither(unsigned int index, unsigned int update)
 {
     unsigned int hash = index ^ (update * kDitherSpread);
     hash ^= hash >> 16;
@@ -81,21 +84,22 @@ GPU_QUANTIZE_INLINE float Dither(unsigned int index, unsigned int update)
 // leaving that magnitude 2^(bits-1) to 2^bits - 1, one more when it exceeds the limit
 // (dithered rounding never carries a magnitude within the limit beyond it), never
 // below -126. Zero and denormal magnitudes take the smallest scale.
-GPU_QUANTIZE_INLINE unsigned int ExponentByte(float magnitude, int bits)
+GPU_TYPES_INLINE unsigned int ExponentByte(float magnitude, int bits)
 {
-    int exponent = int((FloatBits(magnitude) >> 23) & 0xffu) - 126 - bits;
-    exponent = exponent < -126 ? -126 : exponent;
-    if (magnitude * PowerOfTwo(-exponent) > float((1 << bits) - 1))
-        ++exponent;
-    return (unsigned int)(exponent + kExponentBias);
+    // With the biased exponent field E, exponent E - 126 - bits leaves the magnitude m * 2^(bits-1)
+    // for its mantissa m in [1, 2), above the limit 2^bits - 1 exactly when the mantissa field
+    // exceeds 2^23 - 2^(24-bits), which adding 2^(24-bits) - 1 carries into the exponent field.
+    // The signed shift sends -0 below the clamp.
+    const int carried = int(FloatBits(magnitude) + ((1u << (24 - bits)) - 1u)) >> 23;
+    return (unsigned int)((carried < bits ? bits : carried) - bits);
 }
 
-GPU_QUANTIZE_INLINE unsigned int RegretExponent(float magnitude)
+GPU_TYPES_INLINE unsigned int RegretExponent(float magnitude)
 {
     return ExponentByte(magnitude, kRegretBits);
 }
 
-GPU_QUANTIZE_INLINE unsigned int SumExponent(float magnitude)
+GPU_TYPES_INLINE unsigned int SumExponent(float magnitude)
 {
     return ExponentByte(magnitude, kSumBits);
 }
@@ -103,16 +107,23 @@ GPU_QUANTIZE_INLINE unsigned int SumExponent(float magnitude)
 // Stochastic floor(value / scale + dither). Truncate first so the signed fractional
 // part is exact even near zero; compare it without adding the dither to a large integer.
 // Dither's 24-bit grid makes 1 - dither exact, and integral scaled values stay unchanged.
-GPU_QUANTIZE_INLINE int Quantize(float value, unsigned int exponentByte, float dither)
+GPU_TYPES_INLINE int Quantize(float value, unsigned int exponentByte, float dither)
 {
     const float scaled = value * PowerOfTwo(kExponentBias - int(exponentByte));
+#if defined(__CUDA_ARCH__)
+    // The comparisons below add the carry of the exact sum scaled + dither to its truncation, so
+    // the result is that sum's floor, an integer below 2^16 in magnitude that rounding the sum
+    // down keeps.
+    return __float2int_rd(__fadd_rd(scaled, dither));
+#else
     const int base = int(scaled);
     const float fraction = scaled - float(base);
     return base + (fraction >= 1.0f - dither ? 1 : 0) - (dither < -fraction ? 1 : 0);
+#endif
 }
 
 // The integer is passed already converted to float, as the kernels hold entries.
-GPU_QUANTIZE_INLINE float Dequantize(float quantized, unsigned int exponentByte)
+GPU_TYPES_INLINE float Dequantize(float quantized, unsigned int exponentByte)
 {
     return quantized * PowerOfTwo(int(exponentByte) - kExponentBias);
 }

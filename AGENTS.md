@@ -13,6 +13,7 @@ Run the relevant [README checks](README.md#checks) and follow the [fixture updat
 - Do not add tests unless explicitly requested. Adapt existing tests when interfaces change, preserving independent expected values and precision.
 - Reuse existing build and output directories. Create additional directories under `build/` only when necessary.
 - Repeat or broaden passed checks only for relevant changes, failures or unresolved concerns.
+- Time performance changes back to back against a rebuilt baseline, and GPU changes also beyond the benchmark's hand counts (see [Benchmark](tests/README.md#benchmark)).
 - Rust formatting hooks must name crate roots and their edition. Inspect desktop layout changes using the current build.
 
 ## Documentation
