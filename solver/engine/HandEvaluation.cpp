@@ -15,12 +15,21 @@ std::vector<float> CompatibleHandMasses(const HandBoardData& data, std::size_t p
     return masses;
 }
 
+std::vector<float> ValueScales(const std::vector<float>& masses)
+{
+    std::vector<float> scales;
+    scales.reserve(masses.size());
+    for (const float mass : masses)
+        scales.push_back(ValueScale(mass));
+    return scales;
+}
+
 void EvaluateFoldHands(
     const HandBoardData& data,
     std::size_t player,
     std::uint64_t boardMask,
     const float* opponentReach,
-    const float* divisors,
+    const float* scales,
     float utility,
     float* values
 )
@@ -47,7 +56,7 @@ void EvaluateFoldHands(
         masses[index] = (hand.mask & boardMask) ? 0.0f : total - cards[hand.cardIndices[0]] - cards[hand.cardIndices[1]] + identical;
     }
     for (std::size_t index = 0; index < mine.size(); ++index)
-        values[index] = divisors[index] > 0.0f ? (masses[index] / divisors[index]) * utility : 0.0f;
+        values[index] = scales[index] > 0.0f ? (masses[index] * scales[index]) * utility : 0.0f;
 }
 
 // Prefix sums over the opponent's rank order give each hand's strictly weaker and
@@ -58,7 +67,7 @@ void EvaluateShowdownHands(
     std::size_t player,
     const std::array<HandBoardData::RankOrder, 2>& ranks,
     const float* opponentReach,
-    const float* divisors,
+    const float* scales,
     const std::array<float, 3>& utilities,
     float* values
 )
@@ -119,7 +128,6 @@ void EvaluateShowdownHands(
         }
     }
     for (std::size_t hand = 0; hand < count; ++hand)
-        values[hand] =
-            divisors[hand] > 0.0f ? (tie * masses[hand] + winDelta * wins[hand] + lossDelta * losses[hand]) / divisors[hand] : 0.0f;
+        values[hand] = scales[hand] > 0.0f ? (tie * masses[hand] + winDelta * wins[hand] + lossDelta * losses[hand]) * scales[hand] : 0.0f;
 }
 } // namespace solver::engine

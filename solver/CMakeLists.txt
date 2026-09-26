@@ -8,21 +8,9 @@ file(
 )
 list(APPEND SOLVER_LIB_SOURCES engine/gpu/GpuPlan.cpp)
 
-option(SOLVER_ENABLE_GPU "Build the native CUDA or Metal DCFR backend when available" ON)
+option(SOLVER_ENABLE_GPU "Build the CUDA DCFR backend on Windows when available" ON)
 set(SOLVER_GPU_BACKEND "CPU")
-if(SOLVER_ENABLE_GPU AND APPLE)
-    enable_language(OBJCXX)
-    set_source_files_properties(engine/gpu/MetalExecutor.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
-    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/engine/gpu/GpuTypes.h" GPU_TYPES)
-    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/engine/gpu/GpuQuantize.h" GPU_QUANTIZE)
-    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/engine/gpu/GpuKernels.inc" GPU_KERNELS)
-    set_property(
-        DIRECTORY APPEND
-        PROPERTY CMAKE_CONFIGURE_DEPENDS engine/gpu/GpuTypes.h engine/gpu/GpuQuantize.h engine/gpu/GpuKernels.inc
-    )
-    configure_file(engine/gpu/MetalSource.h.in "${CMAKE_CURRENT_BINARY_DIR}/MetalSource.h" @ONLY)
-    set(SOLVER_GPU_BACKEND "Metal")
-elseif(SOLVER_ENABLE_GPU AND WIN32)
+if(SOLVER_ENABLE_GPU AND WIN32)
     include(CheckLanguage)
     check_language(CUDA)
     if(CMAKE_CUDA_COMPILER)
@@ -64,12 +52,7 @@ file(
 function(add_solver_service suffix arch)
     add_library(solver_lib${suffix} STATIC ${SOLVER_LIB_SOURCES})
     target_compile_features(solver_lib${suffix} PUBLIC cxx_std_17)
-    if(SOLVER_GPU_BACKEND STREQUAL "Metal")
-        target_sources(solver_lib${suffix} PRIVATE engine/gpu/MetalExecutor.mm)
-        set_target_properties(solver_lib${suffix} PROPERTIES OBJCXX_STANDARD 17 OBJCXX_STANDARD_REQUIRED ON)
-        target_link_libraries(solver_lib${suffix} PRIVATE "-framework Metal" "-framework Foundation")
-        target_include_directories(solver_lib${suffix} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-    elseif(SOLVER_GPU_BACKEND STREQUAL "CUDA")
+    if(SOLVER_GPU_BACKEND STREQUAL "CUDA")
         target_sources(solver_lib${suffix} PRIVATE engine/gpu/CudaExecutor.cu)
         target_link_libraries(solver_lib${suffix} PRIVATE CUDA::cudart_static)
         # Native code for RTX 30, 40 and 50 series; other GPUs JIT the newest PTX they support.

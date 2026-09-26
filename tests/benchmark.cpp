@@ -128,7 +128,7 @@ class Diagnostics : public testing::EmptyTestEventListener
 };
 } // namespace
 
-TEST(WideRangeBenchmark, UtgBbThreeBetFixedWork)
+TEST(WideRangeBenchmark, UtgBbSingleRaisedFixedWork)
 {
     StartStage("preparation");
     const std::string fixturePath = std::string(TEST_FIXTURE_DIR) + "utg-bb-wide.json";
@@ -138,7 +138,7 @@ TEST(WideRangeBenchmark, UtgBbThreeBetFixedWork)
     report["oracle"] = reference.at("source");
     const auto& expected = reference.at("utg-bb-wide");
     ASSERT_EQ(input, expected.at("scenario"));
-    ASSERT_EQ(input.at("initialPot"), 26.5);
+    ASSERT_EQ(input.at("initialPot"), 5.5);
     ASSERT_EQ(input.at("heroPosition"), "UTG");
     ASSERT_EQ(input.at("villainPosition"), "BB");
     ASSERT_EQ(reference.at("source").at("chipScale"), 10.0);
@@ -148,8 +148,8 @@ TEST(WideRangeBenchmark, UtgBbThreeBetFixedWork)
         ASSERT_TRUE(std::isfinite(expected.at("uniform").at(key).get<double>()));
     }
     auto scenario = io::LoadScenario(fixturePath);
-    ASSERT_EQ(input.at("heroStack"), 87.0);
-    ASSERT_EQ(input.at("villainStack"), 87.0);
+    ASSERT_EQ(input.at("heroStack"), 97.5);
+    ASSERT_EQ(input.at("villainStack"), 97.5);
     const double initialPot = input.at("initialPot").get<double>();
     const double targetExploitability = initialPot * scenario.accuracyPercent / 100.0;
     report["exploitability_limit"] = targetExploitability;

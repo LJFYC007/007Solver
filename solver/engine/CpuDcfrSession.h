@@ -26,7 +26,7 @@ private:
     QuantizedState ReadTrainingState() const { return state_; }
     void WriteTrainingState(const QuantizedState& state);
     const HandTraversal traversal_;
-    std::array<std::vector<float>, 2> divisors_;
+    std::array<std::vector<float>, 2> scales_;
     QuantizedState state_;
     HandTraversal::Workspace workspace_;
     std::vector<HandTraversal::Workspace> workers_;

@@ -1,4 +1,5 @@
 #include "engine/CpuDcfrSession.h"
+#include "engine/HandEvaluation.h"
 #include "engine/MemoryEstimate.h"
 #include "engine/StrategyEvaluator.h"
 #include <algorithm>
@@ -17,7 +18,7 @@ CpuDcfrSession::CpuDcfrSession(const SolveProblem& problem, int workers)
     state_.stamps.resize(traversal_.nodes.size(), 0);
     for (std::size_t player = 0; player < 2; ++player)
         for (const auto& hand : traversal_.hands[player])
-            divisors_[player].push_back(hand.opponentMass);
+            scales_[player].push_back(ValueScale(hand.opponentMass));
     workspace_ = traversal_.MakeWorkspace(workerCount_ > 1);
     if (workerCount_ > 1)
         for (int worker = 0; worker < workerCount_; ++worker)
@@ -32,7 +33,7 @@ void CpuDcfrSession::Update(std::size_t updatingPlayer, const UpdateWeights& wei
         workspace_.reach[hand] = opponentHands[hand].weight;
 
     HandTraversal::TrainState train{state_.regrets.data(), state_.strategySums.data(), state_.stamps.data(), weights};
-    traversal_.WalkTraining(updatingPlayer, divisors_[updatingPlayer].data(), workspace_, rootValues_.data(), workers_, train);
+    traversal_.WalkTraining(updatingPlayer, scales_[updatingPlayer].data(), workspace_, rootValues_.data(), workers_, train);
 }
 
 ExploitabilityMetrics CpuDcfrSession::EvaluateExploitability() const
@@ -57,8 +58,8 @@ StrategySnapshot CpuDcfrSession::ExportStrategy() &&
     workspace_ = {};
     std::vector<HandTraversal::Workspace>().swap(workers_);
     std::vector<float>().swap(rootValues_);
-    for (auto& divisors : divisors_)
-        std::vector<float>().swap(divisors);
+    for (auto& scales : scales_)
+        std::vector<float>().swap(scales);
 
     return traversal_.Data().ExportStrategy(std::move(state_.strategySums));
 }

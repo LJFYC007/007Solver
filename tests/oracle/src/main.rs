@@ -222,8 +222,8 @@ fn main() {
         // Disable threshold replacement: the upstream engine rounds its SPR threshold.
         let scale = 10.0;
         output["source"]["chipScale"] = json!(scale);
-        assert_eq!(scenario["initialPot"], 26.5);
-        assert_eq!(scenario["heroStack"], 87.0);
+        assert_eq!(scenario["initialPot"], 5.5);
+        assert_eq!(scenario["heroStack"], 97.5);
         assert_eq!(scenario["bettingTree"]["allInSpr"], 0.0);
         for street in ["flop", "turn", "river"] {
             assert_eq!(scenario["bettingTree"][street]["bet"], json!([33, 125]));

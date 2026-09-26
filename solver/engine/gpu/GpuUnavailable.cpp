@@ -13,6 +13,6 @@ std::uint64_t DeviceMemoryBudget()
 }
 std::unique_ptr<Executor> MakeExecutor(const Plan&)
 {
-    throw std::runtime_error("This build has no GPU compute backend; build with CUDA or Metal, or select CPU");
+    throw std::runtime_error("This build has no GPU compute backend; build with CUDA on Windows, or select CPU");
 }
 } // namespace solver::engine::gpu

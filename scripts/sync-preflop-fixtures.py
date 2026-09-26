@@ -57,7 +57,9 @@ def line(format_name, bet_level):
     solution = solutions[format_name]
     history = [{"actor": position, "action": "Raise 2.5" if position == "UTG" else "Fold"}
                for position in solution["positions"][:-1]]
-    assert bet_level in (3, 4)
+    assert bet_level in (2, 3, 4)
+    if bet_level == 2:
+        return history + [{"actor": "BB", "action": "Call"}]
     history.append({"actor": "BB", "action": "Raise 13" if format_name == "8max" else "Raise 12.5"})
     if bet_level == 3:
         return history + [{"actor": "UTG", "action": "Call"}]
@@ -87,14 +89,14 @@ def scenario(format_name, bet_level, selected, stack, board="Ks 9s 2d", pot=2.0,
 fixtures = ROOT / "tests/fixtures"
 weighted = scenario("8max", 4, {"UTG": ["AKs", "QQ"], "BB": ["KK", "A5s"]}, 4.0)
 raised = scenario("6max", 4, {"UTG": ["KJs"], "BB": ["AQs"]}, 8.0)
-wide = scenario("8max", 3, None, 87.0, "Ac Kh Qs", 26.5, 2000)
+wide = scenario("8max", 2, None, 97.5, "Ac Kh Qs", 5.5, 1000)
 for street in ("flop", "turn", "river"):
     wide["bettingTree"][street]["bet"] = [33, 125]
 # Keep small bets as distinct branches instead of replacing them with all-ins.
 wide["bettingTree"]["allInSpr"] = 0.0
 wide["rangeSource"]["reduction"] = (
-    "Full captured 8-max UTG raise 2.5 / BB raise 13 / UTG call ranges. "
-    "100bb starting stacks leave 87bb each; the 26.5bb pot includes the folded SB's 0.5bb. "
+    "Full captured 8-max UTG raise 2.5 / BB call ranges. "
+    "100bb starting stacks leave 97.5bb each; the 5.5bb pot includes the folded SB's 0.5bb. "
     "No range subsets or weight rescaling."
 )
 # Lockstep CPU/GPU updates; iterations counts compared updates.

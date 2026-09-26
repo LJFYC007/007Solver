@@ -33,15 +33,18 @@ ReachCalculator::ReachCalculator(const engine::SolveResult& result) : result_(re
 {
     const engine::SolveProblem& problem = result_.Problem();
     NodeReach root{{problem.ranges.For(core::PlayerId::Player0()).Entries(), problem.ranges.For(core::PlayerId::Player1()).Entries()}};
+    // Wide ranges have tens of thousands of pairs, over which a float running sum drifts by about 1e-4.
+    double rootMass = 0.0;
     VisitPairs(
         root.ownReachWeights,
         problem.game->Spec().initialBoard,
         [&](core::HoleCards, core::HoleCards, float weight)
         {
-            rootMass_ += weight;
+            rootMass += weight;
             return true;
         }
     );
+    rootMass_ = static_cast<float>(rootMass);
     if (rootMass_ <= 0.0f)
         throw std::runtime_error("No valid private hand pairs for reach calculation");
     path_.push_back({problem.game->Root(), std::move(root)});

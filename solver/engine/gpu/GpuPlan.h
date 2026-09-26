@@ -9,35 +9,38 @@
 
 namespace solver::engine::gpu
 {
-constexpr std::size_t kReadbackBytes = 16 * 1024 * 1024;
-inline std::size_t TerminalSharedBytes(const State& state)
+// Terminal shared memory in floats from the staged reach of the given opponent hands (a
+// Terminal launch's lanes): that reach, its forward and reverse rank prefixes, each card's
+// rank-ordered blocked reach after a leading zero, a fold's total and card masses, then a fold
+// sibling's reach. The kernel's pointers and Plan::order follow it.
+struct TerminalLayout
 {
-    // Group flags, opponent reach, forward/reverse rank prefixes (Fold stores one total
-    // and 52 card masses instead), then each card's rank-ordered blocked reach prefix.
-    return (kGroupFlags + state.stride + std::max(2 * state.stride, 53u) + 2 * state.stride + 52) * sizeof(float);
-}
-// One updating player's launch of a pass. Backup launches one lane per two of the
-// updating player's hands. Only the opponent's reach is propagated, so a boundary Reach
-// pass launches one lane per opponent hand and a deeper one launches the opponent's
-// decisions, grouped by actor within the pass, with two hands per lane.
+    explicit constexpr TerminalLayout(U32 hands)
+        : forward(hands), reverse(2 * hands), runs(3 * hands), foldMasses(5 * hands + 52), end(foldMasses + 53 + hands)
+    {}
+    U32 forward, reverse, runs, foldMasses, end;
+};
+// One updating player's launch of a pass of Plan::passes: that player's items (Pass::begin
+// and end) and the lanes each takes. Backup launches one lane per two of the updating
+// player's hands. Terminal's lanes are the opponent's hands its shared memory holds. Only the
+// opponent's reach is propagated, so Reach launches one lane per two opponent hands.
 inline Pass LaunchPass(Pass pass, const State& shape, U32 player)
 {
+    pass.offset += pass.begin[player];
+    pass.count = pass.end[player] - pass.begin[player];
+    const U32 opponent = 1 - player;
     if (pass.operation == Kernel::Backup)
         pass.lanes = (shape.hands[player] + 1) / 2;
-    if (pass.operation != Kernel::Reach)
-        return pass;
-    const U32 opponent = 1 - player;
-    if (!pass.boundary)
+    else if (pass.operation == Kernel::Terminal)
+        pass.lanes = shape.hands[opponent];
+    else if (pass.operation == Kernel::Reach)
     {
-        if (player == 0)
-        {
-            pass.offset += pass.split;
-            pass.count -= pass.split;
-        }
-        else
-            pass.count = pass.split;
+        pass.lanes = (shape.hands[opponent] + 1) / 2;
+        // Items at least a warp wide take whole warps, so no warp runs two items' different
+        // paths; narrower ones stay packed rather than idle most of a warp.
+        if (pass.lanes >= kWarpSize)
+            pass.lanes = (pass.lanes + kWarpSize - 1) / kWarpSize * kWarpSize;
     }
-    pass.lanes = pass.boundary ? shape.hands[opponent] : (shape.hands[opponent] + 1) / 2;
     return pass;
 }
 // Each node's newest stamp is the larger of its entries in the stamps buffer's two halves.
@@ -61,25 +64,26 @@ struct BufferData
 struct Plan
 {
     explicit Plan(const HandTraversalData& data);
-    // One entry per scheduled work item, in pass order, so kernels index nodes by
-    // pass offset, then one per decision a showdown's Terminal block backs up. A node
-    // repeats at each of its passes; parents name a Backup entry or a trailing record.
-    // Node stamps are indexed by the traversal node index, shared with the CPU layout.
+    // One entry per scheduled work item, in pass order, so kernels index nodes by pass
+    // offset. A node repeats at each of its passes. Parents and node stamps are traversal
+    // node indices, the stamps shared with the CPU layout.
     std::vector<Node> nodes;
     // Reach writes and Backup reads child slots without a dependent Node lookup.
     std::vector<U32> childSlots;
     std::vector<Hand> hands;
     // Each rank row stores ranks by hand, then every card's hands in rank order.
     std::vector<unsigned short> ranks;
-    // Each rank row stores packed lower/upper bounds and per-card blocker positions
-    // interleaved by hand, then the sorted hands, at an even pitch (State::orderPitch).
+    // Each rank row stores four entries per hand, the byte offsets from Terminal's staged reach
+    // of what its showdown loads (see Terminal), then the sorted hands, at a pitch of a multiple
+    // of four (State::orderPitch).
     std::vector<U32> order;
     std::vector<int> runouts;
     std::vector<U32> cards;
     std::vector<Pass> initialization;
     std::vector<Pass> passes;
-    // Per pass, the earlier passes in other streams whose slot accesses conflict with it:
-    // the graph edges a parallel executor needs beyond stream order.
+    // Per pass, the earlier passes in other streams whose slot accesses conflict with it and
+    // that neither stream order nor its other predecessors imply: the CUDA graph's edges beyond
+    // stream order.
     std::vector<std::vector<U32>> predecessors;
     State state{};
     std::size_t entries = 0; // 16-bit units of the regrets or sums buffer (HandTraversalData::strategySize)
@@ -90,8 +94,9 @@ struct Plan
     std::uint64_t HostBytes() const;
 };
 
-// Both concrete implementations own their resident training state and scratch. Update
-// may return before the device finishes; downloads, RootValues and Synchronize wait.
+// The CUDA executor owns the resident training state and scratch; builds without CUDA link
+// GpuUnavailable.cpp, which reports no device. Update may return before the device finishes;
+// downloads, RootValues and Synchronize wait.
 class Executor
 {
 public:

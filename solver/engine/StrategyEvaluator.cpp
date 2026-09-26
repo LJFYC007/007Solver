@@ -1,4 +1,5 @@
 #include "engine/StrategyEvaluator.h"
+#include "engine/HandEvaluation.h"
 #include "engine/HandTraversal.h"
 #include <stdexcept>
 #include <vector>
@@ -15,14 +16,15 @@ ExploitabilityMetrics EvaluateBestResponses(
 {
     const auto values = [&](std::size_t player)
     {
-        // At the game root, opponent reach is the range weight and divisors are compatible opponent masses.
-        std::vector<float> reach, divisors;
+        // At the game root, opponent reach is the range weight and values scale by the compatible
+        // opponent masses.
+        std::vector<float> reach, scales;
         for (const auto& hand : traversal.hands[1 - player])
             reach.push_back(hand.weight);
         for (const auto& hand : traversal.hands[player])
-            divisors.push_back(hand.opponentMass);
-        return strategy ? traversal.EvaluateSnapshot(*strategy, player, reach, divisors, HandTraversal::Evaluation::BestResponse)
-                        : traversal.EvaluateAverageBestResponse(strategySums, player, reach, divisors);
+            scales.push_back(ValueScale(hand.opponentMass));
+        return strategy ? traversal.EvaluateSnapshot(*strategy, player, reach, scales, HandTraversal::Evaluation::BestResponse)
+                        : traversal.EvaluateAverageBestResponse(strategySums, player, reach, scales);
     };
     return RootExploitability(*traversal.Data().tables, {values(0), values(1)});
 }
@@ -73,12 +75,12 @@ std::map<core::HoleCards, float> NodeStrategyEvaluator::Evaluate(game::NodeId no
     }
     const HandTraversal traversal(std::make_shared<const HandTraversalData>(tables, node));
     const auto reach = traversal.OpponentReachAtRoot(strategy_, player.Other().Index());
-    const auto divisors = traversal.CompatibleMasses(player.Index(), reach.data());
-    const auto values = traversal.EvaluateSnapshot(strategy_, player.Index(), reach, divisors, HandTraversal::Evaluation::StrategyValue);
+    const auto scales = ValueScales(traversal.CompatibleMasses(player.Index(), reach.data()));
+    const auto values = traversal.EvaluateSnapshot(strategy_, player.Index(), reach, scales, HandTraversal::Evaluation::StrategyValue);
     std::map<core::HoleCards, float> evs;
     for (std::size_t hand = 0; hand < values.size(); ++hand)
     {
-        if (divisors[hand] > 0.0f)
+        if (scales[hand] > 0.0f)
         {
             // Undo the subtree's zero-sum shift for either player: the pot at the
             // queried node is dead money; this restores net payoff from that node.

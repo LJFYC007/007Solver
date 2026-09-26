@@ -23,6 +23,7 @@ public:
         try
         {
             Check(cudaSetDevice(0));
+            Check(cudaDeviceGetStreamPriorityRange(&lowPriority_, &highPriority_));
             for (auto& stream : streams_)
                 Check(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
             Check(cudaEventCreateWithFlags(&fork_, cudaEventDisableTiming));
@@ -70,7 +71,7 @@ public:
     {
         Update(state);
         std::vector<float> values(state.hands[state.player]);
-        Copy(values.data(), buffers_[ValuesBuffer], values.size() * sizeof(float), cudaMemcpyDeviceToHost);
+        Copy(values.data(), buffers_[ScratchBuffer], values.size() * sizeof(float), cudaMemcpyDeviceToHost);
         return values;
     }
     std::vector<std::uint16_t> DownloadSums(bool releaseTraining) override
@@ -129,6 +130,7 @@ private:
     std::size_t slot_ = 0;
     std::array<cudaGraph_t, 2> graphs_{};
     std::array<cudaGraphExec_t, 2> executables_{};
+    int lowPriority_ = 0, highPriority_ = 0;
     void Upload(std::size_t index, const BufferData& source)
     {
         Check(cudaMalloc(&buffers_[index], source.AllocationBytes()));
@@ -172,55 +174,58 @@ private:
                 Check(cudaStreamWaitEvent(stream_, join_, 0));
             }
         Check(cudaStreamEndCapture(stream_, &graphs_[player]));
-        Check(cudaGraphInstantiate(&executables_[player], graphs_[player], nullptr, nullptr, 0));
+        Check(cudaGraphInstantiateWithFlags(&executables_[player], graphs_[player], cudaGraphInstantiateFlagUseNodePriority));
     }
     void Dispatch(const Pass& pass, cudaStream_t stream)
     {
         if (pass.count == 0)
             return;
-        // Backup tiles its pass.lanes, two of the current player's hands each; other passes are linear over pass.lanes.
+        // Backup tiles its pass.lanes, two of the current player's hands each, and Terminal runs one group per item; other
+        // passes are linear over pass.lanes.
         const bool handTiles = pass.operation == Kernel::Backup;
-        const auto group = pass.operation == Kernel::Terminal ? 64u : handTiles ? (std::min(pass.lanes, 256u) + 31) / 32 * 32 : 256u;
+        const U32 group = pass.operation == Kernel::Terminal ? kTerminalGroup
+                          : handTiles                        ? (std::min(pass.lanes, 256u) + kWarpSize - 1) / kWarpSize * kWarpSize
+                                                             : 256u;
         const auto threads = pass.count * pass.lanes;
         const dim3 blocks = handTiles ? dim3(pass.count, (pass.lanes + group - 1) / group)
                                       : dim3(pass.operation == Kernel::Terminal ? pass.count : (threads + group - 1) / group);
-        const auto shared = pass.operation == Kernel::Terminal ? TerminalSharedBytes(shape_) : 0;
-#define LAUNCH(name)                                               \
-    name<<<blocks, group, shared, stream>>>(                       \
-        static_cast<const Node*>(buffers_[NodesBuffer]),           \
-        static_cast<const U32*>(buffers_[ChildSlotsBuffer]),       \
-        static_cast<const Hand*>(buffers_[HandsBuffer]),           \
-        static_cast<const unsigned short*>(buffers_[RanksBuffer]), \
-        static_cast<const int*>(buffers_[RunoutsBuffer]),          \
-        static_cast<const U32*>(buffers_[OrderBuffer]),            \
-        static_cast<const U32*>(buffers_[CardsBuffer]),            \
-        static_cast<U32*>(buffers_[OutcomesBuffer]),               \
-        static_cast<short*>(buffers_[RegretsBuffer]),              \
-        static_cast<unsigned short*>(buffers_[SumsBuffer]),        \
-        static_cast<float*>(buffers_[ScratchBuffer]),              \
-        static_cast<float*>(buffers_[ValuesBuffer]),               \
-        static_cast<U32*>(buffers_[FlagsBuffer]),                  \
-        static_cast<U32*>(buffers_[StampsBuffer]),                 \
-        static_cast<const State*>(buffers_[StateBuffer]),          \
-        pass                                                       \
-    )
-        switch (pass.operation)
-        {
-        case Kernel::Reach:
-            LAUNCH(Reach);
-            break;
-        case Kernel::Terminal:
-            LAUNCH(Terminal);
-            break;
-        case Kernel::Backup:
-            LAUNCH(Backup);
-            break;
-        case Kernel::Outcomes:
-            LAUNCH(Outcomes);
-            break;
-        }
-#undef LAUNCH
-        Check(cudaGetLastError());
+        const auto shared = pass.operation == Kernel::Terminal ? TerminalLayout(pass.lanes).end * sizeof(float) : 0;
+        // Terminal blocks run at the lowest priority: freed SM slots go first to pending Reach and
+        // Backup blocks, which gate their streams' next passes, and long Terminal launches fill
+        // the rest instead of holding every SM while the other streams wait (7% faster).
+        cudaLaunchAttribute priority{};
+        priority.id = cudaLaunchAttributePriority;
+        priority.val.priority = pass.operation == Kernel::Terminal ? lowPriority_ : highPriority_;
+        cudaLaunchConfig_t config{};
+        config.gridDim = blocks;
+        config.blockDim = dim3(group);
+        config.dynamicSmemBytes = shared;
+        config.stream = stream;
+        config.attrs = &priority;
+        config.numAttrs = 1;
+        const auto kernel = pass.operation == Kernel::Reach      ? Reach
+                            : pass.operation == Kernel::Terminal ? Terminal
+                            : pass.operation == Kernel::Backup   ? Backup
+                                                                 : Outcomes;
+        Check(cudaLaunchKernelEx(
+            &config,
+            kernel,
+            static_cast<const Node*>(buffers_[NodesBuffer]),
+            static_cast<const U32*>(buffers_[ChildSlotsBuffer]),
+            static_cast<const Hand*>(buffers_[HandsBuffer]),
+            static_cast<const unsigned short*>(buffers_[RanksBuffer]),
+            static_cast<const int*>(buffers_[RunoutsBuffer]),
+            static_cast<const U32*>(buffers_[OrderBuffer]),
+            static_cast<const U32*>(buffers_[CardsBuffer]),
+            static_cast<U32*>(buffers_[OutcomesBuffer]),
+            static_cast<short*>(buffers_[RegretsBuffer]),
+            static_cast<unsigned short*>(buffers_[SumsBuffer]),
+            static_cast<float*>(buffers_[ScratchBuffer]),
+            static_cast<U32*>(buffers_[FlagsBuffer]),
+            static_cast<U32*>(buffers_[StampsBuffer]),
+            static_cast<const State*>(buffers_[StateBuffer]),
+            pass
+        ));
     }
     void Free(std::size_t i)
     {

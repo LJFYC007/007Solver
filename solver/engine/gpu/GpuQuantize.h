@@ -1,6 +1,6 @@
 #pragma once
 
-// 16-bit training state shared by the CPU walk and the CUDA/Metal kernels: a hand's
+// 16-bit training state shared by the CPU walk and the CUDA kernels: a hand's
 // regrets are int16 and its cumulative strategies uint16, all of a hand's entries at one
 // power-of-two scale whose exponent byte follows the node's action rows (see
 // HandTraversalData::StateUnits). Ratios within a hand, which regret matching and
@@ -11,22 +11,14 @@
 // increments below one quantum still accumulate. Every device computes the same dither
 // and rounding, so equal float inputs quantize identically, and encoding a decoded state
 // reproduces its values.
-#if defined(__METAL_VERSION__)
-#define GPU_QUANTIZE_INLINE inline
-#else
 #include <cstring>
 #if defined(__CUDACC__)
 #define GPU_QUANTIZE_INLINE __host__ __device__ __forceinline__
 #else
 #define GPU_QUANTIZE_INLINE inline
 #endif
-#endif
 
-namespace solver
-{
-namespace engine
-{
-namespace gpu
+namespace solver::engine::gpu
 {
 enum : int
 {
@@ -39,9 +31,7 @@ enum : int
 
 GPU_QUANTIZE_INLINE unsigned int FloatBits(float value)
 {
-#if defined(__METAL_VERSION__)
-    return as_type<unsigned int>(value);
-#elif defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
     return __float_as_uint(value);
 #else
     unsigned int bits;
@@ -52,9 +42,7 @@ GPU_QUANTIZE_INLINE unsigned int FloatBits(float value)
 
 GPU_QUANTIZE_INLINE float BitsFloat(unsigned int bits)
 {
-#if defined(__METAL_VERSION__)
-    return as_type<float>(bits);
-#elif defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
     return __uint_as_float(bits);
 #else
     float value;
@@ -128,6 +116,4 @@ GPU_QUANTIZE_INLINE float Dequantize(float quantized, unsigned int exponentByte)
 {
     return quantized * PowerOfTwo(int(exponentByte) - kExponentBias);
 }
-} // namespace gpu
-} // namespace engine
-} // namespace solver
+} // namespace solver::engine::gpu

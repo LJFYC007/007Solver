@@ -4,7 +4,7 @@
 
 <h1 align="center">007 Solver</h1>
 
-007 Solver is a Windows/macOS desktop app for heads-up postflop solving and strategy analysis. Its C++17 DCFR engine supports CPU, CUDA on Windows and Metal on Apple Silicon.
+007 Solver is a Windows/macOS desktop app for heads-up postflop solving and strategy analysis. Its C++17 DCFR engine runs on the CPU on both platforms and on NVIDIA GPUs through CUDA on Windows.
 
 The bundled [GTO Wizard catalog](resources/gtowizard-preflop/) contains chip-EV, 100bb, 6-max and 8-max ranges. Missing branches are not inferred. Solving is rake-free and does not model folded players' card-removal effects.
 
@@ -19,7 +19,7 @@ On macOS, install Xcode Command Line Tools (`xcode-select --install`) and `brew 
 
 On Windows, use **Developer PowerShell for Visual Studio** with Visual Studio 2022+ and **Desktop development with C++** installed. Run `chcp 65001` before building so Ninja can parse localized MSVC dependencies. The installer downloads WebView2 when missing and bundles the Microsoft Visual C++ x64 runtime, including OpenMP (`VCOMP140.DLL`); CLI services copied elsewhere need that runtime installed. `solver_service` requires AVX2; the app runs `solver_service_sse2` on CPUs without AVX2, FMA or BMI.
 
-GPU support is enabled by default; Intel Macs use CPU. Windows builds use CUDA when CMake finds a Toolkit compatible with MSVC; otherwise they use CPU. The CUDA build requires Toolkit 12.8+. CUDA requires compute capability 8.6+ (RTX 30 series or newer) and a compatible NVIDIA driver. Use `-DSOLVER_ENABLE_GPU=OFF` for CPU-only builds or `-DCMAKE_CUDA_COMPILER=<path-to-nvcc>` for a toolkit outside the compiler search path.
+macOS builds are CPU-only. Windows builds use CUDA by default when CMake finds a Toolkit compatible with MSVC; otherwise they use CPU. The CUDA build requires Toolkit 12.8+. CUDA requires compute capability 8.6+ (RTX 30 series or newer) and a compatible NVIDIA driver. Use `-DSOLVER_ENABLE_GPU=OFF` for CPU-only builds or `-DCMAKE_CUDA_COMPILER=<path-to-nvcc>` for a toolkit outside the compiler search path.
 
 ## Setup and development
 
@@ -33,7 +33,7 @@ npm --prefix desktop run dev
 
 Restart `dev` after C++ changes; React edits reload automatically. Use `npm --prefix desktop run build` to package the app. Both commands build and stage the C++ service; `npm --prefix desktop run build:solver` does only that step.
 
-Packages appear under `desktop/src-tauri/target/release/bundle/`: `macos/` and `dmg/` on macOS, or `nsis/` on Windows. Every push also builds a CUDA-enabled Windows installer and an Apple Silicon `.dmg` as [workflow](.github/workflows/package.yml) artifacts.
+Packages appear under `desktop/src-tauri/target/release/bundle/`: `macos/` and `dmg/` on macOS, or `nsis/` on Windows. Every push also builds a CUDA-enabled Windows installer and a CPU-only Apple Silicon `.dmg` as [workflow](.github/workflows/package.yml) artifacts.
 
 Packages are not signed with a developer certificate, so users must allow them past Windows SmartScreen or macOS Gatekeeper (Privacy & Security → Open Anyway). Mac builds link Homebrew's static `libomp`, which can require a newer OS than the configured deployment target.
 

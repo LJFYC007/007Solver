@@ -79,8 +79,12 @@ NodeReport AnalysisSession::EvaluateNodeEvs(NodeReport report) const
     {
         const auto evs = nodeEvaluator_.Evaluate(report.nodeId, *report.actor);
         for (auto& hand : report.hands)
-            if (hand.marginalReachMass > 0.0f)
-                hand.nodeStrategyEv = evs.at(hand.cards);
+        {
+            // The evaluator omits hands whose opponent mass has no value scale (see ValueScale).
+            const auto ev = evs.find(hand.cards);
+            if (hand.marginalReachMass > 0.0f && ev != evs.end())
+                hand.nodeStrategyEv = ev->second;
+        }
     }
     report.evsReady = true;
     return report;

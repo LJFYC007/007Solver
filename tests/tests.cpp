@@ -155,7 +155,7 @@ TEST(SolverReferenceTest, WeightedFlopCpuFourWorkers)
 TEST(SolverReferenceTest, WeightedFlopGpu)
 {
     if (!engine::GpuDcfrSession::Available())
-        GTEST_SKIP() << "No supported CUDA or Metal GPU is available";
+        GTEST_SKIP() << "No supported CUDA GPU is available";
     CheckSolve("weighted-flop", engine::ComputeDevice::Auto, 0);
 }
 
@@ -172,14 +172,14 @@ TEST(SolverReferenceTest, RaiseFlopCpuFourWorkers)
 TEST(SolverReferenceTest, RaiseFlopGpu)
 {
     if (!engine::GpuDcfrSession::Available())
-        GTEST_SKIP() << "No supported CUDA or Metal GPU is available";
+        GTEST_SKIP() << "No supported CUDA GPU is available";
     CheckSolve("raise-flop", engine::ComputeDevice::Auto, 0);
 }
 
 TEST(BackendParityTest, GpuUpdatesMatchCpuFromSharedState)
 {
     if (!engine::GpuDcfrSession::Available())
-        GTEST_SKIP() << "No supported CUDA or Metal GPU is available";
+        GTEST_SKIP() << "No supported CUDA GPU is available";
     const auto problem = LoadProblem("backend-parity");
     const engine::HandTraversalData layout(*problem, problem->game->Root());
     engine::DcfrSession cpu(problem, engine::ComputeDevice::Cpu, 4);

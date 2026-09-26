@@ -99,6 +99,13 @@ struct HandTraversalData
     {
         return node.board.CardCount() == 3 ? 0 : static_cast<std::size_t>(node.board.CardAt(3).Index()) + 1;
     }
+    // The scales of a runout row's win and loss counts under win/tie/loss payoffs: each payoff's
+    // difference from the tie per runout. Both devices use these floats.
+    static std::array<float, 2> RunoutScales(const std::array<float, 3>& payoffs, std::size_t row)
+    {
+        const float runouts = row == 0 ? 990.0f : 44.0f;
+        return {(payoffs[0] - payoffs[1]) / runouts, (payoffs[2] - payoffs[1]) / runouts};
+    }
     std::size_t runoutRows = 0; // one past the largest RunoutRow of a forced runout, zero without any
 
     std::size_t infoSetCount = 0;

@@ -71,7 +71,7 @@ public:
     Workspace MakeWorkspace(bool parallel = false) const;
     void WalkTraining(
         std::size_t player,
-        const float* divisors,
+        const float* scales,
         Workspace& workspace,
         float* values,
         std::vector<Workspace>& workers,
@@ -83,14 +83,14 @@ public:
         const StrategySnapshot& strategy,
         std::size_t player,
         const std::vector<float>& opponentReach,
-        const std::vector<float>& divisors,
+        const std::vector<float>& scales,
         Evaluation evaluation
     ) const;
     std::vector<float> EvaluateAverageBestResponse(
         const std::uint16_t* strategySums,
         std::size_t player,
         const std::vector<float>& opponentReach,
-        const std::vector<float>& divisors
+        const std::vector<float>& scales
     ) const;
 
 private:
@@ -124,7 +124,7 @@ private:
     struct WalkContext
     {
         std::size_t player;
-        const float* divisors;
+        const float* scales;
         const StrategySnapshot* strategy = nullptr;
         const std::uint16_t* strategySums = nullptr;
         TrainState* train = nullptr;
@@ -153,13 +153,7 @@ private:
     // Regret matching over the actor's hands. Given the actor's reach at the node, hands
     // without reach get a zero policy and their regrets are not read.
     void MatchRegrets(const Node& node, const TrainState& train, float* current, const float* actorReach) const;
-    void EvaluateRunoutOutcomes(
-        const Node& node,
-        std::size_t player,
-        const float* opponentReach,
-        const float* divisors,
-        float* values
-    ) const;
+    void EvaluateRunoutOutcomes(const Node& node, std::size_t player, const float* opponentReach, const float* scales, float* values) const;
     // Returns parent at another player's decision, whose reach the child shares; otherwise
     // writes and returns child, including the chance probability at chance nodes.
     const float* PropagateChild(
@@ -170,7 +164,7 @@ private:
         const float* parent,
         float* child
     ) const;
-    void EvaluateTerminal(const Node& node, std::size_t player, const float* opponentReach, const float* divisors, float* values) const;
+    void EvaluateTerminal(const Node& node, std::size_t player, const float* opponentReach, const float* scales, float* values) const;
     // Utilities are win/tie/loss for player; recurses over undealt cards to river showdowns.
     void EvaluateRunout(
         const std::array<float, 3>& utilities,
@@ -178,7 +172,7 @@ private:
         std::uint64_t boardMask,
         std::size_t player,
         const float* opponentReach,
-        const float* divisors,
+        const float* scales,
         float* values
     ) const;
 };

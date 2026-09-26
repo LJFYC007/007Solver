@@ -29,12 +29,13 @@ EquityReport AnalysisSession::QueryEquity(game::NodeId nodeId)
 
     for (std::size_t player = 0; player < 2; ++player)
     {
-        const auto divisors = engine::CompatibleHandMasses(tables, player, ownReach[1 - player].data());
+        const auto masses = engine::CompatibleHandMasses(tables, player, ownReach[1 - player].data());
+        const auto scales = engine::ValueScales(masses);
         std::vector<float> equities(tables.hands[player].size(), 0.0f), values(equities.size());
         for (const auto& ranks : tables.rankRows)
         {
             engine::EvaluateShowdownHands(
-                tables, player, ranks, ownReach[1 - player].data(), divisors.data(), {1.0f, 0.5f, 0.0f}, values.data()
+                tables, player, ranks, ownReach[1 - player].data(), scales.data(), {1.0f, 0.5f, 0.0f}, values.data()
             );
             for (std::size_t hand = 0; hand < values.size(); ++hand)
                 equities[hand] += values[hand];
@@ -46,9 +47,9 @@ EquityReport AnalysisSession::QueryEquity(game::NodeId nodeId)
             if (ownReach[player][hand] <= 0.0f)
                 continue;
             auto& entry = report.players[player].hands[output++];
-            if (divisors[hand] > 0.0f)
+            if (scales[hand] > 0.0f)
                 entry.equity = equities[hand] / runoutCount;
-            const float mass = ownReach[player][hand] * divisors[hand];
+            const float mass = ownReach[player][hand] * masses[hand];
             totalEquity += mass * (equities[hand] / runoutCount);
             totalMass += mass;
         }

@@ -1,4 +1,6 @@
-# C++ and Objective-C++ formatting
+# C++ formatting
+
+Language: Cpp
 BasedOnStyle: Chromium
 IndentWidth: 4
 ColumnLimit: 140
