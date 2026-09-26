@@ -2,6 +2,7 @@
 #include "engine/AverageStrategy.h"
 #include "engine/HandEvaluation.h"
 #include "engine/ChanceGroups.h"
+#include "engine/MemoryEstimate.h"
 #include "engine/gpu/GpuQuantize.h"
 #include <algorithm>
 #include <cmath>
@@ -310,14 +311,14 @@ HandTraversal::HandTraversal(const SolveProblem& problem, game::NodeId root, boo
 
 HandTraversal::HandTraversal(std::shared_ptr<const HandTraversalData> data)
     : data_(std::move(data))
-    , hands(data_->tables->hands)
+    , hands(data_->tables.hands)
     , nodes(data_->nodes)
     , strategySize(data_->strategySize)
     , maxActions(data_->maxActions)
     , rootHalfPot(data_->rootHalfPot)
     , children(data_->children)
     , dealtCards(data_->dealtCards)
-    , rankRows(data_->tables->rankRows)
+    , rankRows(data_->tables.rankRows)
     , maxDepth(data_->maxDepth)
     , chanceGroups_(data_->chanceGroups_)
     , chanceTasks_(data_->chanceTasks_)
@@ -391,7 +392,7 @@ std::vector<float> HandTraversal::OpponentReachAtRoot(const StrategySnapshot& st
 
 std::vector<float> HandTraversal::CompatibleMasses(std::size_t player, const float* opponentReach) const
 {
-    return CompatibleHandMasses(*data_->tables, player, opponentReach);
+    return CompatibleHandMasses(data_->tables, player, opponentReach);
 }
 
 const float* HandTraversal::PropagateChild(
@@ -411,7 +412,7 @@ const float* HandTraversal::PropagateChild(
     {
         // Multiplying by an exact zero/one factor keeps the loop branch-free and vectorizable.
         const float chance = 1.0f / (node.childCount - 4);
-        const float* factors = data_->tables->cardFactors[player].data() + std::size_t(dealtCards[node.childOffset + action]) * count;
+        const float* factors = data_->tables.cardFactors[player].data() + std::size_t(dealtCards[node.childOffset + action]) * count;
         for (std::size_t hand = 0; hand < count; ++hand)
             child[hand] = parent[hand] * factors[hand] * chance;
     }
@@ -432,7 +433,7 @@ void HandTraversal::EvaluateTerminal(
     float* values
 ) const
 {
-    const auto& tables = *data_->tables;
+    const auto& tables = data_->tables;
     if (node.kind == Kind::Fold)
     {
         const float fold = updatingPlayer == 0 ? node.utilities[0] : -node.utilities[0];
@@ -454,7 +455,7 @@ void HandTraversal::EvaluateRunout(
     float* values
 ) const
 {
-    const auto& tables = *data_->tables;
+    const auto& tables = data_->tables;
     if (board.CardCount() == 5)
     {
         EvaluateShowdownHands(tables, player, rankRows[tables.RankRow(board)], opponentReach, scales, utilities, values);
@@ -513,16 +514,14 @@ HandTraversal::StorageEstimate HandTraversal::EstimateStorage(
     const auto totalHands = handCounts[0] + handCounts[1];
     const auto maxHands = std::max(handCounts[0], handCounts[1]);
     std::uint64_t chanceTasks = 0, chancePlanBytes = 0;
-    if (prepareTraining)
-        VisitChanceGroups(
-            game.GetNode(game.Root()),
-            [&](const game::GameNode& node, std::uint32_t, const std::vector<std::uint32_t>& path)
-            {
-                chanceTasks += node.ChanceOutcomeCount();
-                chancePlanBytes +=
-                    sizeof(ChanceGroup) + path.size() * sizeof(std::uint32_t) + node.ChanceOutcomeCount() * sizeof(ChanceTask);
-            }
-        );
+    VisitChanceGroups(
+        game.GetNode(game.Root()),
+        [&](const game::GameNode& node, std::uint32_t, const std::vector<std::uint32_t>& path)
+        {
+            chanceTasks += node.ChanceOutcomeCount();
+            chancePlanBytes += sizeof(ChanceGroup) + path.size() * sizeof(std::uint32_t) + node.ChanceOutcomeCount() * sizeof(ChanceTask);
+        }
+    );
     const std::uint64_t layout = size.traversalNodes * (sizeof(Node) + sizeof(std::uint32_t) + sizeof(std::uint8_t));
     const std::uint64_t rankBytes = 6 * sizeof(std::uint16_t) + 3 * sizeof(std::uint32_t);
     // Games start on the flop, so every turn/river pair has a rank row.
@@ -537,6 +536,7 @@ HandTraversal::StorageEstimate HandTraversal::EstimateStorage(
         // Every runout row in both layouts: the flop row and one row per possible turn
         // card, an upper bound that spares walking the tree here.
         prepareTraining ? 2 * 53 * handCounts[0] * handCounts[1] * sizeof(std::uint32_t) : 0,
+        (totalHands + maxHands) * sizeof(float),
     };
 }
 
@@ -551,6 +551,13 @@ HandTraversal::Workspace HandTraversal::MakeWorkspace(bool parallel) const
     workspace.parallelLive.resize(parallel ? chanceTasks_.size() : 0);
     workspace.strategies.resize(size.strategies);
     return workspace;
+}
+
+std::vector<HandTraversal::Workspace> HandTraversal::MakeWorkers(int team) const
+{
+    if (team <= 1 || chanceTasks_.empty())
+        return {};
+    return std::vector<Workspace>(static_cast<std::size_t>(team), MakeWorkspace());
 }
 
 void HandTraversal::MatchRegrets(const Node& node, const TrainState& train, float* current, const float* actorReach) const
@@ -610,20 +617,27 @@ void HandTraversal::WalkTraining(
 {
     WalkContext context{player, scales};
     context.train = &train;
-    const float* rootReach = workspace.reach.data();
-    if (workers.size() <= 1 || chanceTasks_.empty())
+    // The serial walk from the root accumulates the ancestors' strategy sums.
+    WalkTasks(context, workspace, workspace.reach.data(), values, workers);
+}
+
+void HandTraversal::WalkTasks(
+    const WalkContext& context,
+    Workspace& workspace,
+    const float* rootReach,
+    float* values,
+    std::vector<Workspace>& workers
+) const
+{
+    if (workers.empty())
     {
         Walk(0, context, workspace, 0, rootReach, values);
         return;
     }
-    const auto count = hands[player].size();
+    const auto count = hands[context.player].size();
     const auto stride = std::max(hands[0].size(), hands[1].size());
-    const auto opponent = 1 - player;
+    const auto opponent = 1 - context.player;
     const int team = static_cast<int>(std::min(workers.size(), chanceTasks_.size()));
-    // Ancestor regrets stay unchanged until all disjoint subtrees finish. Replaying
-    // their short paths avoids retaining separate strategy/reach snapshots; the serial
-    // walk below accumulates the ancestors' strategy sums. Workers read the root reach
-    // row in place and write reach only to their own scratch.
 #pragma omp parallel for num_threads(team) schedule(dynamic, 1)
     for (std::int64_t index = 0; index < static_cast<std::int64_t>(chanceTasks_.size()); ++index)
     {
@@ -638,7 +652,7 @@ void HandTraversal::WalkTraining(
             const Node& node = nodes[nodeIndex];
             float* policy = scratch.strategies.data();
             if (node.kind == Kind::Decision && node.actor == opponent)
-                MatchRegrets(node, train, policy, reach);
+                LoadPolicy(node, context, policy, reach);
             reach = PropagateChild(nodeIndex, action, opponent, policy, reach, scratch.reach.data() + (depth + 1) * stride);
             nodeIndex = children[node.childOffset + action];
             ++depth;
@@ -656,6 +670,38 @@ void HandTraversal::WalkTraining(
     // Consume each result once in the same preorder/action order as serial Walk.
     std::size_t cursor = 0;
     Walk(0, context, workspace, 0, rootReach, values, &cursor);
+}
+
+void HandTraversal::LoadPolicy(const Node& node, const WalkContext& context, float* current, const float* actorReach) const
+{
+    const auto actorCount = hands[node.actor].size();
+    if (context.train)
+    {
+        MatchRegrets(node, *context.train, current, actorReach);
+        return;
+    }
+    if (context.strategySums)
+    {
+        const std::uint16_t* sums = context.strategySums + node.strategyOffset;
+        for (std::size_t hand = 0; hand < actorCount; ++hand)
+            NormalizeAverageStrategy(sums + hand, actorCount, node.childCount, current + hand, actorCount);
+        return;
+    }
+    const auto source = context.strategy->FindNodeStrategy(node.id);
+    std::fill_n(current, node.childCount * actorCount, 1.0f / node.childCount);
+    if (!source)
+        return;
+    // Both hand lists are sorted; merge once rather than looking up each infoset.
+    std::size_t other = 0;
+    for (std::size_t hand = 0; hand < actorCount; ++hand)
+    {
+        const auto cards = hands[node.actor][hand].cards;
+        while (other < source->handCount && source->hands[other] < cards)
+            ++other;
+        if (other < source->handCount && source->hands[other] == cards)
+            for (std::size_t action = 0; action < node.childCount; ++action)
+                current[action * actorCount + hand] = source->probabilities[other * source->actionCount + action];
+    }
 }
 
 std::vector<float> HandTraversal::EvaluateSnapshot(
@@ -687,9 +733,10 @@ std::vector<float> HandTraversal::EvaluateAverageBestResponse(
 
 std::vector<float> HandTraversal::EvaluateHands(const WalkContext& context, const std::vector<float>& opponentReach) const
 {
-    auto workspace = MakeWorkspace();
+    auto workers = MakeWorkers(CpuWorkerCount());
+    auto workspace = MakeWorkspace(!workers.empty());
     std::vector<float> values(hands[context.player].size());
-    Walk(0, context, workspace, 0, opponentReach.data(), values.data());
+    WalkTasks(context, workspace, opponentReach.data(), values.data(), workers);
     return values;
 }
 
@@ -705,8 +752,6 @@ bool HandTraversal::Walk(
 {
     const auto player = context.player;
     const auto* scales = context.scales;
-    const auto* strategy = context.strategy;
-    const auto* strategySums = context.strategySums;
     auto* train = context.train;
     const bool bestResponse = context.bestResponse;
     const Node& node = nodes[nodeIndex];
@@ -735,40 +780,10 @@ bool HandTraversal::Walk(
     // Best response maximizes own action values and propagates only opponent reach.
     if (node.kind == Kind::Decision && !(bestResponse && node.actor == player))
     {
-        const auto actorCount = hands[node.actor].size();
+        // Preserve this entry policy until reach, backup and average-strategy accumulation
+        // finish. Descendants and other workers use separate rows.
         float* current = workspace.strategies.data() + depth * maxActions * stride;
-        if (train)
-        {
-            // Preserve this entry strategy until reach, backup and average-strategy
-            // accumulation finish. Descendants and other workers use separate rows.
-            MatchRegrets(node, *train, current, node.actor == player ? nullptr : opponentReach);
-        }
-        else if (strategySums)
-        {
-            const std::uint16_t* sums = strategySums + node.strategyOffset;
-            for (std::size_t hand = 0; hand < actorCount; ++hand)
-                NormalizeAverageStrategy(sums + hand, actorCount, node.childCount, current + hand, actorCount);
-        }
-        else
-        {
-            const auto source = strategy->FindNodeStrategy(node.id);
-            const float uniform = 1.0f / node.childCount;
-            std::fill_n(current, node.childCount * actorCount, uniform);
-            if (source)
-            {
-                // Both hand lists are sorted; merge once rather than looking up each infoset.
-                std::size_t other = 0;
-                for (std::size_t hand = 0; hand < actorCount; ++hand)
-                {
-                    const auto cards = hands[node.actor][hand].cards;
-                    while (other < source->handCount && source->hands[other] < cards)
-                        ++other;
-                    if (other < source->handCount && source->hands[other] == cards)
-                        for (std::size_t action = 0; action < node.childCount; ++action)
-                            current[action * actorCount + hand] = source->probabilities[other * source->actionCount + action];
-                }
-            }
-        }
+        LoadPolicy(node, context, current, node.actor == player ? nullptr : opponentReach);
         nodeStrategy = current;
     }
     const bool acting = node.kind == Kind::Decision && node.actor == player;

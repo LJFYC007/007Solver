@@ -19,7 +19,6 @@ EquityReport AnalysisSession::QueryEquity(game::NodeId nodeId)
     if (!reachCalculator_.CommonBlockers(reach, board))
         return report;
 
-    // Query-local tables keep this input-thread calculation independent of the EV worker's cache.
     const engine::HandBoardData tables(problem, nodeId);
     const float runoutCount = board.CardCount() == 3 ? 990.0f : board.CardCount() == 4 ? 44.0f : 1.0f;
     std::array<std::vector<float>, 2> ownReach;

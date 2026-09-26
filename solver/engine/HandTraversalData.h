@@ -5,7 +5,6 @@
 #include "engine/gpu/GpuTypes.h"
 #include <array>
 #include <cstdint>
-#include <memory>
 #include <type_traits>
 #include <vector>
 
@@ -62,7 +61,7 @@ struct HandTraversalData
 
         bool IsLeaf() const { return kind != Kind::Decision && kind != Kind::Chance; }
     };
-    std::shared_ptr<const HandBoardData> tables;
+    HandBoardData tables;
     std::vector<Node> nodes;
     // 16-bit units of one decision's regrets or strategy sums: its action rows, then its
     // hands' exponent bytes in whole units.
@@ -70,13 +69,14 @@ struct HandTraversalData
     static std::size_t StateUnits(std::size_t actions, std::size_t hands) { return actions * hands + ExponentUnits(hands); }
     std::size_t strategySize = 0; // units of the whole tree
     std::size_t maxActions = 1;
-    std::size_t probabilityCount = 0; // exported probabilities: board-compatible hands times actions
     float rootHalfPot = 0.0f;
 
     std::vector<std::uint32_t> children;
     std::vector<std::uint8_t> dealtCards; // card index of each chance edge
     std::size_t maxDepth = 1;
 
+    // CPU walks run one task per outcome of the first non-all-in chance node on each betting
+    // path below the root (ChanceGroups.h), each group with its path from the root.
     struct ChanceGroup
     {
         std::uint32_t node;
@@ -108,10 +108,10 @@ struct HandTraversalData
     }
     std::size_t runoutRows = 0; // one past the largest RunoutRow of a forced runout, zero without any
 
-    std::size_t infoSetCount = 0;
-
+    // Only training prepares the runout outcome rows.
     HandTraversalData(const SolveProblem& problem, game::NodeId root, bool prepareTraining = false);
-    HandTraversalData(std::shared_ptr<const HandBoardData> tables, game::NodeId root, bool prepareTraining = false);
+    // Normalizes this layout's quantized strategy sums; an actor's decisions on one board share
+    // its list of board-compatible hands.
     StrategySnapshot ExportStrategy(std::vector<std::uint16_t> sums) const;
     // Compare states by these values: re-encoding can store equal values differently.
     TrainingState Decode(const QuantizedState& state) const;

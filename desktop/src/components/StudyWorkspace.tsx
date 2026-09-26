@@ -194,11 +194,6 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                 <section className="strategy-panel">
                     <div className="panel-strip-title">
                         <strong>{strategy.title}</strong>
-                        {showPostflop && navigation.node?.kind === "decision" && !navigation.node.evsReady && (
-                            <span role="status" title={navigation.evError}>
-                                {navigation.evError ? "EV unavailable" : "Calculating EV…"}
-                            </span>
-                        )}
                         <span>{strategy.combos === undefined ? "" : `${strategy.combos.toFixed(2)} combos`}</span>
                     </div>
                     <div className="strategy-content">

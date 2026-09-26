@@ -4,7 +4,6 @@
 #include <array>
 #include <cstdint>
 #include <map>
-#include <memory>
 #include <vector>
 
 namespace solver::engine
@@ -24,20 +23,9 @@ ExploitabilityMetrics EvaluateAverageStrategy(const HandTraversal& traversal, co
 // Weights each player's game-root best-response hand values by range weight and compatible opponent mass.
 ExploitabilityMetrics RootExploitability(const HandBoardData& tables, const std::array<std::vector<float>, 2>& bestResponseValues);
 
-// Borrows one immutable result. A single EV worker reuses at most one board per
-// street; traversal nodes, utility baselines and workspaces stay query-local.
-class NodeStrategyEvaluator
-{
-public:
-    explicit NodeStrategyEvaluator(const SolveResult& result);
-    // Fixed-policy net EV for board-compatible hands with positive opponent reach.
-    // Caller decides eligibility from joint reach.
-    std::map<core::HoleCards, float> Evaluate(game::NodeId node, core::PlayerId player);
-
-private:
-    const SolveProblem& problem_;
-    const StrategySnapshot& strategy_;
-    std::array<std::shared_ptr<const HandBoardData>, 3> boards_;
-};
+// Fixed-policy net EV at node for board-compatible hands with positive opponent reach; the
+// caller decides eligibility from joint reach. Board tables, traversal nodes and workspaces
+// stay query-local.
+std::map<core::HoleCards, float> EvaluateNodeStrategy(const SolveResult& result, game::NodeId node, core::PlayerId player);
 
 } // namespace solver::engine

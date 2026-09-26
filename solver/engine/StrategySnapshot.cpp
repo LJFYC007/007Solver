@@ -6,10 +6,10 @@
 
 namespace solver::engine
 {
-std::uint64_t StrategySnapshot::EstimateStorageBytes(std::size_t nodes, std::size_t hands, std::size_t probabilities)
+std::uint64_t StrategySnapshot::EstimateStorageBytes(std::size_t nodes, std::size_t probabilities)
 {
     // Node blocks grow incrementally during export; allow for vector capacity.
-    return 2 * sizeof(NodeBlock) * nodes + sizeof(core::HoleCards) * hands + sizeof(float) * probabilities;
+    return 2 * sizeof(NodeBlock) * nodes + sizeof(float) * probabilities;
 }
 
 StrategySnapshot::StrategySnapshot(std::shared_ptr<const game::CompiledGame> game, std::vector<StrategyEntry> entries)
@@ -32,77 +32,51 @@ StrategySnapshot::StrategySnapshot(std::shared_ptr<const game::CompiledGame> gam
     std::size_t probabilityCount = 0;
     for (const StrategyEntry& entry : entries)
         probabilityCount += entry.probabilities.size();
-    probabilities_.reserve(probabilityCount);
+    probabilities_.reset(new float[probabilityCount]);
     hands_.reserve(entries.size());
+    std::optional<core::Board> board;
+    std::size_t probabilityOffset = 0;
     for (const StrategyEntry& entry : entries)
     {
         if (nodes_.empty() || nodes_.back().node != entry.infoSet.node)
-            nodes_.push_back(
-                {entry.infoSet.node, hands_.size(), probabilities_.size(), 0, game_->GetNode(entry.infoSet.node).BettingEdgeCount()}
-            );
+        {
+            const auto node = game_->GetNode(entry.infoSet.node);
+            if (node.Kind() != game::NodeKind::Decision || node.BettingEdgeCount() == 0)
+                throw std::invalid_argument("Strategy entry must refer to a decision node with actions");
+            nodes_.push_back({entry.infoSet.node, hands_.size(), probabilityOffset, 0, node.BettingEdgeCount()});
+            board = node.State().board;
+        }
+        else if (hands_.back() == entry.infoSet.hand)
+            throw std::invalid_argument("Strategy entry hands must be unique per node");
+        if (core::Overlaps(entry.infoSet.hand, *board))
+            throw std::invalid_argument("Strategy entry hand overlaps the public board");
         if (entry.probabilities.size() != nodes_.back().actionCount)
             throw std::invalid_argument("Strategy probability count does not match the node action count");
+        float totalProbability = 0.0f;
+        for (const float probability : entry.probabilities)
+        {
+            if (!std::isfinite(probability) || probability < 0.0f)
+                throw std::invalid_argument("Strategy probabilities must be finite and non-negative");
+            totalProbability += probability;
+        }
+        constexpr float normalizationTolerance = 1e-5f;
+        if (std::abs(totalProbability - 1.0f) > normalizationTolerance)
+            throw std::invalid_argument("Strategy probabilities must sum to one");
         ++nodes_.back().handCount;
         hands_.push_back(entry.infoSet.hand);
-        probabilities_.insert(probabilities_.end(), entry.probabilities.begin(), entry.probabilities.end());
+        std::copy(entry.probabilities.begin(), entry.probabilities.end(), probabilities_.get() + probabilityOffset);
+        probabilityOffset += entry.probabilities.size();
     }
-    Validate();
 }
 
 StrategySnapshot::StrategySnapshot(
     std::shared_ptr<const game::CompiledGame> game,
     std::vector<NodeBlock> nodes,
     std::vector<core::HoleCards> hands,
-    std::vector<float> probabilities
+    std::unique_ptr<float[]> probabilities
 )
     : game_(std::move(game)), nodes_(std::move(nodes)), hands_(std::move(hands)), probabilities_(std::move(probabilities))
-{
-    Validate();
-}
-
-void StrategySnapshot::Validate() const
-{
-    if (!game_)
-        throw std::invalid_argument("Strategy snapshot requires a compiled game");
-
-    std::size_t handOffset = 0, probabilityOffset = 0;
-    const NodeBlock* previous = nullptr;
-    for (const NodeBlock& block : nodes_)
-    {
-        const auto node = game_->GetNode(block.node);
-        if (node.Kind() != game::NodeKind::Decision || node.BettingEdgeCount() == 0)
-            throw std::invalid_argument("Strategy entry must refer to a decision node with actions");
-        if (previous && !(previous->node < block.node))
-            throw std::invalid_argument("Packed strategy nodes must be sorted and unique");
-        if (block.handOffset != handOffset || block.probabilityOffset != probabilityOffset ||
-            block.handCount > hands_.size() - handOffset || block.actionCount != node.BettingEdgeCount() ||
-            block.handCount > (probabilities_.size() - probabilityOffset) / block.actionCount)
-            throw std::invalid_argument("Strategy block size does not match its hands and actions");
-        for (std::size_t hand = 0; hand < block.handCount; ++hand)
-        {
-            const auto cards = hands_[handOffset + hand];
-            if (core::Overlaps(cards, node.State().board))
-                throw std::invalid_argument("Strategy entry hand overlaps the public board");
-            if (hand > 0 && !(hands_[handOffset + hand - 1] < cards))
-                throw std::invalid_argument("Packed strategy hands must be sorted and unique");
-            float totalProbability = 0.0f;
-            for (std::size_t action = 0; action < block.actionCount; ++action)
-            {
-                const float probability = probabilities_[probabilityOffset++];
-                if (!std::isfinite(probability) || probability < 0.0f)
-                    throw std::invalid_argument("Strategy probabilities must be finite and non-negative");
-                totalProbability += probability;
-            }
-            constexpr float normalizationTolerance = 1e-5f;
-            if (std::abs(totalProbability - 1.0f) > normalizationTolerance)
-                throw std::invalid_argument("Strategy probabilities must sum to one");
-        }
-        handOffset += block.handCount;
-        previous = &block;
-    }
-    if (handOffset != hands_.size() || probabilityOffset != probabilities_.size())
-        throw std::invalid_argument("Strategy probability count does not match the node action count");
-}
+{}
 
 std::optional<StrategySnapshot::NodeStrategyView> StrategySnapshot::FindNodeStrategy(game::NodeId node) const
 {
@@ -111,7 +85,7 @@ std::optional<StrategySnapshot::NodeStrategyView> StrategySnapshot::FindNodeStra
     if (found == nodes_.end() || found->node != node)
         return std::nullopt;
     return NodeStrategyView{
-        hands_.data() + found->handOffset, probabilities_.data() + found->probabilityOffset, found->handCount, found->actionCount
+        hands_.data() + found->handOffset, probabilities_.get() + found->probabilityOffset, found->handCount, found->actionCount
     };
 }
 

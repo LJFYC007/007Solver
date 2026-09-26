@@ -19,10 +19,8 @@ CpuDcfrSession::CpuDcfrSession(const SolveProblem& problem, int workers)
     for (std::size_t player = 0; player < 2; ++player)
         for (const auto& hand : traversal_.hands[player])
             scales_[player].push_back(ValueScale(hand.opponentMass));
-    workspace_ = traversal_.MakeWorkspace(workerCount_ > 1);
-    if (workerCount_ > 1)
-        for (int worker = 0; worker < workerCount_; ++worker)
-            workers_.push_back(traversal_.MakeWorkspace());
+    workers_ = traversal_.MakeWorkers(workerCount_);
+    workspace_ = traversal_.MakeWorkspace(!workers_.empty());
     rootValues_.resize(std::max(traversal_.hands[0].size(), traversal_.hands[1].size()));
 }
 

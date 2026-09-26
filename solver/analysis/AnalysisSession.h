@@ -4,7 +4,6 @@
 #include "analysis/EquityReport.h"
 #include "analysis/ReachCalculator.h"
 #include "engine/SolveResult.h"
-#include "engine/StrategyEvaluator.h"
 #include <vector>
 
 namespace solver::analysis
@@ -19,16 +18,13 @@ public:
     AnalysisSession& operator=(AnalysisSession&&) = delete;
 
     game::NodeId RootNode() const { return result_.Problem().game->Root(); }
+    // Decision reports include node EVs for hands with joint reach.
     NodeReport QueryNode(game::NodeId nodeId);
-    // One EV worker owns access to the board-table cache. May run alongside
-    // node/reach queries, which use separate mutable state.
-    NodeReport EvaluateNodeEvs(NodeReport report) const;
     EquityReport QueryEquity(game::NodeId nodeId);
 
 private:
     engine::SolveResult result_;
     ReachCalculator reachCalculator_;
-    mutable engine::NodeStrategyEvaluator nodeEvaluator_;
 
     std::vector<HandReport> BuildHandReports(
         game::NodeId nodeId,

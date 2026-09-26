@@ -19,8 +19,11 @@ struct StrategyEntry
 class StrategySnapshot
 {
 public:
+    // Entries must name decision nodes and unique board-compatible hands, with finite,
+    // non-negative probabilities per action that sum to one.
     StrategySnapshot(std::shared_ptr<const game::CompiledGame> game, std::vector<StrategyEntry> entries);
-    static std::uint64_t EstimateStorageBytes(std::size_t nodes, std::size_t hands, std::size_t probabilities);
+    // Exported hand lists (one per actor and board) are negligible beside the probabilities.
+    static std::uint64_t EstimateStorageBytes(std::size_t nodes, std::size_t probabilities);
 
     // Borrows one node's sorted hands and hand-major probabilities from this snapshot.
     // Destruction, move or assignment of the snapshot invalidates the view.
@@ -52,17 +55,19 @@ private:
         std::size_t actionCount;
     };
 
+    // Exports build valid blocks from the traversal layout.
     StrategySnapshot(
         std::shared_ptr<const game::CompiledGame> game,
         std::vector<NodeBlock> nodes,
         std::vector<core::HoleCards> hands,
-        std::vector<float> probabilities
+        std::unique_ptr<float[]> probabilities
     );
-    void Validate() const;
 
     std::shared_ptr<const game::CompiledGame> game_;
+    // Sorted by node; each block owns its hand-major probabilities, while blocks may share a
+    // sorted hand list.
     std::vector<NodeBlock> nodes_;
     std::vector<core::HoleCards> hands_;
-    std::vector<float> probabilities_;
+    std::unique_ptr<float[]> probabilities_;
 };
 } // namespace solver::engine

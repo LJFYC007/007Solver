@@ -15,7 +15,8 @@ public:
     // Zero workers selects the OpenMP runtime's default team size.
     explicit CpuDcfrSession(const SolveProblem& problem, int workers = 0);
 
-    // Configured workspace/team limit; the OpenMP runtime may use fewer threads.
+    // Configured training workspace/team limit; the OpenMP runtime may use fewer threads.
+    // Evaluation uses the default CPU team.
     int WorkerCount() const { return workerCount_; }
 
 private:

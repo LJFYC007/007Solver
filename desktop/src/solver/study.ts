@@ -159,7 +159,7 @@ function buildSpotSeats({
         combos: comboCount(s.range),
     }));
     let actorEv: number | null = null;
-    if (current?.kind === "decision" && current.evsReady) {
+    if (current?.kind === "decision") {
         const mass = current.hands.reduce((sum, hand) => sum + hand.marginalReachMass, 0);
         if (mass > 0)
             actorEv =

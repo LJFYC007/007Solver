@@ -4,6 +4,7 @@
 #include "engine/StrategySnapshot.h"
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace solver::engine
@@ -18,7 +19,8 @@ public:
     using Hand = HandTraversalData::Hand;
     using Node = HandTraversalData::Node;
     static constexpr std::size_t kMaxHands = HandTraversalData::kMaxHands;
-    // One depth-first stack per worker, reused across all subtrees and iterations.
+    // One depth-first stack per worker, reused across a walk's subtrees (and across
+    // training updates).
     // Every walk propagates only the opponent's reach: one row per depth.
     struct Workspace
     {
@@ -52,6 +54,13 @@ public:
         std::uint64_t workspaceBytes;
         std::uint64_t parallelValuesBytes;
         std::uint64_t runoutOutcomesBytes;
+        std::uint64_t rootVectorBytes; // a walk's root reach, scales and values
+        // One walk's workspaces across a team and its root vectors, with per-thread runtime overhead.
+        std::uint64_t WalkBytes(int team) const
+        {
+            return workspaceBytes * (team > 1 ? team + 1 : 1) + (team > 1 ? parallelValuesBytes : 0) + (team + 1) * 128 * 1024 +
+                   rootVectorBytes;
+        }
     };
     static StorageEstimate EstimateStorage(
         const game::CompiledGame& game,
@@ -64,11 +73,17 @@ public:
     const std::size_t& strategySize;
     const std::size_t& maxActions;
     const float& rootHalfPot;
-    // Training amortizes runout caching and the chance-batch plan; analysis leaves them off.
+    // prepareTraining adds the runout outcome rows, which only training walks read.
     HandTraversal(const SolveProblem& problem, game::NodeId root, bool prepareTraining = false);
     explicit HandTraversal(std::shared_ptr<const HandTraversalData> data);
     const HandTraversalData& Data() const { return *data_; }
     Workspace MakeWorkspace(bool parallel = false) const;
+    // One workspace per worker when a team of more than one can split chance tasks, otherwise
+    // none. The walk from the root then needs MakeWorkspace(!workers.empty()).
+    std::vector<Workspace> MakeWorkers(int team) const;
+    // Walks run chance tasks on one workspace per worker, then the walk from the root consumes
+    // their values in serial preorder, so values do not depend on the team size. Evaluation
+    // uses the default CPU team (CpuWorkerCount).
     void WalkTraining(
         std::size_t player,
         const float* scales,
@@ -131,11 +146,23 @@ private:
         bool bestResponse = false;
     };
     std::vector<float> EvaluateHands(const WalkContext& context, const std::vector<float>& opponentReach) const;
+    // Ancestor policies stay unchanged until every chance task finishes; tasks replay their
+    // short paths rather than retaining ancestor snapshots, and read the root reach in place.
+    void WalkTasks(
+        const WalkContext& context,
+        Workspace& workspace,
+        const float* rootReach,
+        float* values,
+        std::vector<Workspace>& workers
+    ) const;
+    // The actor's entry policy at a decision as action-major rows of its hands, from the
+    // context's regrets (see MatchRegrets for actorReach), sums or snapshot.
+    void LoadPolicy(const Node& node, const WalkContext& context, float* current, const float* actorReach) const;
     // Required entry policies stay in a row per depth. The opponent's reach points at
     // the row written by the nearest ancestor that changed it, which rewrites that row
     // only after the subtree reading it finishes. Returns whether the subtree carried
     // opponent reach, as the GPU's terminal flags do; subtrees without it are skipped
-    // and their acting decisions keep their stamps. Training supplies a cursor only when
+    // and their acting decisions keep their stamps. WalkTasks supplies a cursor only when
     // consuming completed chance tasks in preorder.
     bool Walk(
         std::uint32_t node,

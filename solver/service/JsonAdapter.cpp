@@ -151,7 +151,6 @@ Json BuildNodeJson(const analysis::NodeReport& node)
 
     jsonNode["kind"] = "decision";
     jsonNode["actor"] = PlayerCode(*node.actor);
-    jsonNode["evsReady"] = node.evsReady;
     jsonNode["hands"] = Json::array();
     for (const analysis::HandReport& hand : node.hands)
     {
@@ -192,8 +191,6 @@ ServiceRequest ParseServiceRequest(const std::string& jsonLine)
         const auto command = json.at("command").get<std::string>();
         if (command == "query_node")
             request.kind = QueryKind::Node;
-        else if (command == "query_node_evs")
-            request.kind = QueryKind::NodeEvs;
         else if (command == "query_equity")
             request.kind = QueryKind::Equity;
         else

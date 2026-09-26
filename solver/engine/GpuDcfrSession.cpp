@@ -23,13 +23,10 @@ GpuDcfrSession::GpuDcfrSession(const SolveProblem& problem)
     // Combined host/device allocation estimate, not a claim about available VRAM.
     const auto host = size.storageBytes + fixed.fixedBytes;
     const auto sumsBytes = plan.Buffers()[gpu::SumsBuffer].bytes;
-    const auto maxHands = std::max(counts.hands[0], counts.hands[1]);
-    const auto evaluationVectors = sizeof(float) * (counts.hands[0] + counts.hands[1] + maxHands);
     const auto initialization = device + plan.HostBytes();
     // CPU certification evaluates a host copy of the sums while training stays resident.
-    const auto certification = device + sumsBytes + fixed.workspaceBytes + evaluationVectors;
-    const auto snapshot =
-        StrategySnapshot::EstimateStorageBytes(size.decisionNodes[0] + size.decisionNodes[1], data_->infoSetCount, data_->probabilityCount);
+    const auto certification = device + sumsBytes + fixed.WalkBytes(CpuWorkerCount());
+    const auto snapshot = StrategySnapshot::EstimateStorageBytes(size.decisionNodes[0] + size.decisionNodes[1], counts.strategyEntries);
     // Download releases other device buffers first; the snapshot's probabilities are
     // normalized from the downloaded sums.
     const auto exportDownload = 2 * sumsBytes;
@@ -65,7 +62,7 @@ ExploitabilityMetrics GpuDcfrSession::EvaluateExploitability() const
         state.player = p;
         values[p] = executor_->RootValues(state);
     }
-    return RootExploitability(*data_->tables, values);
+    return RootExploitability(data_->tables, values);
 }
 
 ExploitabilityMetrics GpuDcfrSession::EvaluateExploitabilityOnCpu() const
@@ -84,7 +81,6 @@ void GpuDcfrSession::WriteTrainingState(const QuantizedState& state)
 
 StrategySnapshot GpuDcfrSession::ExportStrategy() &&
 {
-    auto sums = executor_->DownloadSums(true);
-    return data_->ExportStrategy(std::move(sums));
+    return data_->ExportStrategy(executor_->DownloadSums(true));
 }
 } // namespace solver::engine

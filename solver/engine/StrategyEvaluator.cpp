@@ -26,7 +26,7 @@ ExploitabilityMetrics EvaluateBestResponses(
         return strategy ? traversal.EvaluateSnapshot(*strategy, player, reach, scales, HandTraversal::Evaluation::BestResponse)
                         : traversal.EvaluateAverageBestResponse(strategySums, player, reach, scales);
     };
-    return RootExploitability(*traversal.Data().tables, {values(0), values(1)});
+    return RootExploitability(traversal.Data().tables, {values(0), values(1)});
 }
 } // namespace
 
@@ -61,22 +61,13 @@ ExploitabilityMetrics EvaluateAverageStrategy(const HandTraversal& traversal, co
     return EvaluateBestResponses(traversal, nullptr, strategySums);
 }
 
-NodeStrategyEvaluator::NodeStrategyEvaluator(const SolveResult& result) : problem_(result.Problem()), strategy_(result.Strategy()) {}
-
-std::map<core::HoleCards, float> NodeStrategyEvaluator::Evaluate(game::NodeId node, core::PlayerId player)
+std::map<core::HoleCards, float> EvaluateNodeStrategy(const SolveResult& result, game::NodeId node, core::PlayerId player)
 {
-    const auto board = problem_.game->GetNode(node).State().board;
-    auto& tables = boards_[board.CardCount() - 3];
-    if (!tables || tables->board != board)
-    {
-        // Release the previous board before constructing its replacement.
-        tables.reset();
-        tables = std::make_shared<const HandBoardData>(problem_, node);
-    }
-    const HandTraversal traversal(std::make_shared<const HandTraversalData>(tables, node));
-    const auto reach = traversal.OpponentReachAtRoot(strategy_, player.Other().Index());
+    const HandTraversal traversal(result.Problem(), node);
+    const auto& strategy = result.Strategy();
+    const auto reach = traversal.OpponentReachAtRoot(strategy, player.Other().Index());
     const auto scales = ValueScales(traversal.CompatibleMasses(player.Index(), reach.data()));
-    const auto values = traversal.EvaluateSnapshot(strategy_, player.Index(), reach, scales, HandTraversal::Evaluation::StrategyValue);
+    const auto values = traversal.EvaluateSnapshot(strategy, player.Index(), reach, scales, HandTraversal::Evaluation::StrategyValue);
     std::map<core::HoleCards, float> evs;
     for (std::size_t hand = 0; hand < values.size(); ++hand)
     {

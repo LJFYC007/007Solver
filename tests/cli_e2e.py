@@ -79,9 +79,8 @@ class CliEndToEndTest(unittest.TestCase):
         action = next(action for action in node["actions"] if action["kind"] == kind)
         return self.query(process, action["nextNodeId"])
 
-    def check_decision(self, node, *, evs_ready=False):
+    def check_decision(self, node):
         self.assertEqual(node["kind"], "decision")
-        self.assertEqual(node["evsReady"], evs_ready)
         self.assertTrue(node["hands"])
         for hand in node["hands"]:
             self.assertFalse(set(hand["cards"]) & set(node["state"]["board"]))
@@ -92,10 +91,9 @@ class CliEndToEndTest(unittest.TestCase):
                 self.assertEqual(len(hand["strategy"]), len(node["actions"]))
                 self.assertAlmostEqual(sum(hand["strategy"]), 1, delta=1e-5)
                 self.assertTrue(all(0 <= p <= 1 for p in hand["strategy"]))
-                if evs_ready:
-                    self.assertTrue(math.isfinite(hand["nodeStrategyEv"]))
-                    continue
-            self.assertIsNone(hand["nodeStrategyEv"])
+                self.assertTrue(math.isfinite(hand["nodeStrategyEv"]))
+            else:
+                self.assertIsNone(hand["nodeStrategyEv"])
 
     def test_file_solve_navigation_and_eof_drains_queries(self):
         process, ready = self.start("weighted-flop")
@@ -134,8 +132,8 @@ class CliEndToEndTest(unittest.TestCase):
         self.assertEqual(chance["kind"], "terminal")
         self.assertEqual(chance["result"], {"reason": "showdown"})
 
-        # Mix async EV work, an invalid request and immediate replies; match IDs, not arrival order.
-        commands = {10: "query_node_evs", 11: "unknown", 12: "query_equity", 13: "query_node", 14: "query_node_evs"}
+        # An invalid request fails alone among queued queries; EOF still answers every line.
+        commands = {11: "unknown", 12: "query_equity", 13: "query_node"}
         for request_id, command in commands.items():
             self.send(process, {"requestId": request_id, "command": command, "nodeId": ready["rootNodeId"]})
         process.stdin.close()
@@ -149,11 +147,8 @@ class CliEndToEndTest(unittest.TestCase):
         self.assertEqual(responses.keys(), commands.keys())
         self.assertFalse(responses[11]["ok"])
         self.assertTrue(responses[11]["error"])
-        for request_id in (10, 12, 13, 14):
+        for request_id in (12, 13):
             self.assertTrue(responses[request_id]["ok"], responses[request_id])
-        self.check_decision(responses[10]["node"], evs_ready=True)
-        self.check_decision(responses[14]["node"], evs_ready=True)
-        self.assertEqual(responses[10]["node"], responses[14]["node"])
         self.assertEqual(responses[13]["node"], root)
         equity = responses[12]["equity"]
         self.assertEqual(equity["nodeId"], ready["rootNodeId"])

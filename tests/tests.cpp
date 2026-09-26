@@ -119,7 +119,7 @@ void ExpectNodesNear(
             continue;
         // Low-reach nodes hold tiny entries, so scale by each node's largest CPU entry.
         // Rounding stays below 1e-4 of that scale; update bugs move entries far more.
-        const auto end = node.strategyOffset + node.childCount * layout.tables->hands[node.actor].size();
+        const auto end = node.strategyOffset + node.childCount * layout.tables.hands[node.actor].size();
         float scale = 0.0f;
         for (auto i = node.strategyOffset; i < end; ++i)
             scale = std::max(scale, std::fabs(expected[i]));
@@ -232,9 +232,6 @@ TEST(AnalysisSessionTest, FixedPoliciesMatchIndependentNodeValuesAndReach)
                 }
             }
             ASSERT_EQ(node.kind, game::NodeKind::Decision);
-            EXPECT_FALSE(node.evsReady);
-            node = session.EvaluateNodeEvs(std::move(node));
-            EXPECT_TRUE(node.evsReady);
             EXPECT_EQ(node.actor, core::PlayerId(expected.at("actor").get<std::uint8_t>()));
             EXPECT_EQ(node.state.board, core::ParseBoard(expected.at("board").get<std::string>(), core::BoardCardCount(node.state.street)));
             EXPECT_DOUBLE_EQ(static_cast<double>(node.state.pot.Raw()) / core::Chips::kUnitsPerChip, expected.at("pot").get<double>());

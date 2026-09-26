@@ -29,7 +29,7 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         throw std::runtime_error(
             "The GPU supports at most " + std::to_string(kMaxActions) + " actions per decision; reduce bet or raise sizes or use CPU"
         );
-    const auto& tables = *data.tables;
+    const auto& tables = data.tables;
     static_assert(sizeof(Node) == 96 && sizeof(Hand) == 32 && sizeof(State) == 56 && sizeof(Pass) == 40);
     state.board = data.nodes.front().boardMask;
     for (U32 p = 0; p < 2; ++p)

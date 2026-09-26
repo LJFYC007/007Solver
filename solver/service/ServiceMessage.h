@@ -62,7 +62,6 @@ struct ServiceMessage
 enum class QueryKind : std::uint8_t
 {
     Node,
-    NodeEvs,
     Equity,
 };
 

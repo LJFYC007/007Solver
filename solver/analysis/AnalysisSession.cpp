@@ -8,9 +8,7 @@
 
 namespace solver::analysis
 {
-AnalysisSession::AnalysisSession(engine::SolveResult result)
-    : result_(std::move(result)), reachCalculator_(result_), nodeEvaluator_(result_)
-{}
+AnalysisSession::AnalysisSession(engine::SolveResult result) : result_(std::move(result)), reachCalculator_(result_) {}
 
 NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
 {
@@ -56,6 +54,17 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
     report.hands = BuildHandReports(
         nodeId, result_.Problem().ranges.For(player), marginalReachMasses, currentReach.ownReachWeights[player.Index()], player
     );
+    if (std::any_of(report.hands.begin(), report.hands.end(), [](const auto& hand) { return hand.marginalReachMass > 0.0f; }))
+    {
+        const auto evs = engine::EvaluateNodeStrategy(result_, nodeId, player);
+        for (auto& hand : report.hands)
+        {
+            // The evaluator omits hands whose opponent mass has no value scale (see ValueScale).
+            const auto ev = evs.find(hand.cards);
+            if (hand.marginalReachMass > 0.0f && ev != evs.end())
+                hand.nodeStrategyEv = ev->second;
+        }
+    }
 
     for (std::size_t edgeIndex = 0; edgeIndex < node.BettingEdgeCount(); ++edgeIndex)
     {
@@ -68,25 +77,6 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
             node.GetBettingEdge(edgeIndex).NextNode(),
         });
     }
-    return report;
-}
-
-NodeReport AnalysisSession::EvaluateNodeEvs(NodeReport report) const
-{
-    if (report.kind != game::NodeKind::Decision)
-        return report;
-    if (std::any_of(report.hands.begin(), report.hands.end(), [](const auto& hand) { return hand.marginalReachMass > 0.0f; }))
-    {
-        const auto evs = nodeEvaluator_.Evaluate(report.nodeId, *report.actor);
-        for (auto& hand : report.hands)
-        {
-            // The evaluator omits hands whose opponent mass has no value scale (see ValueScale).
-            const auto ev = evs.find(hand.cards);
-            if (hand.marginalReachMass > 0.0f && ev != evs.end())
-                hand.nodeStrategyEv = ev->second;
-        }
-    }
-    report.evsReady = true;
     return report;
 }
 

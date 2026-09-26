@@ -26,7 +26,6 @@ SolveSize MeasureSolveSize(const SolveProblem& problem)
                 ++size.hands[player];
         const auto entries = size.tree.actionEntries[player] * size.hands[player];
         size.strategyEntries += entries;
-        size.infoSets += size.tree.decisionNodes[player] * size.hands[player];
         size.stateUnits += entries + size.tree.decisionNodes[player] * HandTraversalData::ExponentUnits(size.hands[player]);
     }
     return size;
@@ -49,27 +48,25 @@ MemoryEstimate EstimateCpuMemory(const SolveProblem& problem, int workers)
 {
     const auto counts = MeasureSolveSize(problem);
     const auto& size = counts.tree;
-    const auto& hands = counts.hands;
-    const std::uint64_t maxHands = std::max(hands[0], hands[1]);
     const std::uint64_t entries = counts.strategyEntries;
-    const std::uint64_t infosets = counts.infoSets;
     const std::uint64_t decisions = size.decisionNodes[0] + size.decisionNodes[1];
     const int count = CpuWorkerCount(workers);
-    const auto storage = HandTraversal::EstimateStorage(*problem.game, hands, true);
-    const auto rootVectors = sizeof(float) * (hands[0] + hands[1] + maxHands);
+    const auto storage = HandTraversal::EstimateStorage(*problem.game, counts.hands, true);
     // Include the bounded runout/regret scratch and per-team runtime overhead.
-    const std::uint64_t workspace = storage.workspaceBytes * (count > 1 ? count + 1 : 1) + (count > 1 ? storage.parallelValuesBytes : 0) +
-                                    (count + 1) * 128 * 1024 + rootVectors;
+    const std::uint64_t workspace = storage.WalkBytes(count);
     // Training retains quantized regrets and strategy sums and node stamps; current policies live in depth rows.
     const std::uint64_t trainingPeak =
         TrainingStateBytes(counts) + sizeof(std::uint32_t) * size.traversalNodes + workspace + storage.runoutOutcomesBytes;
-    // Checkpoints borrow sums while all training allocations remain resident.
-    const auto checkpointPeak = trainingPeak + storage.workspaceBytes + rootVectors;
+    // Checkpoints borrow sums while all training allocations remain resident; evaluation
+    // walks use the default team.
+    const std::uint64_t evaluationWalk = storage.WalkBytes(CpuWorkerCount());
+    const auto checkpointPeak = trainingPeak + evaluationWalk;
     // Final export releases regrets and workspaces before allocating the snapshot, whose
-    // probabilities are normalized from the still resident quantized sums.
-    const std::uint64_t snapshot = StrategySnapshot::EstimateStorageBytes(decisions, infosets, entries);
+    // probabilities are normalized from the still resident quantized sums. Strategy entries
+    // bound its probabilities, which cover board-compatible hands only.
+    const std::uint64_t snapshot = StrategySnapshot::EstimateStorageBytes(decisions, entries);
     const std::uint64_t exportPeak = sizeof(std::uint16_t) * counts.stateUnits + snapshot + storage.runoutOutcomesBytes;
-    const std::uint64_t evaluationPeak = snapshot + storage.workspaceBytes + rootVectors;
+    const std::uint64_t evaluationPeak = snapshot + evaluationWalk;
     const std::uint64_t peak = size.storageBytes + storage.fixedBytes + std::max({checkpointPeak, exportPeak, evaluationPeak});
     return MakeMemoryEstimate(counts, peak, count);
 }
