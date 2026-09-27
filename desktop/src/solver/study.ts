@@ -283,9 +283,7 @@ export function buildStudyView({
                 kind: "empty",
                 title: solveState === "failed" ? "Unable to solve" : "Solving strategy",
                 description:
-                    solveState === "failed"
-                        ? solveError
-                        : "Preparing your strategy. Open Solver above to view progress.",
+                    solveState === "failed" ? solveError : "Preparing your strategy. Progress is shown on the right.",
             };
     } else if (!preNode && !state.complete)
         matrix = {
@@ -309,6 +307,8 @@ export function buildStudyView({
             matchup: canPlayPostflop
                 ? {
                       title: `${ip.position} vs ${oop.position}`,
+                      oop: oop.position,
+                      ip: ip.position,
                       detail: `${raises === 0 ? "Limped pot" : raises === 1 ? "Single-raised pot" : `${raises + 1}-bet pot`} · ${formatNumber(fullState.pot)} pot · ${formatNumber(solution.stack - ip.committed)} behind`,
                   }
                 : undefined,

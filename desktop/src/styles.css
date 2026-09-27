@@ -26,7 +26,7 @@
         BlinkMacSystemFont,
         "Segoe UI",
         sans-serif;
-    font-size: 13px;
+    font-size: 14px;
     font-variant-numeric: tabular-nums;
     color-scheme: dark;
     font-synthesis: none;
@@ -50,6 +50,10 @@ body,
     height: 100%;
     margin: 0;
 }
+html {
+    /* main.tsx scales the layout with the window. Viewport units ignore this zoom. */
+    zoom: var(--zoom);
+}
 body {
     overflow: hidden;
 }
@@ -68,16 +72,19 @@ button:disabled {
 }
 button:focus-visible,
 input:focus-visible,
-select:focus-visible,
-summary:focus-visible {
+select:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
 }
 .app-shell {
     display: grid;
     height: 100%;
-    grid-template-rows: 35px 136px minmax(0, 1fr);
+    grid-template-rows: 35px 140px minmax(0, 1fr);
     background: var(--surface-base);
+}
+/* Browsers show no title bar. */
+.app-shell.browser {
+    grid-template-rows: 140px minmax(0, 1fr);
 }
 .app-header {
     display: flex;
@@ -97,7 +104,7 @@ summary:focus-visible {
     align-items: center;
 }
 .brand strong {
-    font-size: 13px;
+    font-size: 14px;
 }
 .brand-mark {
     display: grid;
@@ -108,7 +115,7 @@ summary:focus-visible {
     border-radius: 5px;
     background: #294332;
     color: #b6eab9;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 800;
     font-stretch: 80%;
 }
@@ -119,7 +126,7 @@ summary:focus-visible {
     margin-left: 20px;
     padding: 2px 10px 0;
     border-bottom: 2px solid var(--accent);
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
 }
 .study-browser {
@@ -129,6 +136,7 @@ summary:focus-visible {
     padding: 7px 7px 6px;
 }
 .preflop-settings {
+    position: relative;
     flex: 0 0 190px;
     display: flex;
     flex-direction: column;
@@ -136,7 +144,7 @@ summary:focus-visible {
     border-radius: 6px;
     padding: 8px;
     background: var(--surface-panel);
-    font-size: 12px;
+    font-size: 13px;
 }
 .solution-heading {
     display: flex;
@@ -145,11 +153,10 @@ summary:focus-visible {
     gap: 8px;
 }
 .solution-heading strong {
-    font-size: 18px;
-    font-stretch: 85%;
+    font-size: 16px;
 }
 .solution-heading strong span {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 400;
     color: var(--text-secondary);
 }
@@ -158,39 +165,60 @@ summary:focus-visible {
     background: transparent;
     color: var(--text-secondary);
 }
-.preflop-settings > small {
-    color: var(--text-muted);
-    font-size: 11px;
+.preflop-settings ul {
+    margin: 0;
+    padding-left: 16px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
 }
 .quiet-button {
     border: 1px solid var(--border);
     border-radius: 4px;
     padding: 5px 8px;
     background: var(--surface-control);
-    font-size: 12px;
+    font-size: 13px;
 }
 .quiet-button:hover:not(:disabled),
 .board-selection-tools button:hover:not(:disabled),
-.solution-options button:hover:not(:disabled) {
+.pill-group button:hover:not(:disabled) {
     background: var(--surface-hover);
 }
-.solution-options {
+.solution-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 20;
     display: flex;
-    gap: 3px;
-    padding: 3px;
-    border-radius: 5px;
-    background: var(--surface-base);
+    width: 260px;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-panel);
+    box-shadow: 0 16px 48px #0009;
 }
-.solution-options button {
-    flex: 1;
-    padding: 7px 3px;
-    border-radius: 3px;
+.solution-menu > span {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+.pill-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.pill-group button {
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
     background: transparent;
     color: var(--text-secondary);
     font-size: 13px;
 }
-.solution-options button[aria-pressed="true"] {
-    background: var(--surface-control);
+.pill-group button[aria-pressed="true"] {
+    border-color: transparent;
+    background: var(--surface-hover);
     color: var(--text-primary);
 }
 
@@ -234,7 +262,7 @@ summary:focus-visible {
     padding: 2px 3px;
     background: transparent;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.15;
 }
 .timeline-node-title strong {
@@ -254,7 +282,7 @@ summary:focus-visible {
     padding: 2px 4px 2px 9px;
     border-radius: 3px;
     background: transparent;
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.15;
     text-align: left;
     white-space: nowrap;
@@ -271,7 +299,7 @@ summary:focus-visible {
 }
 .timeline-choice small {
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: 11px;
 }
 .timeline-choice:not(.chosen):hover:not(:disabled) {
     background: var(--surface-hover);
@@ -295,6 +323,21 @@ summary:focus-visible {
 }
 .board-stage .stage-cards {
     margin-top: 7px;
+}
+.stage-status {
+    margin-top: 7px;
+    padding: 0 3px;
+    overflow: hidden;
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.stage-status.ready {
+    color: var(--accent);
+}
+.stage-status.failed {
+    color: #f095a7;
 }
 .board-stage .board-card {
     width: 30px;
@@ -320,7 +363,7 @@ summary:focus-visible {
 }
 .next-card-button > span:last-child,
 .history-node-choice {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-secondary);
 }
 .history-node-choice {
@@ -352,14 +395,14 @@ summary:focus-visible {
     gap: 8px;
     padding: 5px 9px;
     background: var(--surface-strip);
-    font-size: 12px;
+    font-size: 13px;
 }
 .panel-strip-title strong {
     font-weight: 500;
 }
 .panel-strip-title > span {
     color: var(--text-secondary);
-    font-size: 10px;
+    font-size: 11px;
 }
 .strategy-content {
     flex: 1;
@@ -402,7 +445,7 @@ summary:focus-visible {
     background-image: none;
 }
 .range-cell strong {
-    font-size: clamp(12px, 1.15vw, 18px);
+    font-size: 18px;
     font-weight: 400;
     font-stretch: 85%;
     line-height: 1;
@@ -422,7 +465,7 @@ summary:focus-visible {
     left: 50%;
     transform: translateX(-50%);
     z-index: 30;
-    max-width: 80vw;
+    max-width: 80%;
     padding: 10px 16px;
     border: 1px solid #924b5c;
     border-radius: 5px;
@@ -460,7 +503,7 @@ summary:focus-visible {
     color: var(--text-secondary);
     background: transparent;
     border-radius: 4px 4px 0 0;
-    font-size: 12px;
+    font-size: 13px;
 }
 .inspector-tabs button[aria-selected="true"] {
     color: #eee;
@@ -471,7 +514,7 @@ summary:focus-visible {
     grid-template-columns: minmax(0, 1fr) 125px;
     align-items: center;
     gap: 9px;
-    height: 84px;
+    height: 88px;
     padding: 6px 7px;
 }
 .overview-seats {
@@ -489,7 +532,7 @@ summary:focus-visible {
     border-radius: 3px;
     background: #262627;
     text-align: center;
-    font-size: clamp(9px, 2cqw, 13px);
+    font-size: clamp(11px, 2cqw, 14px);
     line-height: 1.05;
 }
 .overview-seat b {
@@ -511,7 +554,7 @@ summary:focus-visible {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
     white-space: nowrap;
-    font-size: 12px;
+    font-size: 13px;
 }
 .overview-copy > div {
     display: flex;
@@ -520,18 +563,18 @@ summary:focus-visible {
 }
 .overview-copy span {
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: 11px;
 }
 .overview-copy strong {
     font-weight: 500;
 }
 .spot-body {
-    height: 84px;
+    height: 88px;
     overflow: hidden;
     transition: height 160ms ease-out;
 }
 .spot-body.expanded {
-    height: clamp(170px, calc((100vh - 175px) * 0.34), 270px);
+    height: 270px;
 }
 @media (prefers-reduced-motion: reduce) {
     .spot-body {
@@ -547,7 +590,7 @@ summary:focus-visible {
 }
 .overview-board-button > span:not(.board-card) {
     color: #777;
-    font-size: 10px;
+    font-size: 11px;
 }
 .overview-board-button .board-card {
     width: clamp(16px, 3.5cqw, 24px);
@@ -558,7 +601,7 @@ summary:focus-visible {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(112px, 33%);
     gap: 7px;
-    height: clamp(170px, calc((100vh - 175px) * 0.34), 270px);
+    height: 270px;
     padding: 8px;
 }
 .poker-table {
@@ -583,7 +626,7 @@ summary:focus-visible {
     align-items: center;
     justify-content: center;
     gap: 5px;
-    font-size: 13px;
+    font-size: 14px;
 }
 .table-center > div {
     display: flex;
@@ -595,7 +638,7 @@ summary:focus-visible {
     align-items: center;
     gap: 3px;
     color: var(--text-muted);
-    font-size: 9px;
+    font-size: 11px;
 }
 .table-center .board-card {
     width: clamp(19px, 4.2cqw, 29px);
@@ -615,7 +658,7 @@ summary:focus-visible {
     background: #212122;
     border: 2px solid #343437;
     border-radius: 50%;
-    font-size: clamp(9px, 1.9cqw, 12px);
+    font-size: clamp(11px, 1.9cqw, 13px);
     line-height: 1.05;
 }
 .table-seat.acting {
@@ -636,7 +679,7 @@ summary:focus-visible {
     background: #eee;
     border-radius: 50%;
     color: #242426;
-    font-size: 10px;
+    font-size: 11px;
     font-style: normal;
 }
 .table-contribution {
@@ -645,7 +688,7 @@ summary:focus-visible {
     display: flex;
     align-items: center;
     gap: 3px;
-    font-size: 10px;
+    font-size: 11px;
     pointer-events: none;
 }
 .pot-chip {
@@ -674,14 +717,14 @@ summary:focus-visible {
     gap: 6px;
     background: #242425;
     padding: 5px 7px;
-    font-size: clamp(10px, 2.1cqw, 13px);
+    font-size: clamp(11px, 2.1cqw, 14px);
 }
 .player-stats header strong {
     font-weight: 400;
 }
 .player-stats header small {
     color: var(--text-muted);
-    font-size: 9px;
+    font-size: 11px;
 }
 .player-stat-grid {
     display: grid;
@@ -698,11 +741,11 @@ summary:focus-visible {
 }
 .player-stat-grid span {
     color: var(--text-secondary);
-    font-size: clamp(9px, 1.8cqw, 11px);
+    font-size: clamp(11px, 1.8cqw, 12px);
 }
 .player-stat-grid b {
     color: #b5d7a0;
-    font-size: clamp(10px, 2.3cqw, 14px);
+    font-size: clamp(11px, 2.3cqw, 14px);
     font-weight: 400;
     font-variant-numeric: tabular-nums;
 }
@@ -720,7 +763,7 @@ summary:focus-visible {
 }
 .equity-plot svg text {
     fill: #777;
-    font-size: 9px;
+    font-size: 11px;
 }
 .equity-legend {
     position: absolute;
@@ -737,7 +780,7 @@ summary:focus-visible {
     background: transparent;
     padding: 0;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: 12px;
 }
 .equity-legend button[aria-pressed="false"] {
     opacity: 0.3;
@@ -764,7 +807,7 @@ summary:focus-visible {
     color: #ddd;
     background: #111e;
     border: 1px solid #444;
-    font-size: 10px;
+    font-size: 11px;
     pointer-events: none;
 }
 .equity-empty {
@@ -773,7 +816,7 @@ summary:focus-visible {
     min-width: 0;
     padding: 14px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.5;
     text-align: center;
 }
@@ -783,10 +826,10 @@ summary:focus-visible {
     display: flex;
     flex-direction: column;
     gap: 7px;
-    font-size: 13px;
+    font-size: 14px;
 }
 .line-complete span {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-muted);
 }
 .action-summary-panel {
@@ -830,14 +873,14 @@ summary:focus-visible {
 .action-cards h3 {
     margin: 0;
     overflow: hidden;
-    font-size: clamp(12px, 12.5cqw, 22px);
+    font-size: clamp(13px, 12.5cqw, 22px);
     font-weight: 500;
     line-height: 1.1;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 .action-card-name small {
-    font-size: clamp(10px, 7cqw, 12px);
+    font-size: clamp(11px, 7cqw, 13px);
     opacity: 0.85;
 }
 .action-card-stats {
@@ -853,7 +896,7 @@ summary:focus-visible {
     line-height: 1;
 }
 .action-card-stats small {
-    font-size: 10px;
+    font-size: 11px;
     line-height: 1.2;
     opacity: 0.85;
     text-align: right;
@@ -923,7 +966,7 @@ summary:focus-visible {
 }
 .combo-tile-heading > span {
     color: var(--text-primary);
-    font-size: clamp(10px, 5.5cqw, 12px);
+    font-size: clamp(11px, 5.5cqw, 13px);
     white-space: nowrap;
 }
 .combo-cards {
@@ -950,12 +993,12 @@ summary:focus-visible {
     color: var(--suit-club);
 }
 .combo-cards .playing-card {
-    height: 22px;
+    height: 25px;
     padding: 2px 3px;
-    font-size: 15px;
+    font-size: 17px;
 }
 .combo-cards .playing-card > span:last-child {
-    font-size: 13px;
+    font-size: 15px;
 }
 .combo-action-list {
     display: flex;
@@ -970,7 +1013,7 @@ summary:focus-visible {
     grid-template-columns: 8px minmax(0, 1fr) auto;
     align-items: center;
     gap: 6px;
-    font-size: clamp(11px, 6.5cqw, 15px);
+    font-size: clamp(12px, 6.5cqw, 15px);
     line-height: 1.35;
 }
 .combo-action-list li.unused {
@@ -994,7 +1037,7 @@ summary:focus-visible {
 .combo-reach {
     margin-top: auto;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 13px;
 }
 .study-placeholder {
     height: 100%;
@@ -1006,7 +1049,7 @@ summary:focus-visible {
     padding: 30px;
     text-align: center;
     color: var(--text-secondary);
-    font-size: 13px;
+    font-size: 14px;
 }
 .study-placeholder h2 {
     margin: 0;
@@ -1016,14 +1059,21 @@ summary:focus-visible {
 }
 .muted-copy {
     margin: 15px;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-muted);
 }
 .inspector.without-actions {
     grid-template-rows: auto minmax(0, 1fr);
 }
 .solve-setup {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    overflow-y: auto;
+    border-radius: 6px;
     background: var(--surface-panel);
+    scrollbar-width: thin;
+    scrollbar-color: #454548 transparent;
 }
 .solve-heading {
     display: flex;
@@ -1043,7 +1093,7 @@ summary:focus-visible {
     border-radius: 4px;
     background: var(--surface-control);
     color: var(--text-secondary);
-    font-size: 10px;
+    font-size: 11px;
     white-space: nowrap;
 }
 .solve-state.reached {
@@ -1075,12 +1125,12 @@ summary:focus-visible {
     gap: 3px;
 }
 .solve-spot strong {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
 }
 .solve-spot small {
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: 12px;
 }
 .solve-report {
     padding: 0 20px 18px;
@@ -1092,7 +1142,7 @@ summary:focus-visible {
     margin: 5px 0 0;
 }
 .solve-metrics dt {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-muted);
 }
 .solve-metrics dd {
@@ -1103,7 +1153,7 @@ summary:focus-visible {
 }
 .solve-metrics small {
     display: block;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-muted);
 }
 .solve-phase {
@@ -1113,7 +1163,7 @@ summary:focus-visible {
     display: flex;
     justify-content: space-between;
     gap: 8px;
-    font-size: 11px;
+    font-size: 12px;
 }
 .solve-phase strong {
     font-weight: 400;
@@ -1129,57 +1179,23 @@ summary:focus-visible {
     margin-top: 10px;
     accent-color: var(--accent);
 }
-.solve-snapshot {
-    margin-top: 18px;
-    padding-top: 14px;
-    border-top: 1px solid var(--divider);
-    font-size: 11px;
-}
-.solve-snapshot summary {
-    cursor: pointer;
-    color: var(--text-secondary);
-}
-.solve-snapshot table {
-    width: 100%;
-    margin-top: 12px;
-    border-collapse: collapse;
-    text-align: left;
-}
-.solve-snapshot th,
-.solve-snapshot td {
-    padding: 7px 0;
-    font-weight: 400;
-    vertical-align: middle;
-}
-.solve-snapshot thead {
-    color: var(--text-muted);
-}
-.solve-snapshot tbody th {
-    text-transform: capitalize;
-}
-.solve-snapshot tbody tr {
-    border-top: 1px solid #ffffff08;
-}
-.solve-snapshot p {
-    margin: 10px 0 0;
-    color: var(--text-secondary);
-}
-.solve-snapshot p span {
-    margin: 0 6px;
-    color: var(--text-muted);
-}
 .solve-settings {
     border-top: 1px solid var(--divider);
     padding: 0 20px 18px;
 }
-.solve-settings > summary {
-    cursor: pointer;
-    padding: 16px 0 0;
-    font-size: 12px;
-    color: var(--text-secondary);
+.solve-settings > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 0;
 }
-.solve-settings[open] > summary {
-    margin-bottom: 16px;
+.solve-settings h3 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 500;
+}
+.solve-settings .quiet-button:disabled {
+    opacity: 0.4;
 }
 .solve-targets {
     display: grid;
@@ -1191,11 +1207,11 @@ summary:focus-visible {
     min-width: 0;
     flex-direction: column;
     gap: 7px;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-secondary);
 }
 .solve-targets small {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-muted);
 }
 .solve-setup input,
@@ -1208,7 +1224,7 @@ summary:focus-visible {
     padding: 7px 9px;
     background: var(--surface-strip);
     color: var(--text-primary);
-    font-size: 12px;
+    font-size: 13px;
 }
 .solve-input-unit {
     position: relative;
@@ -1227,6 +1243,10 @@ summary:focus-visible {
     appearance: none;
 }
 .solve-footer {
+    /* Keeps the solve buttons at the bottom, also while the settings scroll. */
+    position: sticky;
+    bottom: 0;
+    margin-top: auto;
     display: flex;
     justify-content: flex-end;
     gap: 8px;
@@ -1243,7 +1263,7 @@ summary:focus-visible {
     margin: 0;
     padding: 0 20px 16px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.5;
 }
 .solve-error {
@@ -1255,7 +1275,7 @@ summary:focus-visible {
     border-radius: 4px;
     background: var(--accent);
     color: #15311c;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
 }
 .solve-button:disabled {
@@ -1320,14 +1340,14 @@ summary:focus-visible {
     position: absolute;
     top: 1px;
     right: 2px;
-    font-size: 9px;
+    font-size: 11px;
 }
 .board-dialog {
     position: fixed;
     padding: 0;
     border: 1px solid var(--border);
     border-radius: 7px;
-    width: min(570px, 90vw);
+    width: min(570px, 90%);
     max-width: none;
     overflow: visible;
     color: #eee;
@@ -1365,7 +1385,7 @@ summary:focus-visible {
 }
 .board-picker-heading small {
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: 13px;
 }
 .board-selection {
     display: flex;
@@ -1388,7 +1408,7 @@ summary:focus-visible {
 .board-slot-label {
     display: block;
     margin-top: 5px;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-secondary);
 }
 .board-selection > button:nth-child(4) {
@@ -1412,7 +1432,7 @@ summary:focus-visible {
     padding: 0;
     background: var(--surface-control);
     border-radius: 3px;
-    font-size: 12px;
+    font-size: 13px;
 }
 .board-deck {
     display: grid;
@@ -1448,117 +1468,111 @@ summary:focus-visible {
 }
 .board-dialog-footer > span {
     color: var(--text-muted);
-    font-size: 11px;
-}
-@media (max-width: 1200px) {
-    .workspace {
-        grid-template-columns: minmax(0, 56fr) minmax(370px, 44fr);
-    }
-    .preflop-settings {
-        flex-basis: 160px;
-    }
-    .overview-board-button .board-card {
-        width: 17px;
-        height: 25px;
-        font-size: 18px;
-    }
-}
-@media (max-height: 780px) {
-    .app-shell {
-        grid-template-rows: 33px 123px minmax(0, 1fr);
-    }
-    .action-cards > button {
-        height: 92px;
-    }
+    font-size: 12px;
 }
 
 .betting-tree-settings {
-    margin: 20px 0 0;
-    font-size: 12px;
-}
-.betting-tree-settings h3 {
-    margin: 0 0 10px;
-    font-size: 12px;
-    font-weight: 500;
-}
-.solve-advanced {
-    margin-top: 14px;
-    padding-top: 8px;
-    border-top: 1px solid var(--divider);
-}
-.betting-tree-settings summary {
-    cursor: pointer;
-    padding: 5px 0;
-    color: var(--text-secondary);
-}
-.betting-tree-settings fieldset {
-    border: 0;
-    padding: 6px 0 0;
-    margin: 0;
     min-width: 0;
+    margin: 16px 0 0;
+    padding: 0;
+    border: 0;
+}
+.betting-players {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 8px;
+}
+.betting-player {
+    min-width: 0;
+    padding: 10px 12px 12px;
+    border-radius: 6px;
+    background: var(--surface-strip);
+}
+.betting-player h4 {
+    margin: 0 0 10px;
+    font-size: 14px;
+    font-weight: 600;
+}
+.betting-player h4 small {
+    margin-left: 4px;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 400;
+    text-transform: uppercase;
 }
 .betting-size-grid {
     display: grid;
-    grid-template-columns: 50px minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr);
     align-items: start;
-    gap: 8px 6px;
-}
-.betting-size-field {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 4px;
-}
-.solve-setup input[aria-invalid="true"] {
-    border-color: #b4526a;
-}
-.size-pills {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 3px;
-    min-height: 16px;
-}
-.size-pills i {
-    padding: 1px 5px;
-    border-radius: 3px;
-    color: #f7f7f7;
-    font-size: 10px;
-    font-style: normal;
-    line-height: 14px;
-}
-.size-pills.empty {
-    color: var(--text-muted);
-    font-size: 10px;
-    line-height: 16px;
+    gap: 6px 10px;
 }
 .betting-size-grid > span {
-    font-size: 10px;
+    color: var(--text-muted);
+    font-size: 11px;
+}
+.betting-size-grid > strong {
+    font-weight: 500;
+    line-height: 28px;
+    text-transform: capitalize;
+}
+.size-list {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.size-field {
+    display: inline-flex;
+    height: 28px;
+    align-items: center;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface-base);
+    padding-left: 6px;
+    box-shadow: inset 3px 0 0 var(--action);
     color: var(--text-muted);
 }
-.betting-size-row {
-    display: contents;
+.size-field:has(input[aria-invalid="true"]) {
+    border-color: #b4526a;
 }
-.betting-size-row strong {
-    text-transform: capitalize;
-    font-weight: 500;
-    line-height: 34px;
+.solve-setup .size-field input {
+    width: 2.6em;
+    height: 100%;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    text-align: right;
 }
-.solve-advanced label {
+.size-field button,
+.size-add {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 155px;
-    align-items: center;
-    gap: 8px;
-    margin-top: 10px;
+    width: 18px;
+    height: 100%;
+    place-items: center;
+    padding: 0;
+    background: transparent;
+    color: var(--text-muted);
 }
-.betting-tree-settings small {
+.size-field button:hover:not(:disabled),
+.size-add:hover:not(:disabled) {
+    color: var(--text-primary);
+}
+.size-add {
+    width: 28px;
+    height: 28px;
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+    font-size: 16px;
+}
+.betting-limits {
+    margin-top: 14px;
+}
+.betting-size-error {
     display: block;
-    margin-top: 8px;
-    font-size: 10px;
-    line-height: 1.4;
-    color: var(--text-secondary);
-}
-.betting-tree-settings .betting-size-error {
+    margin-top: 10px;
     color: #f095a7;
+    font-size: 12px;
+    line-height: 1.4;
 }
 
 .board-dialog:focus {
@@ -1568,13 +1582,6 @@ summary:focus-visible {
     outline: 1px solid var(--text-secondary);
     outline-offset: 0;
     border-radius: 4px;
-}
-.solver-menu {
-    position: relative;
-    margin-right: 6px;
-}
-.solver-menu:last-child {
-    margin-right: 13px;
 }
 .window-controls {
     display: flex;
@@ -1598,40 +1605,4 @@ summary:focus-visible {
 }
 .window-controls svg {
     shape-rendering: crispEdges;
-}
-.solver-toggle {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 5px 8px;
-    border-radius: 4px;
-    background: transparent;
-    font-size: 12px;
-}
-.solver-toggle > span {
-    color: var(--text-secondary);
-    font-size: 11px;
-}
-.solver-toggle:hover,
-.solver-toggle[aria-expanded="true"] {
-    background: var(--surface-control);
-}
-.solver-toggle .solved-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--accent);
-}
-.solver-popover {
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
-    z-index: 20;
-    width: 450px;
-    max-height: calc(100vh - 70px);
-    overflow-y: auto;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    box-shadow: 0 16px 48px #0009;
-    background: var(--surface-panel);
 }

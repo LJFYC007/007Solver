@@ -108,30 +108,58 @@
     "scenario": {
       "bettingTree": {
         "allInSpr": 0.15,
-        "flop": {
-          "bet": [
-            50
-          ],
-          "raise": [
-            50
-          ]
+        "ip": {
+          "flop": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          },
+          "river": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          },
+          "turn": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          }
         },
         "maxRaises": 2,
-        "river": {
-          "bet": [
-            50
-          ],
-          "raise": [
-            50
-          ]
-        },
-        "turn": {
-          "bet": [
-            50
-          ],
-          "raise": [
-            50
-          ]
+        "oop": {
+          "flop": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          },
+          "river": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          },
+          "turn": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          }
         }
       },
       "board": "Ks 9s 2d",
@@ -895,30 +923,58 @@
     "scenario": {
       "bettingTree": {
         "allInSpr": 0.15,
-        "flop": {
-          "bet": [
-            50
-          ],
-          "raise": [
-            50
-          ]
+        "ip": {
+          "flop": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          },
+          "river": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          },
+          "turn": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          }
         },
         "maxRaises": 2,
-        "river": {
-          "bet": [
-            50
-          ],
-          "raise": [
-            50
-          ]
-        },
-        "turn": {
-          "bet": [
-            50
-          ],
-          "raise": [
-            50
-          ]
+        "oop": {
+          "flop": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          },
+          "river": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          },
+          "turn": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          }
         }
       },
       "board": "Ks 9s 2d",

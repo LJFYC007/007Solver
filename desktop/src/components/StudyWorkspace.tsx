@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { formatNumber, isDesktopApp } from "../solver";
-import { stopReasonLabel } from "../solver/study";
 import { useStudyWorkspace, type StudyWorkspaceProps } from "../hooks/useStudyWorkspace";
 import BoardPicker from "./BoardPicker";
 import { BoardCard } from "./PlayingCards";
@@ -26,6 +25,8 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
         setAccuracyPercent,
         bettingTree,
         changeBettingTree,
+        solveSettingsChanged,
+        resetSolveSettings,
         error,
         picker,
         navigation,
@@ -46,10 +47,19 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
         cancel,
         closePicker,
     } = useStudyWorkspace(props);
-    const [solverOpen, setSolverOpen] = useState(false);
     const [selected, setSelected] = useState("AA");
     const scroll = useRef<HTMLElement>(null);
     const { preflop, strategy, busy, showPostflop } = view;
+    const solveLabel =
+        status.state === "queued"
+            ? "Waiting for GPU"
+            : busy
+              ? "Solving…"
+              : status.state === "ready"
+                ? `Solved · ${Math.round(status.elapsedSeconds)}s`
+                : status.state === "failed"
+                  ? "Solve failed"
+                  : "Not solved";
     useEffect(() => {
         const frame = window.requestAnimationFrame(() =>
             scroll.current
@@ -59,77 +69,22 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
         return () => window.cancelAnimationFrame(frame);
     }, [preIndex, navigation.activeIndex, navigation.path.length, history.length, root]);
     return (
-        <main className="app-shell">
-            <header className="app-header" data-tauri-drag-region>
-                <div className="brand" data-tauri-drag-region>
-                    <div className="brand-mark" data-tauri-drag-region>
-                        007
-                    </div>
-                    <strong data-tauri-drag-region>007 Solver</strong>
-                    <span className="preflop-nav-label" data-tauri-drag-region>
-                        Study
-                    </span>
-                </div>
-                <div className="solver-menu">
-                    <button
-                        type="button"
-                        className="solver-toggle"
-                        aria-expanded={solverOpen}
-                        aria-controls="solver-panel"
-                        onClick={() => setSolverOpen(!solverOpen)}
-                    >
-                        <span className={status.state === "ready" ? "solved-dot" : ""} />
-                        Solver{" "}
-                        <span>
-                            {busy
-                                ? "Solving…"
-                                : status.state === "ready"
-                                  ? `${Math.round(status.elapsedSeconds)}s · ${stopReasonLabel(status.stopReason)}`
-                                  : status.state === "failed"
-                                    ? "Failed"
-                                    : "Settings"}
-                        </span>
-                        <span aria-hidden="true">{solverOpen ? "▴" : "▾"}</span>
-                    </button>
-                    {solverOpen && (
-                        <div
-                            id="solver-panel"
-                            className="solver-popover"
-                            onKeyDown={(event) => {
-                                if (event.key === "Escape") setSolverOpen(false);
-                            }}
-                        >
-                            <SolvePanel
-                                board={board}
-                                status={status}
-                                busy={busy}
-                                changing={changing}
-                                ready={!!root}
-                                iterations={iterations}
-                                accuracyPercent={accuracyPercent}
-                                onIterations={setIterations}
-                                onAccuracyPercent={setAccuracyPercent}
-                                bettingTree={bettingTree}
-                                onBettingTree={changeBettingTree}
-                                onSolve={() => {
-                                    if (root) {
-                                        viewPost(navigation.activeIndex);
-                                        setSolverOpen(false);
-                                    } else void solve();
-                                }}
-                                onResolve={() => void solve()}
-                                onCancel={cancel}
-                                scenario={props.scenario}
-                                matchup={preflop.matchup}
-                                canSolve={preflop.canPlayPostflop}
-                                error={error}
-                            />
+        <main className={`app-shell${isDesktopApp ? "" : " browser"}`}>
+            {/* Browsers have no window for a title bar to move or control. */}
+            {isDesktopApp && (
+                <header className="app-header" data-tauri-drag-region>
+                    <div className="brand" data-tauri-drag-region>
+                        <div className="brand-mark" data-tauri-drag-region>
+                            007
                         </div>
-                    )}
-                </div>
-                {/* Browsers have no window for the caption buttons to control. */}
-                {isDesktopApp && <WindowControls />}
-            </header>
+                        <strong data-tauri-drag-region>007 Solver</strong>
+                        <span className="preflop-nav-label" data-tauri-drag-region>
+                            Study
+                        </span>
+                    </div>
+                    <WindowControls />
+                </header>
+            )}
             <div className="study-browser">
                 <SolutionSettings
                     format={format}
@@ -146,7 +101,7 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                         onView={viewPreTimeline}
                         onAction={(entry, action) => void choose(entry.history, entry.node.actor, action)}
                     />
-                    {preflop.complete && !root && (
+                    {preflop.complete && (
                         <section className={`board-stage${preIndex === history.length ? " active" : ""}`}>
                             <button
                                 type="button"
@@ -157,17 +112,22 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                                 <span>{formatNumber(preflop.pot)}</span>
                             </button>
                             {preflop.canPlayPostflop ? (
-                                <button
-                                    type="button"
-                                    className="stage-cards"
-                                    disabled={busy || changing}
-                                    aria-label="Select flop"
-                                    onClick={openFlop}
-                                >
-                                    {Array.from({ length: 3 }, (_, i) => (
-                                        <BoardCard card={board[i]} key={i} />
-                                    ))}
-                                </button>
+                                <>
+                                    <button
+                                        type="button"
+                                        className="stage-cards"
+                                        disabled={busy || changing}
+                                        aria-label={board.length ? `Change flop ${board.join(" ")}` : "Select flop"}
+                                        onClick={openFlop}
+                                    >
+                                        {Array.from({ length: 3 }, (_, i) => (
+                                            <BoardCard card={board[i]} key={i} />
+                                        ))}
+                                    </button>
+                                    {board.length === 3 && (
+                                        <small className={`stage-status ${status.state}`}>{solveLabel}</small>
+                                    )}
+                                </>
                             ) : (
                                 <span>{preflop.resultLabel}</span>
                             )}
@@ -182,7 +142,6 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                         onPath={viewPost}
                         onAction={(...args) => void actPost(...args)}
                         onBoard={pickRunout}
-                        onFlop={openFlop}
                     />
                 </nav>
             </div>
@@ -224,15 +183,39 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                             onBoard: boardAction,
                         }}
                     />
-                    {view.panel === "solve" ? null : view.panel === "complete" ? (
-                        <section className="line-complete" role="status">
-                            <strong>Betting complete</strong>
-                            <span>No more actions to choose.</span>
-                        </section>
+                    {view.panel === "solve" ? (
+                        <SolvePanel
+                            board={board}
+                            status={status}
+                            busy={busy}
+                            changing={changing}
+                            iterations={iterations}
+                            accuracyPercent={accuracyPercent}
+                            settingsChanged={solveSettingsChanged}
+                            onIterations={setIterations}
+                            onAccuracyPercent={setAccuracyPercent}
+                            bettingTree={bettingTree}
+                            onBettingTree={changeBettingTree}
+                            onSolve={() => void solve()}
+                            onCancel={cancel}
+                            onReset={resetSolveSettings}
+                            scenario={props.scenario}
+                            matchup={preflop.matchup}
+                            error={error}
+                        />
                     ) : (
-                        <ActionSummary actions={actionCards} actor={strategy.actor} />
+                        <>
+                            {view.panel === "complete" ? (
+                                <section className="line-complete" role="status">
+                                    <strong>Betting complete</strong>
+                                    <span>No more actions to choose.</span>
+                                </section>
+                            ) : (
+                                <ActionSummary actions={actionCards} actor={strategy.actor} />
+                            )}
+                            <HandDetails label={selected} combos={strategy.handDetails(selected)} />
+                        </>
                     )}
-                    <HandDetails label={selected} combos={strategy.handDetails(selected)} />
                 </aside>
             </div>
             {(error || navigation.navigationError) && (

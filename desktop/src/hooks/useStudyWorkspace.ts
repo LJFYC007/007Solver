@@ -6,6 +6,9 @@ import { buildStudyView } from "../solver/study";
 import { defaultBettingTree, parseBettingTree } from "../solver/bettingTree";
 import { useSolverNavigation } from "./useSolverNavigation";
 
+const DEFAULT_ITERATIONS = 10000;
+const DEFAULT_ACCURACY_PERCENT = 0.01;
+
 export interface StudyWorkspaceProps {
     root?: SolverNode;
     status: SolverStatus;
@@ -29,8 +32,8 @@ export function useStudyWorkspace({
     const [history, setHistory] = useState<PreflopChoice[]>([]);
     const [preIndex, setPreIndex] = useState<number | null>(0);
     const [board, setBoard] = useState<string[]>([]);
-    const [iterations, setIterations] = useState(3000);
-    const [accuracyPercent, setAccuracyPercent] = useState(0.01);
+    const [iterations, setIterations] = useState(DEFAULT_ITERATIONS);
+    const [accuracyPercent, setAccuracyPercent] = useState(DEFAULT_ACCURACY_PERCENT);
     const [bettingTree, setBettingTree] = useState(defaultBettingTree);
     const [rangeSeat, setRangeSeat] = useState<string>();
     const [error, setError] = useState<string>();
@@ -205,6 +208,15 @@ export function useStudyWorkspace({
     function cancel() {
         void changeStudy(() => setPreIndex(history.length));
     }
+    const solveSettingsChanged =
+        iterations !== DEFAULT_ITERATIONS ||
+        accuracyPercent !== DEFAULT_ACCURACY_PERCENT ||
+        JSON.stringify(bettingTree) !== JSON.stringify(defaultBettingTree());
+    function resetSolveSettings() {
+        setIterations(DEFAULT_ITERATIONS);
+        setAccuracyPercent(DEFAULT_ACCURACY_PERCENT);
+        setBettingTree(defaultBettingTree());
+    }
     function closePicker() {
         setPicker(undefined);
     }
@@ -243,6 +255,8 @@ export function useStudyWorkspace({
         setAccuracyPercent,
         bettingTree,
         changeBettingTree: setBettingTree,
+        solveSettingsChanged,
+        resetSolveSettings,
         error,
         picker,
         navigation,

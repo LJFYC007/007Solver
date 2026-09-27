@@ -77,7 +77,8 @@ def scenario(format_name, bet_level, selected, stack, board="Ks 9s 2d", pot=2.0,
         "board": board, "heroPosition": "UTG", "villainPosition": "BB", "heroActsFirst": False,
         "initialPot": pot, "heroStack": stack, "villainStack": stack, "iterations": iterations,
         # Half-pot fixture sizes avoid cross-engine chip-rounding differences.
-        "bettingTree": {**{street: {"bet": [50], "raise": [50]} for street in ("flop", "turn", "river")},
+        "bettingTree": {**{position: {street: {"bet": [50], "raise": [50]} for street in ("flop", "turn", "river")}
+                           for position in ("oop", "ip")},
                         "maxRaises": 2, "allInSpr": 0.15},
         "ranges": retained,
         "rangeSource": {"catalog": "resources/gtowizard-preflop", "sha256": digest, "solution": format_name,
@@ -90,8 +91,9 @@ fixtures = ROOT / "tests/fixtures"
 weighted = scenario("8max", 4, {"UTG": ["AKs", "QQ"], "BB": ["KK", "A5s"]}, 4.0)
 raised = scenario("6max", 4, {"UTG": ["KJs"], "BB": ["AQs"]}, 8.0)
 wide = scenario("8max", 2, None, 97.5, "Ac Kh Qs", 5.5, 1000)
-for street in ("flop", "turn", "river"):
-    wide["bettingTree"][street]["bet"] = [33, 125]
+for sizes in wide["bettingTree"]["oop"], wide["bettingTree"]["ip"]:
+    for street in ("flop", "turn", "river"):
+        sizes[street]["bet"] = [33, 125]
 # Keep small bets as distinct branches instead of replacing them with all-ins.
 wide["bettingTree"]["allInSpr"] = 0.0
 wide["rangeSource"]["reduction"] = (

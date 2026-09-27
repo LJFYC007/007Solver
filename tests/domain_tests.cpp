@@ -58,7 +58,7 @@ TEST(BettingRulesTest, UnequalStacksCapMaximumWithoutMakingItAllIn)
     EXPECT_EQ(legalActions.aggression->maximumAmountTo, Chips(40.0));
 
     game::BettingAbstraction abstraction{{}, 2, 0.0};
-    abstraction.streets[0].betSizes = {{game::BetSizeKind::PotFractionOfCurrentPot, 3, 4, Chips(0.0)}};
+    abstraction.players[state.playerToAct.Index()][0].betSizes = {{game::BetSizeKind::PotFractionOfCurrentPot, 3, 4, Chips(0.0)}};
     const std::vector<game::BettingAction> actions = abstraction.SelectActions(state, legalActions);
     const game::BettingAction& maximum = actions.back();
     EXPECT_EQ(maximum.AmountTo(), Chips(40.0));
@@ -70,7 +70,7 @@ TEST(BettingAbstractionTest, BetAndRaiseSizesUseExplicitAmountToAndPotBases)
     const game::PublicState root = MakeState();
     const game::LegalActionSet rootActions = game::GetLegalActions(root);
     game::BettingAbstraction abstraction{{}, 2, 0.0};
-    abstraction.streets[0].betSizes = {
+    abstraction.players[root.playerToAct.Index()][0].betSizes = {
         {game::BetSizeKind::PotFractionOfCurrentPot, 1, 2, Chips(0.0)},
         {game::BetSizeKind::AbsoluteAmountTo, 0, 1, Chips(7.0)},
     };
@@ -81,8 +81,7 @@ TEST(BettingAbstractionTest, BetAndRaiseSizesUseExplicitAmountToAndPotBases)
 
     const game::ActionApplication afterBet = game::ApplyAction(root, game::BettingAction(game::BettingActionKind::Bet, Chips(10.0)));
     const game::LegalActionSet facingActions = game::GetLegalActions(afterBet.state);
-    abstraction.streets[0].betSizes.clear();
-    abstraction.streets[0].raiseSizes = {
+    abstraction.players[afterBet.state.playerToAct.Index()][0].raiseSizes = {
         {game::RaiseSizeKind::PotFractionOfPotAfterCallAsRaiseBy, 1, 2, Chips(0.0)},
         {game::RaiseSizeKind::AbsoluteAmountTo, 0, 1, Chips(30.0)},
     };

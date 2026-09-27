@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import type { SolverStatus } from "../solver";
-import BettingTreeSettings, { SizePills } from "./BettingTreeSettings";
+import BettingTreeSettings from "./BettingTreeSettings";
 import { BoardCard } from "./PlayingCards";
 import type { PostflopScenario } from "../solver/preflop";
-import { STREETS, parseBettingTree, type BettingTreeDraft } from "../solver/bettingTree";
+import { parseBettingTree, type BettingTreeDraft } from "../solver/bettingTree";
 import { stopReasonLabel } from "../solver/study";
 
 export default function SolvePanel({
@@ -11,35 +11,33 @@ export default function SolvePanel({
     status,
     busy,
     changing,
-    ready,
     iterations,
     accuracyPercent,
+    settingsChanged,
     onSolve,
-    onResolve,
     onCancel,
+    onReset,
     onIterations,
     onAccuracyPercent,
     bettingTree,
     onBettingTree,
     scenario,
     matchup,
-    canSolve,
     error,
 }: {
     scenario?: PostflopScenario;
-    matchup?: { title: string; detail: string };
-    canSolve: boolean;
+    matchup?: { title: string; detail: string; oop: string; ip: string };
     error?: string;
     board: string[];
     status: SolverStatus;
     busy: boolean;
     changing: boolean;
-    ready: boolean;
     iterations: number;
     accuracyPercent: number;
+    settingsChanged: boolean;
     onSolve: () => void;
-    onResolve: () => void;
     onCancel: () => void;
+    onReset: () => void;
     onIterations: (value: number) => void;
     onAccuracyPercent: (value: number) => void;
     bettingTree: BettingTreeDraft;
@@ -112,6 +110,18 @@ export default function SolvePanel({
                     </span>
                 </div>
             )}
+            {/* Messages come before the settings, which can scroll far. */}
+            {error && (
+                <p className="solve-error" role="alert">
+                    {error}
+                </p>
+            )}
+            {status.state === "failed" && (
+                <p className="solve-error" role="alert">
+                    {status.message}
+                </p>
+            )}
+            {board.length !== 3 && <p className="solve-hint">Choose a flop in the action history to continue.</p>}
             {(busy || result) && (
                 <div className="solve-report">
                     <dl className="solve-metrics">
@@ -145,43 +155,22 @@ export default function SolvePanel({
                             <progress aria-label="Estimated solve time progress" max={1} value={timeProgress} />
                         </div>
                     )}
-                    {result && scenario && (
-                        <details className="solve-snapshot">
-                            <summary>Settings used</summary>
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Street</th>
-                                        <th>Bet %</th>
-                                        <th>Raise %</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {STREETS.map((street) => (
-                                        <tr key={street}>
-                                            <th>{street}</th>
-                                            <td>
-                                                <SizePills sizes={scenario.bettingTree[street].bet} />
-                                            </td>
-                                            <td>
-                                                <SizePills sizes={scenario.bettingTree[street].raise} />
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                            <p>
-                                {scenario.bettingTree.maxRaises}{" "}
-                                {scenario.bettingTree.maxRaises === 1 ? "raise" : "raises"} per street <span>·</span>{" "}
-                                All-in SPR {scenario.bettingTree.allInSpr}
-                            </p>
-                        </details>
-                    )}
                 </div>
             )}
             {!busy && (
-                <details className="solve-settings" open={!ready}>
-                    <summary>{ready ? "Next solve" : "Solve settings"}</summary>
+                <section className="solve-settings" aria-label="Solve settings">
+                    <header>
+                        <h3>Settings</h3>
+                        <button
+                            type="button"
+                            className="quiet-button"
+                            disabled={!settingsChanged || changing}
+                            title="Restore the default settings"
+                            onClick={onReset}
+                        >
+                            Reset
+                        </button>
+                    </header>
                     <div className="solve-targets">
                         <label>
                             Target exploitability
@@ -215,26 +204,12 @@ export default function SolvePanel({
                     </div>
                     <BettingTreeSettings
                         value={bettingTree}
+                        players={matchup}
                         disabled={changing}
                         error={treeError}
                         onChange={onBettingTree}
                     />
-                </details>
-            )}
-            {error && (
-                <p className="solve-error" role="alert">
-                    {error}
-                </p>
-            )}
-            {status.state === "failed" && (
-                <p className="solve-error" role="alert">
-                    {status.message}
-                </p>
-            )}
-            {!canSolve ? (
-                <p className="solve-hint">Complete a heads-up preflop line to solve.</p>
-            ) : (
-                board.length !== 3 && <p className="solve-hint">Choose a flop in the action history to continue.</p>
+                </section>
             )}
             <footer className="solve-footer">
                 {busy ? (
@@ -242,21 +217,14 @@ export default function SolvePanel({
                         Cancel solve
                     </button>
                 ) : (
-                    <>
-                        {ready && (
-                            <button type="button" className="quiet-button" disabled={changing} onClick={onSolve}>
-                                View solution
-                            </button>
-                        )}
-                        <button
-                            type="button"
-                            className="solve-button"
-                            disabled={!canSolve || board.length !== 3 || changing || !!treeError}
-                            onClick={ready ? onResolve : onSolve}
-                        >
-                            {ready ? "Solve again" : status.state === "failed" ? "Retry solve" : "Solve"}
-                        </button>
-                    </>
+                    <button
+                        type="button"
+                        className="solve-button"
+                        disabled={board.length !== 3 || changing || !!treeError}
+                        onClick={onSolve}
+                    >
+                        {result ? "Solve again" : status.state === "failed" ? "Retry solve" : "Solve"}
+                    </button>
                 )}
             </footer>
         </section>

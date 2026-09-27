@@ -56,7 +56,7 @@ Each chance outcome has probability `1 / (52 - boardCardCount - 4)` for a compat
 
 ## Betting tree
 
-The scenario's [`bettingTree`](io/ScenarioLoader.cpp) requires all three streets and applies to both players. Empty `bet` or `raise` arrays disable that aggression.
+The scenario's [`bettingTree`](io/ScenarioLoader.cpp) requires all three streets under both `oop` and `ip`; each player's sizes apply to that player's own bets and raises. `heroActsFirst` determines which player is OOP. Empty `bet` or `raise` arrays disable that player's aggression. `maxRaises` and `allInSpr` are shared.
 
 Bet percentages use the current pot. Raise percentages specify the additional raise above a call, as a fraction of the pot after calling. Amounts round half up to tenths of a chip, then clamp to the legal minimum and effective-stack maximum.
 

@@ -8,32 +8,63 @@
     "villainStack": 97.5,
     "iterations": 1000,
     "bettingTree": {
-        "flop": {
-            "bet": [
-                33,
-                125
-            ],
-            "raise": [
-                50
-            ]
+        "oop": {
+            "flop": {
+                "bet": [
+                    33,
+                    125
+                ],
+                "raise": [
+                    50
+                ]
+            },
+            "turn": {
+                "bet": [
+                    33,
+                    125
+                ],
+                "raise": [
+                    50
+                ]
+            },
+            "river": {
+                "bet": [
+                    33,
+                    125
+                ],
+                "raise": [
+                    50
+                ]
+            }
         },
-        "turn": {
-            "bet": [
-                33,
-                125
-            ],
-            "raise": [
-                50
-            ]
-        },
-        "river": {
-            "bet": [
-                33,
-                125
-            ],
-            "raise": [
-                50
-            ]
+        "ip": {
+            "flop": {
+                "bet": [
+                    33,
+                    125
+                ],
+                "raise": [
+                    50
+                ]
+            },
+            "turn": {
+                "bet": [
+                    33,
+                    125
+                ],
+                "raise": [
+                    50
+                ]
+            },
+            "river": {
+                "bet": [
+                    33,
+                    125
+                ],
+                "raise": [
+                    50
+                ]
+            }
         },
         "maxRaises": 2,
         "allInSpr": 0.0

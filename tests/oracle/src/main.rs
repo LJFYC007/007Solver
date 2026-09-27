@@ -65,11 +65,14 @@ fn game_for(scenario: &Value, scale: f32) -> PostFlopGame {
             .collect::<Vec<_>>()
             .join(", ")
     };
+    // Upstream orders per-player sizes as [OOP, IP].
     let sizes = |street: &str| {
-        let bets = percentages(&scenario["bettingTree"][street]["bet"]);
-        let raises = percentages(&scenario["bettingTree"][street]["raise"]);
-        let sizes = BetSizeOptions::try_from((bets.as_str(), raises.as_str())).unwrap();
-        [sizes.clone(), sizes]
+        ["oop", "ip"].map(|position| {
+            let street_sizes = &scenario["bettingTree"][position][street];
+            let bets = percentages(&street_sizes["bet"]);
+            let raises = percentages(&street_sizes["raise"]);
+            BetSizeOptions::try_from((bets.as_str(), raises.as_str())).unwrap()
+        })
     };
     let tree = TreeConfig {
         initial_state: BoardState::Flop,
@@ -225,9 +228,12 @@ fn main() {
         assert_eq!(scenario["initialPot"], 5.5);
         assert_eq!(scenario["heroStack"], 97.5);
         assert_eq!(scenario["bettingTree"]["allInSpr"], 0.0);
-        for street in ["flop", "turn", "river"] {
-            assert_eq!(scenario["bettingTree"][street]["bet"], json!([33, 125]));
-            assert_eq!(scenario["bettingTree"][street]["raise"], json!([50]));
+        for position in ["oop", "ip"] {
+            for street in ["flop", "turn", "river"] {
+                let sizes = &scenario["bettingTree"][position][street];
+                assert_eq!(sizes["bet"], json!([33, 125]));
+                assert_eq!(sizes["raise"], json!([50]));
+            }
         }
         let game = game_for(&scenario, scale);
         let uniform = metrics(&game, scale);

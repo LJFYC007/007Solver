@@ -66,7 +66,7 @@ std::vector<BettingAction> BettingAbstraction::SelectActions(const PublicState& 
     const AggressiveActionRange& range = *legalActions.aggression;
     if (range.kind == BettingActionKind::Raise && state.raiseCount >= maxRaises)
         return actions;
-    const auto& sizes = streets.at(static_cast<std::size_t>(state.street));
+    const auto& sizes = players[state.playerToAct.Index()].at(static_cast<std::size_t>(state.street));
     const auto addAmountTo = [&](core::Chips amountTo)
     {
         // A configured size always yields legal aggression, including a short all-in.

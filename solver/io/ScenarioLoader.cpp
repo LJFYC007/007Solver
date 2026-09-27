@@ -67,24 +67,33 @@ std::vector<std::int64_t> ParsePercentages(const Json& values, const std::string
     return percentages;
 }
 
-game::BettingAbstraction ParseBettingTree(const Json& json)
+game::BettingAbstraction ParseBettingTree(const Json& json, core::PlayerId outOfPositionPlayer)
 {
     const auto& tree = json.at("bettingTree");
     if (!tree.is_object())
         throw std::runtime_error("bettingTree must be an object");
-    std::array<game::StreetBettingSizes, 3> streets;
+    std::array<game::BettingAbstraction::PlayerBettingSizes, 2> players;
+    const std::array<std::pair<std::string, core::PlayerId>, 2> positions{
+        {{"oop", outOfPositionPlayer}, {"ip", outOfPositionPlayer.Other()}}
+    };
     const std::array<std::string, 3> streetNames{"flop", "turn", "river"};
-    for (std::size_t i = 0; i < streetNames.size(); ++i)
+    for (const auto& [position, player] : positions)
     {
-        const auto& name = streetNames[i];
-        const auto& street = tree.at(name);
-        if (!street.is_object())
-            throw std::runtime_error("bettingTree." + name + " must be an object");
-        auto& sizes = streets[i];
-        for (const auto percent : ParsePercentages(street.at("bet"), "bettingTree." + name + ".bet"))
-            sizes.betSizes.push_back({game::BetSizeKind::PotFractionOfCurrentPot, percent, 10000, {}});
-        for (const auto percent : ParsePercentages(street.at("raise"), "bettingTree." + name + ".raise"))
-            sizes.raiseSizes.push_back({game::RaiseSizeKind::PotFractionOfPotAfterCallAsRaiseBy, percent, 10000, {}});
+        const auto& playerTree = tree.at(position);
+        if (!playerTree.is_object())
+            throw std::runtime_error("bettingTree." + position + " must be an object");
+        for (std::size_t i = 0; i < streetNames.size(); ++i)
+        {
+            const auto field = "bettingTree." + position + "." + streetNames[i];
+            const auto& street = playerTree.at(streetNames[i]);
+            if (!street.is_object())
+                throw std::runtime_error(field + " must be an object");
+            auto& sizes = players[player.Index()][i];
+            for (const auto percent : ParsePercentages(street.at("bet"), field + ".bet"))
+                sizes.betSizes.push_back({game::BetSizeKind::PotFractionOfCurrentPot, percent, 10000, {}});
+            for (const auto percent : ParsePercentages(street.at("raise"), field + ".raise"))
+                sizes.raiseSizes.push_back({game::RaiseSizeKind::PotFractionOfPotAfterCallAsRaiseBy, percent, 10000, {}});
+        }
     }
     const auto& maxRaises = tree.at("maxRaises");
     if (!maxRaises.is_number_unsigned() || maxRaises.get<std::uint64_t>() > 2)
@@ -92,7 +101,7 @@ game::BettingAbstraction ParseBettingTree(const Json& json)
     const auto& allInSpr = tree.at("allInSpr");
     if (!allInSpr.is_number() || !std::isfinite(allInSpr.get<float>()) || allInSpr.get<float>() < 0.0f)
         throw std::runtime_error("bettingTree.allInSpr must be a finite non-negative number");
-    return {std::move(streets), maxRaises.get<std::uint32_t>(), allInSpr.get<float>()};
+    return {std::move(players), maxRaises.get<std::uint32_t>(), allInSpr.get<float>()};
 }
 } // namespace
 
@@ -124,6 +133,7 @@ Scenario ReadScenario(std::istream& input)
     const std::string heroPosition = json.at("heroPosition").get<std::string>();
     const std::string villainPosition = json.at("villainPosition").get<std::string>();
     const Json& ranges = json.at("ranges");
+    const core::PlayerId outOfPositionPlayer = json.at("heroActsFirst").get<bool>() ? core::PlayerId::Player0() : core::PlayerId::Player1();
     return {
         {
             core::ParseBoard(json.at("board").get<std::string>(), 3),
@@ -132,8 +142,8 @@ Scenario ReadScenario(std::istream& input)
                 ParseChips(json.at("heroStack"), "heroStack"),
                 ParseChips(json.at("villainStack"), "villainStack"),
             },
-            json.at("heroActsFirst").get<bool>() ? core::PlayerId::Player0() : core::PlayerId::Player1(),
-            ParseBettingTree(json),
+            outOfPositionPlayer,
+            ParseBettingTree(json, outOfPositionPlayer),
         },
         core::RangeSet(LoadRange(ranges, heroPosition), LoadRange(ranges, villainPosition)),
         iterations,

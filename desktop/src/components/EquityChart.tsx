@@ -50,7 +50,8 @@ export default function EquityChart({
             }),
         [data],
     );
-    const width = Math.max(1, size.width - 30),
+    // Margins leave room for the axis labels, including a centered "100" at the right end.
+    const width = Math.max(1, size.width - 36),
         height = Math.max(1, size.height - 29);
     const xAt = (x: number) => 25 + (x / 100) * width;
     const yAt = (equity: number) => 8 + (1 - equity) * height;

@@ -48,12 +48,14 @@ struct StreetBettingSizes
 
 struct BettingAbstraction
 {
-    BettingAbstraction(std::array<StreetBettingSizes, 3> streetSizes, std::uint32_t maximumRaises, float allInThreshold)
-        : streets(std::move(streetSizes)), maxRaises(maximumRaises), allInSpr(allInThreshold)
+    using PlayerBettingSizes = std::array<StreetBettingSizes, 3>;
+
+    BettingAbstraction(std::array<PlayerBettingSizes, 2> playerSizes, std::uint32_t maximumRaises, float allInThreshold)
+        : players(std::move(playerSizes)), maxRaises(maximumRaises), allInSpr(allInThreshold)
     {}
 
-    // Flop, turn, river; both players use the same sizes on each street.
-    std::array<StreetBettingSizes, 3> streets;
+    // Indexed by the acting player's PlayerId, then flop, turn, river.
+    std::array<PlayerBettingSizes, 2> players;
     // The opening bet does not count. At the cap, only passive actions remain.
     std::uint32_t maxRaises;
     // Replace a configured size when the effective SPR after a call is at most this value.
