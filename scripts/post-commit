@@ -1,0 +1,8 @@
+#!/bin/sh
+# Copy to .git/hooks/post-commit to redeploy the web server in the background after each commit
+# on main (README "Web server"). deploy-server.ps1 logs to build/deploy-server.log.
+[ "$(git rev-parse --abbrev-ref HEAD)" = main ] || exit 0
+repo=$(git rev-parse --show-toplevel)
+# The deploy outlives this commit, so it must not inherit the commit's index or repository.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX
+pwsh -NoProfile -Command "Start-Process pwsh -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', '$repo/scripts/deploy-server.ps1'"

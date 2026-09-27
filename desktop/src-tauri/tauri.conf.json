@@ -29,8 +29,11 @@
     "bundle": {
         "active": true,
         "targets": ["nsis"],
-        "icon": ["icons/icon.ico", "icons/icon.icns", "icons/icon.png"],
+        "icon": ["icons/icon.ico"],
         "shortDescription": "Desktop poker solver with live strategy exploration",
-        "externalBin": ["binaries/solver-service"]
+        "externalBin": ["binaries/solver-service", "binaries/solver-service-sse2"],
+        "resources": {
+            "binaries/*.dll": "./"
+        }
     }
 }

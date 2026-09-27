@@ -21,7 +21,9 @@ namespace
 void WriteMessage(std::ostream& output, const ServiceMessage& message)
 {
     output << ServiceMessageToJson(message) << '\n';
-    output.flush();
+    // A failed write means the client has closed the output and cannot use the solve.
+    if (!output.flush())
+        throw std::runtime_error("The client closed the service output");
 }
 } // namespace
 
@@ -162,7 +164,8 @@ int SolverService::Fail(const std::string& message)
 {
     ServiceMessage failed{ServiceMessageKind::Failed};
     failed.text = message;
-    WriteMessage(output_, failed);
+    // Unlike WriteMessage, this never throws: the failure may be a closed output.
+    output_ << ServiceMessageToJson(failed) << '\n' << std::flush;
     return 1;
 }
 } // namespace solver::service

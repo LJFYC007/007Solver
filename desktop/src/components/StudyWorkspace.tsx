@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { formatNumber } from "../solver";
+import { formatNumber, isDesktopApp } from "../solver";
 import { stopReasonLabel } from "../solver/study";
 import { useStudyWorkspace, type StudyWorkspaceProps } from "../hooks/useStudyWorkspace";
 import BoardPicker from "./BoardPicker";
@@ -12,11 +12,6 @@ import SolutionSettings from "./SolutionSettings";
 import PreflopTimeline from "./PreflopTimeline";
 import { PostflopTimeline } from "./PostflopTimeline";
 import WindowControls from "./WindowControls";
-
-// macOS draws its traffic lights over the header; other platforms use the custom caption buttons.
-const isMac = navigator.userAgent.includes("Mac OS");
-// The Vite page also renders in a plain browser, which has no window to control.
-const captionButtons = !isMac && "__TAURI_INTERNALS__" in window;
 
 export default function StudyWorkspace(props: StudyWorkspaceProps) {
     const { root, status, generation, changing } = props;
@@ -65,7 +60,7 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
     }, [preIndex, navigation.activeIndex, navigation.path.length, history.length, root]);
     return (
         <main className="app-shell">
-            <header className={`app-header${isMac ? " mac" : ""}`} data-tauri-drag-region>
+            <header className="app-header" data-tauri-drag-region>
                 <div className="brand" data-tauri-drag-region>
                     <div className="brand-mark" data-tauri-drag-region>
                         007
@@ -132,7 +127,8 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                         </div>
                     )}
                 </div>
-                {captionButtons && <WindowControls />}
+                {/* Browsers have no window for the caption buttons to control. */}
+                {isDesktopApp && <WindowControls />}
             </header>
             <div className="study-browser">
                 <SolutionSettings

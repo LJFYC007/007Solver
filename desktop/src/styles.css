@@ -88,9 +88,6 @@ summary:focus-visible {
     user-select: none;
     -webkit-user-select: none;
 }
-.app-header.mac {
-    padding: 0 13px 0 80px;
-}
 .brand {
     display: flex;
     flex: 1;
@@ -1576,8 +1573,8 @@ summary:focus-visible {
     position: relative;
     margin-right: 6px;
 }
-.app-header.mac .solver-menu {
-    margin-right: 0;
+.solver-menu:last-child {
+    margin-right: 13px;
 }
 .window-controls {
     display: flex;

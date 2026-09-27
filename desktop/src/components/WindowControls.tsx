@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-// Caption buttons for the undecorated window; macOS keeps its native traffic lights instead.
+// Caption buttons for the undecorated window.
 export default function WindowControls() {
     const [maximized, setMaximized] = useState(false);
     useEffect(() => {

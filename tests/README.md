@@ -1,12 +1,12 @@
 # Solver tests
 
-Run commands from the repository root using the [build environment](../README.md#requirements). Append `.exe` to Windows executable paths.
+Run commands from the repository root using the [build environment](../README.md#requirements).
 
 ## Correctness
 
 The [correctness suite](../README.md#checks) runs offline against checked-in references and writes `build/release/solver-test-results.json`. CTest also runs [CLI end-to-end checks](cli_e2e.py) for solving, navigation, queries and errors, using four CPU workers.
 
-GPU cases skip without a supported CUDA device, so they always skip on macOS. Check the device and skipped cases in the JSON report or `ctest -V`.
+GPU cases skip without a supported CUDA device. Check the device and skipped cases in the JSON report or `ctest -V`.
 
 The backend parity [input](fixtures/backend-parity.json) has no independent answer; the CPU backend is its reference. It must keep splitting street regions into several GPU batches.
 
@@ -27,7 +27,7 @@ For Visual Studio CPU sampling with symbols, use the separate RelWithDebInfo bui
 ```sh
 cmake --preset RelWithDebInfo
 cmake --build --preset RelWithDebInfo --target 007SolverBenchmark
-./build/relwithdebinfo/007SolverBenchmark --device=cpu
+./build/relwithdebinfo/007SolverBenchmark.exe --device=cpu
 ```
 
 Direct invocation accepts `--report=<new-json-path>`, `--iterations=<count>`, `--workers=<count>` and `--device=cpu|gpu|auto`. It defaults to CPU; `--workers` affects only CPU training. See [benchmark.cpp](benchmark.cpp) for workload and report definitions.
@@ -38,27 +38,21 @@ Passing checks the independent uniform reference (`2e-6` initial-pot tolerance),
 
 `--convergence` records periodic checkpoints; `--stop-at-accuracy` also permits early stopping under the [CPU certification contract](../solver/ARCHITECTURE.md#training-and-memory). The exported snapshot is independently evaluated. Checkpoint time is separate from training time.
 
-Compare runs without competing builds/solves, holding inputs, references, update budget, checkpoint mode and CPU workers constant. Compare achieved exploitability alongside time, and record the Git revision and uncommitted changes externally. Process memory metrics differ across platforms and exclude dedicated GPU allocations; the solver estimate covers combined host/device allocations.
+Compare runs without competing builds/solves, holding inputs, references, update budget, checkpoint mode and CPU workers constant. Compare achieved exploitability alongside time, and record the Git revision and uncommitted changes externally. Process memory metrics exclude dedicated GPU allocations; the solver estimate covers combined host/device allocations.
 
 ## Updating inputs and references
 
 All ranges derive from [the captured catalog](../resources/gtowizard-preflop/); fixture subsets and pot/stack provenance are recorded in each input's `rangeSource`. Edit scenario definitions in [sync-preflop-fixtures.py](../scripts/sync-preflop-fixtures.py), then regenerate inputs:
 
 ```sh
-python3 scripts/sync-preflop-fixtures.py
+python scripts/sync-preflop-fixtures.py
 ```
 
 The script updates inputs only. Regenerate answers with the independent [Rust oracle](oracle/src/main.rs), pinned by [Cargo.toml](oracle/Cargo.toml) and [Cargo.lock](oracle/Cargo.lock).
 
 The pinned upstream code needs these Rust lint allowances for reference generation:
 
-```sh
-# macOS
-export RUSTFLAGS='-A dangerous_implicit_autorefs -A mismatched_lifetime_syntaxes'
-```
-
 ```powershell
-# Windows
 $env:RUSTFLAGS = '-A dangerous_implicit_autorefs -A mismatched_lifetime_syntaxes'
 ```
 

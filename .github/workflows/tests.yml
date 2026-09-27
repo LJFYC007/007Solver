@@ -7,10 +7,7 @@ permissions:
 
 jobs:
   test:
-    strategy:
-      matrix:
-        os: [windows-2022, macos-15]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-2022
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -18,11 +15,6 @@ jobs:
           submodules: recursive
 
       - uses: ilammy/msvc-dev-cmd@v1
-        if: runner.os == 'Windows'
-
-      - name: Install macOS build dependencies
-        if: runner.os == 'macOS'
-        run: brew install ninja libomp
 
       - name: Configure Release
         run: cmake --preset Release

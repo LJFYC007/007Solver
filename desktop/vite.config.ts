@@ -15,6 +15,8 @@ export default defineConfig({
         host: "127.0.0.1",
         port: 1420,
         strictPort: true,
+        // The browser build's solver requests go to `007solver --serve`.
+        proxy: { "/api": "http://127.0.0.1:8007" },
         watch: {
             ignored: ["**/src-tauri/**"],
         },

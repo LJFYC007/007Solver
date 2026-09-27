@@ -82,6 +82,8 @@ export interface SolveProgress {
 
 export type SolverStatus =
     | { state: "idle" }
+    // Web sessions wait here while another solve holds the GPU.
+    | { state: "queued" }
     | {
           state: "starting";
       }

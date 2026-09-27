@@ -82,7 +82,9 @@ export default function SolvePanel({
                   : "Training strategy"
             : status.state === "buildingTree"
               ? "Preparing solution"
-              : "Starting solver";
+              : status.state === "queued"
+                ? "Waiting for GPU"
+                : "Starting solver";
     return (
         <section className="solve-setup" aria-label="Postflop solver">
             <header className="solve-heading">

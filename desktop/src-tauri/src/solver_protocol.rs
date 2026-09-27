@@ -70,6 +70,8 @@ pub(crate) struct Ready {
 #[serde(rename_all = "camelCase", tag = "state")]
 pub(crate) enum SolverStatus {
     Idle,
+    // Only web sessions queue, waiting for the GPU (see `server`).
+    Queued,
     Starting,
     BuildingTree(BuildingTree),
     Solving(Solving),

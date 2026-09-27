@@ -8,9 +8,9 @@ file(
 )
 list(APPEND SOLVER_LIB_SOURCES engine/gpu/GpuPlan.cpp)
 
-option(SOLVER_ENABLE_GPU "Build the CUDA DCFR backend on Windows when available" ON)
+option(SOLVER_ENABLE_GPU "Build the CUDA DCFR backend when available" ON)
 set(SOLVER_GPU_BACKEND "CPU")
-if(SOLVER_ENABLE_GPU AND WIN32)
+if(SOLVER_ENABLE_GPU)
     include(CheckLanguage)
     check_language(CUDA)
     if(CMAKE_CUDA_COMPILER)
@@ -20,24 +20,6 @@ if(SOLVER_ENABLE_GPU AND WIN32)
     endif()
 endif()
 message(STATUS "DCFR backend: ${SOLVER_GPU_BACKEND} (recursive CPU always available)")
-if(APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-    # Homebrew's libomp is keg-only; let FindOpenMP see its headers and link its
-    # static runtime so packages do not depend on a Homebrew installation.
-    find_program(SOLVER_BREW_EXECUTABLE brew)
-    if(SOLVER_BREW_EXECUTABLE)
-        execute_process(
-            COMMAND ${SOLVER_BREW_EXECUTABLE} --prefix libomp
-            OUTPUT_VARIABLE SOLVER_LIBOMP_PREFIX
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_QUIET
-            RESULT_VARIABLE SOLVER_LIBOMP_RESULT
-        )
-        if(SOLVER_LIBOMP_RESULT EQUAL 0)
-            list(APPEND CMAKE_PREFIX_PATH "${SOLVER_LIBOMP_PREFIX}")
-            set(OpenMP_libomp_LIBRARY "${SOLVER_LIBOMP_PREFIX}/lib/libomp.a" CACHE FILEPATH "OpenMP runtime" FORCE)
-        endif()
-    endif()
-endif()
 find_package(OpenMP REQUIRED COMPONENTS CXX)
 
 file(
@@ -100,53 +82,37 @@ endfunction()
 add_solver_service("" /arch:AVX2)
 
 # Tauri sidecars are named for the native build target, not the executable suffix alone.
-if(APPLE)
-    set(SOLVER_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
-    if(CMAKE_OSX_ARCHITECTURES)
-        set(SOLVER_ARCH "${CMAKE_OSX_ARCHITECTURES}")
-    endif()
-    if(SOLVER_ARCH STREQUAL "arm64")
-        set(SOLVER_TARGET_TRIPLE "aarch64-apple-darwin")
-    elseif(SOLVER_ARCH STREQUAL "x86_64")
-        set(SOLVER_TARGET_TRIPLE "x86_64-apple-darwin")
-    else()
-        message(FATAL_ERROR "Build for one macOS architecture: arm64 or x86_64")
-    endif()
-elseif(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64)$")
+if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64)$")
     set(SOLVER_TARGET_TRIPLE "x86_64-pc-windows-msvc")
 else()
-    message(FATAL_ERROR "Supported desktop targets: macOS arm64/x86_64 and Windows x86_64 MSVC")
+    message(FATAL_ERROR "The supported desktop target is Windows x86_64 MSVC")
+endif()
+
+# The desktop runs this build on CPUs that lack the AVX2, FMA or BMI instructions
+# /arch:AVX2 code may use.
+add_solver_service(_sse2 /arch:SSE2)
+# The installer carries the VC++ runtime DLLs that the services import.
+set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP ON)
+set(CMAKE_INSTALL_OPENMP_LIBRARIES ON)
+include(InstallRequiredSystemLibraries)
+list(FILTER CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS INCLUDE REGEX "/(msvcp140[^/]*|vcruntime140(_1)?|vcomp140)\\.dll$")
+if(NOT CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS MATCHES "/vcruntime140\\.dll" OR NOT CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS MATCHES "/vcomp140\\.dll")
+    message(FATAL_ERROR "Missing VC++ runtime DLLs; found: ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}")
 endif()
 
 set(SOLVER_SERVICE_BUNDLE_DIR "${PROJECT_SOURCE_DIR}/desktop/src-tauri/binaries")
-set(SOLVER_STAGED_TARGETS solver_service)
-set(SOLVER_STAGE_COMMANDS
+add_custom_target(
+    stage_solver_service ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory "${SOLVER_SERVICE_BUNDLE_DIR}"
     COMMAND
         ${CMAKE_COMMAND} -E copy_if_different
         "$<TARGET_FILE:solver_service>"
         "${SOLVER_SERVICE_BUNDLE_DIR}/solver-service-${SOLVER_TARGET_TRIPLE}${CMAKE_EXECUTABLE_SUFFIX}"
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:solver_service_sse2>"
+        "${SOLVER_SERVICE_BUNDLE_DIR}/solver-service-sse2-${SOLVER_TARGET_TRIPLE}${CMAKE_EXECUTABLE_SUFFIX}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS} "${SOLVER_SERVICE_BUNDLE_DIR}"
+    DEPENDS solver_service solver_service_sse2
+    VERBATIM
 )
-if(MSVC)
-    # The desktop runs this build on CPUs that lack the AVX2, FMA or BMI instructions
-    # /arch:AVX2 code may use.
-    add_solver_service(_sse2 /arch:SSE2)
-    list(APPEND SOLVER_STAGED_TARGETS solver_service_sse2)
-    # The installer carries the VC++ runtime DLLs that the services import.
-    set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP ON)
-    set(CMAKE_INSTALL_OPENMP_LIBRARIES ON)
-    include(InstallRequiredSystemLibraries)
-    list(FILTER CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS INCLUDE REGEX "/(msvcp140[^/]*|vcruntime140(_1)?|vcomp140)\\.dll$")
-    if(NOT CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS MATCHES "/vcruntime140\\.dll" OR NOT CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS MATCHES "/vcomp140\\.dll")
-        message(FATAL_ERROR "Missing VC++ runtime DLLs; found: ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}")
-    endif()
-    list(
-        APPEND SOLVER_STAGE_COMMANDS
-        COMMAND
-            ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:solver_service_sse2>"
-            "${SOLVER_SERVICE_BUNDLE_DIR}/solver-service-sse2-${SOLVER_TARGET_TRIPLE}${CMAKE_EXECUTABLE_SUFFIX}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS} "${SOLVER_SERVICE_BUNDLE_DIR}"
-    )
-endif()
-add_custom_target(stage_solver_service ALL ${SOLVER_STAGE_COMMANDS} DEPENDS ${SOLVER_STAGED_TARGETS} VERBATIM)
