@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { type EquityReport, type Player, formatNumber } from "../solver";
+import { PLAYERS, equityRealization } from "../solver/display";
 import { postflopOrder } from "../solver/preflop";
 import type { SpotSeat } from "../solver/study";
-import { useSolverEquity } from "../hooks/useSolverEquity";
+import { type ReportCache, useNodeReport } from "../hooks/useNodeReport";
 import EquityChart from "./EquityChart";
 import { BoardCard } from "./PlayingCards";
+import Tabs from "./Tabs";
 
 export interface SpotSummary {
     seats: SpotSeat[];
@@ -19,12 +21,11 @@ export interface SpotSummary {
     onSeat?: (seat: string) => void;
     onBoard?: () => void;
 }
-const players: Player[] = ["villain", "hero"];
 const tabs = ["Overview", "Table", "Equity chart"] as const;
 
 function PlayerStats({ spot, data }: { spot: SpotSummary; data?: EquityReport }) {
     const seats = spot.players
-        ? players.map((player) => ({
+        ? PLAYERS.map((player) => ({
               player,
               seat: spot.seats.find((seat) => seat.position === spot.players![player]),
           }))
@@ -38,8 +39,7 @@ function PlayerStats({ spot, data }: { spot: SpotSummary; data?: EquityReport })
                 if (!seat) return null;
                 const equity = player ? data?.players[player].equity : undefined;
                 const ev = spot.showdown && equity != null ? equity * spot.pot : seat.ev;
-                const eqr =
-                    ev != null && equity != null && equity > 0 && spot.pot > 0 ? ev / (equity * spot.pot) : undefined;
+                const eqr = equityRealization(ev, equity, spot.pot);
                 return (
                     <article key={seat.position}>
                         <header>
@@ -71,9 +71,9 @@ function PlayerStats({ spot, data }: { spot: SpotSummary; data?: EquityReport })
     );
 }
 
-export default function SpotOverview({ spot, generation }: { spot: SpotSummary; generation?: number }) {
+export default function SpotOverview({ spot, equityCache }: { spot: SpotSummary; equityCache: ReportCache<"equity"> }) {
     const [tab, setTab] = useState<(typeof tabs)[number]>("Overview");
-    const result = useSolverEquity(generation, spot.nodeId, tab !== "Overview");
+    const result = useNodeReport(equityCache, spot.nodeId, tab !== "Overview");
     const data = result?.data;
     const potOdds = spot.toCall && spot.toCall > 0 ? spot.toCall / (spot.pot + spot.toCall) : undefined;
     const blindOrder = postflopOrder(spot.seats.map((s) => s.position));
@@ -94,34 +94,14 @@ export default function SpotOverview({ spot, generation }: { spot: SpotSummary; 
     const basePot = spot.basePot ?? spot.pot;
     return (
         <section className="overview-panel">
-            <div className="inspector-tabs" role="tablist" aria-label="Spot information">
-                {tabs.map((name, index) => (
-                    <button
-                        id={`spot-tab-${name.replace(" ", "-")}`}
-                        aria-controls="spot-information"
-                        type="button"
-                        key={name}
-                        role="tab"
-                        aria-selected={tab === name}
-                        tabIndex={tab === name ? 0 : -1}
-                        onClick={() => setTab(name)}
-                        onKeyDown={(event) => {
-                            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-                            event.preventDefault();
-                            const next = (index + (event.key === "ArrowLeft" ? -1 : 1) + tabs.length) % tabs.length;
-                            setTab(tabs[next]);
-                            (event.currentTarget.parentElement?.children[next] as HTMLButtonElement)?.focus();
-                        }}
-                    >
-                        {name}
-                    </button>
-                ))}
-            </div>
-            <div
-                className={`spot-body${tab === "Overview" ? "" : " expanded"}`}
+            <Tabs
+                tabs={tabs}
+                selected={tab}
+                onSelect={setTab}
+                label="Spot information"
                 id="spot-information"
-                role="tabpanel"
-                aria-labelledby={`spot-tab-${tab.replace(" ", "-")}`}
+                className="inspector-tabs"
+                panelClassName={`spot-body${tab === "Overview" ? "" : " expanded"}`}
             >
                 {tab === "Overview" ? (
                     <div className="overview-row">
@@ -224,7 +204,7 @@ export default function SpotOverview({ spot, generation }: { spot: SpotSummary; 
                         <PlayerStats spot={spot} data={data} />
                     </div>
                 )}
-            </div>
+            </Tabs>
         </section>
     );
 }

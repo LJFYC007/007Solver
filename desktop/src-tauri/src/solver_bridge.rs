@@ -1,5 +1,5 @@
 use crate::solver_protocol::{
-    encode_query, parse_service_message, ServiceEvent, ServiceMessage, SolverStatus,
+    encode_query, parse_service_message, QueryKind, ServiceEvent, ServiceMessage, SolverStatus,
 };
 use serde_json::Value;
 use std::{
@@ -97,7 +97,7 @@ impl SolverBridge {
         &self,
         node_id: i32,
         generation: u64,
-        command: &'static str,
+        kind: QueryKind,
     ) -> Result<Value, String> {
         let receiver = {
             let mut state = self.0.lock().unwrap();
@@ -109,7 +109,7 @@ impl SolverBridge {
             }
             let request_id = state.next_request_id;
             state.next_request_id += 1;
-            let mut request = encode_query(request_id, node_id, command)?;
+            let mut request = encode_query(request_id, node_id, kind)?;
             request.push(b'\n');
             let (sender, receiver) = oneshot::channel();
             state
@@ -148,10 +148,11 @@ fn handle_protocol_message(state: &mut BridgeState, line: &[u8]) {
         ServiceMessage::Response(response) => {
             if let Some(sender) = state.pending.remove(&response.request_id) {
                 let result = if response.ok {
-                    response
-                        .node
-                        .or(response.equity)
-                        .ok_or_else(|| "Successful solver response has no data".to_owned())
+                    let mut report = response.report.into_values();
+                    match (report.next(), report.next()) {
+                        (Some(value), None) => Ok(value),
+                        _ => Err("Successful solver response has no single report".to_owned()),
+                    }
                 } else {
                     Err(response
                         .error

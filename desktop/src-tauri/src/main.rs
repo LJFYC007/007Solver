@@ -6,7 +6,7 @@ mod solver_protocol;
 
 use serde_json::Value;
 use solver_bridge::SolverBridge;
-use solver_protocol::SolverStatus;
+use solver_protocol::{QueryKind, SolverStatus};
 use tauri::{Manager, State};
 
 #[tauri::command]
@@ -15,21 +15,13 @@ fn solver_status(state: State<'_, SolverBridge>) -> SolverStatus {
 }
 
 #[tauri::command]
-async fn query_solver_node(
+async fn query_solver(
+    kind: QueryKind,
     node_id: i32,
     generation: u64,
     state: State<'_, SolverBridge>,
 ) -> Result<Value, String> {
-    state.query(node_id, generation, "query_node").await
-}
-
-#[tauri::command]
-async fn query_solver_equity(
-    node_id: i32,
-    generation: u64,
-    state: State<'_, SolverBridge>,
-) -> Result<Value, String> {
-    state.query(node_id, generation, "query_equity").await
+    state.query(node_id, generation, kind).await
 }
 
 #[tauri::command]
@@ -63,8 +55,7 @@ fn main() {
         .manage(SolverBridge::default())
         .invoke_handler(tauri::generate_handler![
             solver_status,
-            query_solver_node,
-            query_solver_equity,
+            query_solver,
             solve_scenario,
             cancel_solver
         ])

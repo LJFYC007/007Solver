@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -93,9 +93,30 @@ pub(crate) enum ServiceEvent {
 pub(crate) struct ServiceResponse {
     pub request_id: u64,
     pub ok: bool,
-    pub node: Option<Value>,
-    pub equity: Option<Value>,
     pub error: Option<String>,
+    // A successful query's report, its only field besides the request ID and status.
+    #[serde(flatten)]
+    pub report: Map<String, Value>,
+}
+
+// The service's per-node reports. Their names, which also key the response's report, are what
+// the Tauri command and the server route accept.
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum QueryKind {
+    Node,
+    Equity,
+    OpponentEv,
+}
+
+impl QueryKind {
+    fn command(self) -> &'static str {
+        match self {
+            QueryKind::Node => "query_node",
+            QueryKind::Equity => "query_equity",
+            QueryKind::OpponentEv => "query_opponent_ev",
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -121,11 +142,11 @@ pub(crate) fn parse_service_message(line: &[u8]) -> Result<ServiceMessage, Strin
 pub(crate) fn encode_query(
     request_id: u64,
     node_id: i32,
-    command: &'static str,
+    kind: QueryKind,
 ) -> Result<Vec<u8>, String> {
     serde_json::to_vec(&QueryNodeRequest {
         request_id,
-        command,
+        command: kind.command(),
         node_id,
     })
     .map_err(|error| error.to_string())

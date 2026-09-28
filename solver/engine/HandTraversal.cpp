@@ -709,13 +709,14 @@ std::vector<float> HandTraversal::EvaluateSnapshot(
     std::size_t player,
     const std::vector<float>& opponentReach,
     const std::vector<float>& scales,
-    Evaluation evaluation
+    Evaluation evaluation,
+    std::vector<float>* actionValues
 ) const
 {
     WalkContext context{player, scales.data()};
     context.strategy = &strategy;
     context.bestResponse = evaluation == Evaluation::BestResponse;
-    return EvaluateHands(context, opponentReach);
+    return EvaluateHands(context, opponentReach, actionValues);
 }
 
 std::vector<float> HandTraversal::EvaluateAverageBestResponse(
@@ -731,12 +732,22 @@ std::vector<float> HandTraversal::EvaluateAverageBestResponse(
     return EvaluateHands(context, opponentReach);
 }
 
-std::vector<float> HandTraversal::EvaluateHands(const WalkContext& context, const std::vector<float>& opponentReach) const
+std::vector<float> HandTraversal::EvaluateHands(
+    const WalkContext& context,
+    const std::vector<float>& opponentReach,
+    std::vector<float>* actionValues
+) const
 {
     auto workers = MakeWorkers(CpuWorkerCount());
     auto workspace = MakeWorkspace(!workers.empty());
-    std::vector<float> values(hands[context.player].size());
+    const auto count = hands[context.player].size();
+    std::vector<float> values(count);
     WalkTasks(context, workspace, opponentReach.data(), values.data(), workers);
+    // The root decision's child rows (depth 0) survive the walk; a fresh workspace keeps them zero when
+    // the walk skips the root for lack of opponent reach.
+    const Node& root = nodes.front();
+    if (actionValues && root.kind == Kind::Decision && root.actor == context.player)
+        actionValues->assign(workspace.childValues.begin(), workspace.childValues.begin() + root.childCount * count);
     return values;
 }
 

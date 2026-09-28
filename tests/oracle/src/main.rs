@@ -170,21 +170,33 @@ fn query_reference(game: &mut PostFlopGame, scenario: &Value, path: Value) -> Va
     game.cache_normalized_weights();
     let player = game.current_player();
     let evs = game.expected_values(player);
+    // Action-major: each action's EV when the hand takes it and then follows the strategy.
+    let action_evs = game.expected_values_detail(player);
     let strategy = game.strategy();
     let cards = game.private_cards(player);
     let board = game.current_board();
+    let actions = game.available_actions().len();
+    let on_board = |&(a, b): &(Card, Card)| board.contains(&a) || board.contains(&b);
+    let marginal = |player: usize, i: usize| {
+        game.normalized_weights(player)[i] / (joint_weight * chance_factor)
+    };
     let hands: Vec<_> = cards
         .iter()
         .enumerate()
-        .filter(|(_, (a, b))| !board.contains(a) && !board.contains(b))
+        .filter(|(_, hand)| !on_board(hand))
         .map(|(i, &hand)| {
-            let mass = game.normalized_weights(player)[i] / (joint_weight * chance_factor);
-            let probabilities: Vec<_> = if mass > 0.0 {
-                (0..game.available_actions().len())
-                    .map(|a| strategy[a * cards.len() + i])
-                    .collect()
+            let mass = marginal(player, i);
+            let (probabilities, action_evs): (Vec<_>, Vec<_>) = if mass > 0.0 {
+                (0..actions)
+                    .map(|a| {
+                        (
+                            strategy[a * cards.len() + i],
+                            action_evs[a * cards.len() + i] / SCALE,
+                        )
+                    })
+                    .unzip()
             } else {
-                vec![]
+                (vec![], vec![])
             };
             json!({
                 "cards": hand_name(hand),
@@ -193,6 +205,23 @@ fn query_reference(game: &mut PostFlopGame, scenario: &Value, path: Value) -> Va
                 "marginalReachMass": mass,
                 "nodeStrategyEv": if mass > 0.0 { Some(evs[i] / SCALE) } else { None },
                 "strategy": probabilities,
+                "actionEvs": action_evs,
+            })
+        })
+        .collect();
+    let opponent = player ^ 1;
+    let opponent_evs = game.expected_values(opponent);
+    let opponent_hands: Vec<_> = game
+        .private_cards(opponent)
+        .iter()
+        .enumerate()
+        .filter(|(_, hand)| !on_board(hand))
+        .map(|(i, &hand)| {
+            let mass = marginal(opponent, i);
+            json!({
+                "cards": hand_name(hand),
+                "marginalReachMass": mass,
+                "nodeStrategyEv": if mass > 0.0 { Some(opponent_evs[i] / SCALE) } else { None },
             })
         })
         .collect();
@@ -207,6 +236,7 @@ fn query_reference(game: &mut PostFlopGame, scenario: &Value, path: Value) -> Va
         "stacks": [scenario["heroStack"].as_f64().unwrap() - bets[1] as f64 / SCALE as f64,
                    scenario["villainStack"].as_f64().unwrap() - bets[0] as f64 / SCALE as f64],
         "hands": hands,
+        "opponentHands": opponent_hands,
     })
 }
 

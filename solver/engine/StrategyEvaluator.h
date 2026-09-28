@@ -23,9 +23,20 @@ ExploitabilityMetrics EvaluateAverageStrategy(const HandTraversal& traversal, co
 // Weights each player's game-root best-response hand values by range weight and compatible opponent mass.
 ExploitabilityMetrics RootExploitability(const HandBoardData& tables, const std::array<std::vector<float>, 2>& bestResponseValues);
 
-// Fixed-policy net EV at node for board-compatible hands with positive opponent reach; the
-// caller decides eligibility from joint reach. Board tables, traversal nodes and workspaces
-// stay query-local.
-std::map<core::HoleCards, float> EvaluateNodeStrategy(const SolveResult& result, game::NodeId node, core::PlayerId player);
+struct NodeStrategyValue
+{
+    float ev = 0.0f;
+    // When the player acts at the node: the EV of taking each action and then following the policy.
+    std::vector<float> actionEvs;
+};
+
+// Fixed-policy net EV at the traversal's root node for board-compatible hands with positive
+// opponent reach; the caller decides eligibility from joint reach. The traversal must come from
+// result's problem, rooted at the queried node. Workspaces stay call-local.
+std::map<core::HoleCards, NodeStrategyValue> EvaluateNodeStrategy(
+    const SolveResult& result,
+    const HandTraversal& traversal,
+    core::PlayerId player
+);
 
 } // namespace solver::engine

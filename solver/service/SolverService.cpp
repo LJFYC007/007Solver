@@ -140,6 +140,8 @@ int SolverService::Run(const std::string& scenarioPath, engine::ComputeDevice de
                 response.requestId = request.requestId;
                 if (request.kind == QueryKind::Equity)
                     response.equity = analysis.QueryEquity(*request.nodeId);
+                else if (request.kind == QueryKind::OpponentEv)
+                    response.opponentEv = analysis.QueryOpponentEv(*request.nodeId);
                 else
                     response.node = analysis.QueryNode(*request.nodeId);
                 WriteMessage(output_, response);

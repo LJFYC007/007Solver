@@ -61,22 +61,31 @@ ExploitabilityMetrics EvaluateAverageStrategy(const HandTraversal& traversal, co
     return EvaluateBestResponses(traversal, nullptr, strategySums);
 }
 
-std::map<core::HoleCards, float> EvaluateNodeStrategy(const SolveResult& result, game::NodeId node, core::PlayerId player)
+std::map<core::HoleCards, NodeStrategyValue> EvaluateNodeStrategy(
+    const SolveResult& result,
+    const HandTraversal& traversal,
+    core::PlayerId player
+)
 {
-    const HandTraversal traversal(result.Problem(), node);
     const auto& strategy = result.Strategy();
     const auto reach = traversal.OpponentReachAtRoot(strategy, player.Other().Index());
     const auto scales = ValueScales(traversal.CompatibleMasses(player.Index(), reach.data()));
-    const auto values = traversal.EvaluateSnapshot(strategy, player.Index(), reach, scales, HandTraversal::Evaluation::StrategyValue);
-    std::map<core::HoleCards, float> evs;
-    for (std::size_t hand = 0; hand < values.size(); ++hand)
+    std::vector<float> actionValues;
+    const auto values =
+        traversal.EvaluateSnapshot(strategy, player.Index(), reach, scales, HandTraversal::Evaluation::StrategyValue, &actionValues);
+    const std::size_t count = values.size();
+    std::map<core::HoleCards, NodeStrategyValue> evs;
+    for (std::size_t hand = 0; hand < count; ++hand)
     {
-        if (scales[hand] > 0.0f)
-        {
-            // Undo the subtree's zero-sum shift for either player: the pot at the
-            // queried node is dead money; this restores net payoff from that node.
-            evs.emplace(traversal.hands[player.Index()][hand].cards, values[hand] + traversal.rootHalfPot);
-        }
+        if (scales[hand] <= 0.0f)
+            continue;
+        // Undo the subtree's zero-sum shift for either player: the pot at the queried node is
+        // dead money; this restores net payoff from that node. Action values share the frame
+        // and include the action's own contribution.
+        NodeStrategyValue value{values[hand] + traversal.rootHalfPot, {}};
+        for (std::size_t action = 0; action < actionValues.size() / count; ++action)
+            value.actionEvs.push_back(actionValues[action * count + hand] + traversal.rootHalfPot);
+        evs.emplace(traversal.hands[player.Index()][hand].cards, std::move(value));
     }
     return evs;
 }

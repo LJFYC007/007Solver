@@ -5,7 +5,7 @@ import {
     type SolverStatus,
     cancelSolver,
     getSolverStatus,
-    querySolverNode,
+    querySolver,
     solveScenario,
 } from "./solver";
 import type { PostflopScenario } from "./solver/preflop";
@@ -69,7 +69,7 @@ export default function App() {
                 if (cancelled || epoch !== request.current) return;
                 setStatus(next);
                 if (next.state === "ready") {
-                    const value = await querySolverNode(next.rootNodeId, activeGeneration);
+                    const value = await querySolver("node", next.rootNodeId, activeGeneration);
                     if (!cancelled && epoch === request.current) setRoot(value);
                 } else if (next.state !== "failed") timer = window.setTimeout(() => void poll(), 500);
             } catch (error) {

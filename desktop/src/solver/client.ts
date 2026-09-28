@@ -1,5 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { EquityReport, SolverNode, SolverStatus } from "./types";
+import type { EquityReport, OpponentEvReport, SolverNode, SolverStatus } from "./types";
 import type { PostflopScenario } from "./preflop";
 
 // The desktop app calls its bridge in process; browsers reach `007solver --serve`, which keeps
@@ -53,14 +53,16 @@ export function getSolverStatus(): Promise<SolverStatus> {
     return isDesktopApp ? invoke<SolverStatus>("solver_status") : request<SolverStatus>("/status");
 }
 
-export function querySolverNode(nodeId: number, generation: number): Promise<SolverNode> {
-    return isDesktopApp
-        ? invoke<SolverNode>("query_solver_node", { nodeId, generation })
-        : request<SolverNode>(`/nodes/${nodeId}?generation=${generation}`);
+/** The service's per-node reports by query kind. */
+export interface SolverReports {
+    node: SolverNode;
+    equity: EquityReport;
+    opponentEv: OpponentEvReport;
 }
+export type QueryKind = keyof SolverReports;
 
-export function querySolverEquity(nodeId: number, generation: number): Promise<EquityReport> {
+export function querySolver<K extends QueryKind>(kind: K, nodeId: number, generation: number) {
     return isDesktopApp
-        ? invoke<EquityReport>("query_solver_equity", { nodeId, generation })
-        : request<EquityReport>(`/equity/${nodeId}?generation=${generation}`);
+        ? invoke<SolverReports[K]>("query_solver", { kind, nodeId, generation })
+        : request<SolverReports[K]>(`/reports/${kind}/${nodeId}?generation=${generation}`);
 }

@@ -92,8 +92,12 @@ class CliEndToEndTest(unittest.TestCase):
                 self.assertAlmostEqual(sum(hand["strategy"]), 1, delta=1e-5)
                 self.assertTrue(all(0 <= p <= 1 for p in hand["strategy"]))
                 self.assertTrue(math.isfinite(hand["nodeStrategyEv"]))
+                self.assertEqual(len(hand["actionEvs"]), len(node["actions"]))
+                expected = sum(p * ev for p, ev in zip(hand["strategy"], hand["actionEvs"]))
+                self.assertAlmostEqual(expected, hand["nodeStrategyEv"], delta=1e-4)
             else:
                 self.assertIsNone(hand["nodeStrategyEv"])
+                self.assertEqual(hand["actionEvs"], [])
 
     def test_file_solve_navigation_and_eof_drains_queries(self):
         process, ready = self.start("weighted-flop")
@@ -133,7 +137,7 @@ class CliEndToEndTest(unittest.TestCase):
         self.assertEqual(chance["result"], {"reason": "showdown"})
 
         # An invalid request fails alone among queued queries; EOF still answers every line.
-        commands = {11: "unknown", 12: "query_equity", 13: "query_node"}
+        commands = {11: "unknown", 12: "query_equity", 13: "query_node", 14: "query_opponent_ev"}
         for request_id, command in commands.items():
             self.send(process, {"requestId": request_id, "command": command, "nodeId": ready["rootNodeId"]})
         process.stdin.close()
@@ -147,7 +151,7 @@ class CliEndToEndTest(unittest.TestCase):
         self.assertEqual(responses.keys(), commands.keys())
         self.assertFalse(responses[11]["ok"])
         self.assertTrue(responses[11]["error"])
-        for request_id in (12, 13):
+        for request_id in (12, 13, 14):
             self.assertTrue(responses[request_id]["ok"], responses[request_id])
         self.assertEqual(responses[13]["node"], root)
         equity = responses[12]["equity"]
@@ -155,6 +159,16 @@ class CliEndToEndTest(unittest.TestCase):
         values = [equity["players"][player]["equity"] for player in ("hero", "villain")]
         self.assertTrue(all(0 <= value <= 1 for value in values))
         self.assertAlmostEqual(sum(values), 1, delta=1e-5)
+        # The two players' joint-reach-weighted EVs split the pot.
+        opponent = responses[14]["opponentEv"]
+        self.assertEqual(opponent["player"], "hero")
+        evs = [
+            (hand["nodeStrategyEv"], hand["marginalReachMass"])
+            for hands in (root["hands"], opponent["hands"])
+            for hand in hands
+            if hand["nodeStrategyEv"] is not None
+        ]
+        self.assertAlmostEqual(sum(ev * mass for ev, mass in evs), root["state"]["pot"], delta=1e-4)
 
     def test_stdin_auto_device_stops_at_accuracy(self):
         process, ready = self.start("raise-flop", stdin=True, accuracy=100)

@@ -94,12 +94,14 @@ public:
     ) const;
     std::vector<float> OpponentReachAtRoot(const StrategySnapshot& strategy, std::size_t opponentPlayer) const;
     std::vector<float> CompatibleMasses(std::size_t player, const float* opponentReach) const;
+    // When player acts at the root, actionValues receives each root action's values, action-major.
     std::vector<float> EvaluateSnapshot(
         const StrategySnapshot& strategy,
         std::size_t player,
         const std::vector<float>& opponentReach,
         const std::vector<float>& scales,
-        Evaluation evaluation
+        Evaluation evaluation,
+        std::vector<float>* actionValues = nullptr
     ) const;
     std::vector<float> EvaluateAverageBestResponse(
         const std::uint16_t* strategySums,
@@ -145,7 +147,11 @@ private:
         TrainState* train = nullptr;
         bool bestResponse = false;
     };
-    std::vector<float> EvaluateHands(const WalkContext& context, const std::vector<float>& opponentReach) const;
+    std::vector<float> EvaluateHands(
+        const WalkContext& context,
+        const std::vector<float>& opponentReach,
+        std::vector<float>* actionValues = nullptr
+    ) const;
     // Ancestor policies stay unchanged until every chance task finishes; tasks replay their
     // short paths rather than retaining ancestor snapshots, and read the root reach in place.
     void WalkTasks(

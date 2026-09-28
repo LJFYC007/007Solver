@@ -18,6 +18,8 @@ export interface HandStrategy {
     nodeStrategyEv: number | null;
     ownReachWeight: number;
     strategy: number[];
+    /** EV of each action followed by the node strategy; empty exactly when nodeStrategyEv is null. */
+    actionEvs: number[];
 }
 
 export interface DecisionAction {
@@ -109,6 +111,13 @@ export type SolverStatus =
           message: string;
           state: "failed";
       };
+
+/** The waiting player's node strategy EVs, a separate query because they take another subtree evaluation. */
+export interface OpponentEvReport {
+    nodeId: number;
+    player: Player;
+    hands: { cards: string[]; marginalReachMass: number; nodeStrategyEv: number | null }[];
+}
 
 export interface EquityReport {
     nodeId: number;

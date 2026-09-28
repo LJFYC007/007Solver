@@ -100,6 +100,18 @@ Json BuildEquityJson(const analysis::EquityReport& report)
     return {{"nodeId", report.nodeId.Value()}, {"players", std::move(players)}};
 }
 
+Json BuildOpponentEvJson(const analysis::OpponentEvReport& report)
+{
+    Json hands = Json::array();
+    for (const auto& hand : report.hands)
+        hands.push_back(
+            {{"cards", FormatHoleCards(hand.cards)},
+             {"marginalReachMass", hand.marginalReachMass},
+             {"nodeStrategyEv", hand.nodeStrategyEv ? Json(*hand.nodeStrategyEv) : Json(nullptr)}}
+        );
+    return {{"nodeId", report.nodeId.Value()}, {"player", PlayerCode(report.player)}, {"hands", std::move(hands)}};
+}
+
 Json BuildNodeJson(const analysis::NodeReport& node)
 {
     Json jsonNode = {
@@ -161,6 +173,7 @@ Json BuildNodeJson(const analysis::NodeReport& node)
             {"marginalReachMass", hand.marginalReachMass},
             {"nodeStrategyEv", hand.nodeStrategyEv.has_value() ? Json(*hand.nodeStrategyEv) : Json(nullptr)},
             {"strategy", hand.strategy},
+            {"actionEvs", hand.actionEvs},
         });
     }
 
@@ -193,6 +206,8 @@ ServiceRequest ParseServiceRequest(const std::string& jsonLine)
             request.kind = QueryKind::Node;
         else if (command == "query_equity")
             request.kind = QueryKind::Equity;
+        else if (command == "query_opponent_ev")
+            request.kind = QueryKind::OpponentEv;
         else
             throw std::invalid_argument("Unknown solver command");
 
@@ -239,6 +254,8 @@ std::string ServiceMessageToJson(const ServiceMessage& message)
         json = {{"requestId", message.requestId}, {"ok", true}};
         if (message.equity)
             json["equity"] = BuildEquityJson(*message.equity);
+        else if (message.opponentEv)
+            json["opponentEv"] = BuildOpponentEvJson(*message.opponentEv);
         else
             json["node"] = BuildNodeJson(*message.node);
         break;

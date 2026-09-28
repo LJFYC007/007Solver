@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { type SolverNode, querySolverNode } from "../solver";
+import { type SolverNode, querySolver } from "../solver";
 
 interface Navigation {
     root?: SolverNode;
@@ -32,7 +32,7 @@ export function useSolverNavigation(root?: SolverNode, generation?: number) {
         try {
             let child = cache.nodes.get(nodeId);
             if (!child) {
-                child = await querySolverNode(nodeId, generation);
+                child = await querySolver("node", nodeId, generation);
                 cache.nodes.set(nodeId, child);
             }
             if (request !== navigationRequest.current) return;

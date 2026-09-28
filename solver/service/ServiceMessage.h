@@ -54,6 +54,7 @@ struct ServiceMessage
     std::string text;
     std::optional<analysis::NodeReport> node;
     std::optional<analysis::EquityReport> equity;
+    std::optional<analysis::OpponentEvReport> opponentEv;
     std::optional<engine::MemoryEstimate> estimate;
     SolveProgress progress;
     StopReason stopReason = StopReason::IterationLimit;
@@ -63,6 +64,7 @@ enum class QueryKind : std::uint8_t
 {
     Node,
     Equity,
+    OpponentEv,
 };
 
 struct ServiceRequest

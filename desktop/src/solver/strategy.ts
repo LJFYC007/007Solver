@@ -1,4 +1,4 @@
-import type { DecisionAction, DecisionNode, HandStrategy, SolverNode } from "./types";
+import type { DecisionAction, DecisionNode, HandStrategy, Player, SolverNode } from "./types";
 
 export const isForcedRunout = (node?: SolverNode) =>
     node?.kind === "chance" && (node.state.stacks.hero === 0 || node.state.stacks.villain === 0);
@@ -16,12 +16,6 @@ export interface ActionInfo {
 export interface AggregatedAction extends ActionInfo {
     combos: number;
     probability: number;
-}
-
-export interface HandGroup {
-    actions: AggregatedAction[];
-    hands: HandStrategy[];
-    ownReachWeight: number;
 }
 
 export const RANKS = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"] as const;
@@ -174,34 +168,38 @@ export function toHandClass(cards: readonly string[]): string {
     return `${highRank}${lowRank}${suited ? "s" : "o"}`;
 }
 
-export function groupHands(node: DecisionNode): Map<string, HandGroup> {
-    const rawGroups = new Map<string, HandStrategy[]>();
-    const blockedCards = new Set(node.state.board);
+/** Order-independent key of a hand's cards. */
+export const cardsKey = (cards: readonly string[]) => cards.slice().sort().join("");
 
-    for (const hand of node.hands) {
-        const label = toHandClass(hand.cards);
-        const group = rawGroups.get(label);
-        if (group) group.push(hand);
-        else rawGroups.set(label, [hand]);
+/** The weighted mean of the values, leaving out items without a value or a positive weight. */
+export function weightedMean<T>(
+    items: readonly T[],
+    value: (item: T) => number | null | undefined,
+    weight: (item: T) => number,
+): number | undefined {
+    let sum = 0,
+        total = 0;
+    for (const item of items) {
+        const v = value(item),
+            w = weight(item);
+        if (v == null || w <= 0) continue;
+        sum += v * w;
+        total += w;
     }
+    return total > 0 ? sum / total : undefined;
+}
 
-    return new Map(
-        [...rawGroups.entries()].map(([label, hands]) => {
-            const availableComboCount = handClassCombos(label).filter((cards) =>
-                cards.every((card) => !blockedCards.has(card)),
-            ).length;
-
-            return [
-                label,
-                {
-                    actions: aggregateActions(node, hands),
-                    hands,
-                    ownReachWeight:
-                        hands.reduce((sum, hand) => sum + hand.ownReachWeight, 0) / Math.max(1, availableComboCount),
-                },
-            ];
-        }),
+/**
+ * A player's EV at a decision node. The actor's is weighted by joint reach, and hands without an EV do not
+ * count; the waiting player holds the rest of the pot.
+ */
+export function nodeEv(node: DecisionNode, player: Player): number | undefined {
+    const ev = weightedMean(
+        node.hands,
+        (hand) => hand.nodeStrategyEv,
+        (hand) => hand.marginalReachMass,
     );
+    return ev === undefined || player === node.actor ? ev : node.state.pot - ev;
 }
 
 export function handClassCombos(label: string): string[][] {

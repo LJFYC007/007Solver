@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useOutsidePress } from "../hooks/useOutsidePress";
 import type { TableFormat } from "../solver/catalog";
 
 const FORMATS: { value: TableFormat; label: string }[] = [
@@ -19,14 +20,7 @@ export default function SolutionSettings({
 }) {
     const [open, setOpen] = useState(false);
     const card = useRef<HTMLElement>(null);
-    useEffect(() => {
-        if (!open) return;
-        const close = (event: PointerEvent) => {
-            if (!card.current?.contains(event.target as Node)) setOpen(false);
-        };
-        document.addEventListener("pointerdown", close);
-        return () => document.removeEventListener("pointerdown", close);
-    }, [open]);
+    useOutsidePress(card, open, setOpen);
     return (
         <section
             ref={card}

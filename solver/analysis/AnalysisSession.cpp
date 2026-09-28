@@ -1,9 +1,12 @@
 #include "analysis/AnalysisSession.h"
+#include "engine/HandTraversal.h"
 #include "engine/StrategyEvaluator.h"
 #include <algorithm>
 #include "game/BettingRules.h"
 #include "game/CompiledGame.h"
 #include <cstdint>
+#include <map>
+#include <stdexcept>
 #include <utility>
 
 namespace solver::analysis
@@ -54,15 +57,14 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
     report.hands = BuildHandReports(
         nodeId, result_.Problem().ranges.For(player), marginalReachMasses, currentReach.ownReachWeights[player.Index()], player
     );
-    if (std::any_of(report.hands.begin(), report.hands.end(), [](const auto& hand) { return hand.marginalReachMass > 0.0f; }))
+    const auto evs = JointReachEvs(nodeId, player, marginalReachMasses);
+    for (auto& hand : report.hands)
     {
-        const auto evs = engine::EvaluateNodeStrategy(result_, nodeId, player);
-        for (auto& hand : report.hands)
+        const auto ev = evs.find(hand.cards);
+        if (ev != evs.end())
         {
-            // The evaluator omits hands whose opponent mass has no value scale (see ValueScale).
-            const auto ev = evs.find(hand.cards);
-            if (hand.marginalReachMass > 0.0f && ev != evs.end())
-                hand.nodeStrategyEv = ev->second;
+            hand.nodeStrategyEv = ev->second.ev;
+            hand.actionEvs = ev->second.actionEvs;
         }
     }
 
@@ -78,6 +80,59 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
         });
     }
     return report;
+}
+
+OpponentEvReport AnalysisSession::QueryOpponentEv(game::NodeId nodeId)
+{
+    const game::GameNode& node = result_.Problem().game->GetNode(nodeId);
+    if (node.Kind() != game::NodeKind::Decision)
+        throw std::invalid_argument("Opponent EVs need a decision node");
+    const core::PlayerId player = node.State().playerToAct.Other();
+    const core::Board board = node.State().board;
+    const auto masses = reachCalculator_.BuildMarginalReachMasses(reachCalculator_.ReachFor(nodeId), board, player);
+    const auto evs = JointReachEvs(nodeId, player, masses);
+    OpponentEvReport report{nodeId, player, {}};
+    for (const auto& [hand, inputRangeWeight] : result_.Problem().ranges.For(player).Entries())
+    {
+        if (inputRangeWeight <= 0.0f || core::Overlaps(hand, board))
+            continue;
+        const auto mass = masses.find(hand);
+        OpponentHandReport entry{hand, mass == masses.end() ? 0.0f : mass->second, std::nullopt};
+        const auto ev = evs.find(hand);
+        if (ev != evs.end())
+            entry.nodeStrategyEv = ev->second.ev;
+        report.hands.push_back(entry);
+    }
+    return report;
+}
+
+engine::HandTraversal AnalysisSession::TraversalAt(game::NodeId nodeId)
+{
+    if (!traversal_ || traversal_->nodes.front().id != nodeId)
+    {
+        // Free the previous tables before building the next.
+        traversal_.reset();
+        traversal_ = std::make_shared<const engine::HandTraversalData>(result_.Problem(), nodeId);
+    }
+    return engine::HandTraversal(traversal_);
+}
+
+std::map<core::HoleCards, engine::NodeStrategyValue> AnalysisSession::JointReachEvs(
+    game::NodeId nodeId,
+    core::PlayerId player,
+    const ReachCalculator::HandWeights& marginalReachMasses
+)
+{
+    std::map<core::HoleCards, engine::NodeStrategyValue> evs;
+    if (std::none_of(marginalReachMasses.begin(), marginalReachMasses.end(), [](const auto& entry) { return entry.second > 0.0f; }))
+        return evs;
+    evs = engine::EvaluateNodeStrategy(result_, TraversalAt(nodeId), player);
+    for (auto ev = evs.begin(); ev != evs.end();)
+    {
+        const auto mass = marginalReachMasses.find(ev->first);
+        ev = mass != marginalReachMasses.end() && mass->second > 0.0f ? std::next(ev) : evs.erase(ev);
+    }
+    return evs;
 }
 
 std::vector<HandReport> AnalysisSession::BuildHandReports(
@@ -110,6 +165,7 @@ std::vector<HandReport> AnalysisSession::BuildHandReports(
             marginalReachMass,
             std::nullopt,
             std::move(strategy),
+            {},
         });
     }
     return hands;

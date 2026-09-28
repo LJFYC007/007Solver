@@ -1,4 +1,7 @@
-use crate::{solver_bridge::SolverBridge, solver_protocol::SolverStatus};
+use crate::{
+    solver_bridge::SolverBridge,
+    solver_protocol::{QueryKind, SolverStatus},
+};
 use axum::{
     extract::{Path, Query, Request, State},
     http::{header, StatusCode, Uri},
@@ -23,8 +26,8 @@ pub(crate) const DEFAULT_ADDRESS: &str = "127.0.0.1:8007";
 // A page's session is released after this long without requests; closing the page releases
 // it at once.
 const IDLE_RELEASE: Duration = Duration::from_secs(10 * 60);
-// Ready solutions stay in host memory, about 4 bytes per strategy entry; beyond this many,
-// the least recently used are released.
+// Ready solutions stay in host memory, about 4 bytes per strategy entry plus the last evaluated
+// decision's traversal tables; beyond this many, the least recently used are released.
 const MAX_READY_SOLUTIONS: usize = 4;
 
 struct Session {
@@ -105,8 +108,7 @@ pub(crate) async fn serve(
         .route("/api/sessions/{id}/cancel", post(cancel))
         .route("/api/sessions/{id}/close", post(close))
         .route("/api/sessions/{id}/status", get(status))
-        .route("/api/sessions/{id}/nodes/{node}", get(node))
-        .route("/api/sessions/{id}/equity/{node}", get(equity))
+        .route("/api/sessions/{id}/reports/{kind}/{node}", get(query))
         .fallback(asset)
         .layer(middleware::from_fn(require_address_host))
         .with_state(server);
@@ -183,33 +185,15 @@ struct Solution {
     generation: u64,
 }
 
-async fn node(
-    State(server): Shared,
-    Path((id, node)): Path<(String, i32)>,
-    Query(solution): Query<Solution>,
-) -> Response {
-    query(&server, &id, node, solution.generation, "query_node").await
-}
-
-async fn equity(
-    State(server): Shared,
-    Path((id, node)): Path<(String, i32)>,
-    Query(solution): Query<Solution>,
-) -> Response {
-    query(&server, &id, node, solution.generation, "query_equity").await
-}
-
 async fn query(
-    server: &Server,
-    id: &str,
-    node: i32,
-    generation: u64,
-    command: &'static str,
+    State(server): Shared,
+    Path((id, kind, node)): Path<(String, QueryKind, i32)>,
+    Query(solution): Query<Solution>,
 ) -> Response {
-    let Some(bridge) = server.session(id) else {
+    let Some(bridge) = server.session(&id) else {
         return released();
     };
-    reply(bridge.query(node, generation, command).await)
+    reply(bridge.query(node, solution.generation, kind).await)
 }
 
 async fn asset(State(server): Shared, uri: Uri) -> Response {

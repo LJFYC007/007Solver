@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type EquityReport, type Player, toHandClass } from "../solver";
-
-const players: Player[] = ["villain", "hero"];
-const colors = { hero: "#8cce83", villain: "#d1cd69" };
+import { PLAYER_COLORS as colors, PLAYERS as players } from "../solver/display";
 
 export default function EquityChart({
     data,
@@ -44,7 +42,13 @@ export default function EquityChart({
                     points: hands.map((hand) => {
                         const start = total ? (weight / total) * 100 : 0;
                         weight += hand.ownReachWeight;
-                        return { ...hand, equity: hand.equity!, start, x: total ? (weight / total) * 100 : 0 };
+                        return {
+                            ...hand,
+                            label: toHandClass(hand.cards),
+                            equity: hand.equity!,
+                            start,
+                            x: total ? (weight / total) * 100 : 0,
+                        };
                     }),
                 };
             }),
@@ -53,8 +57,16 @@ export default function EquityChart({
     // Margins leave room for the axis labels, including a centered "100" at the right end.
     const width = Math.max(1, size.width - 36),
         height = Math.max(1, size.height - 29);
-    const xAt = (x: number) => 25 + (x / 100) * width;
-    const yAt = (equity: number) => 8 + (1 - equity) * height;
+    const xAt = useCallback((x: number) => 25 + (x / 100) * width, [width]);
+    const yAt = useCallback((equity: number) => 8 + (1 - equity) * height, [height]);
+    // Hovering re-renders the chart; the lines change only with the data and size.
+    const lines = useMemo(
+        () =>
+            curves.map((c) =>
+                c.points.flatMap((p) => [`${xAt(p.start)},${yAt(p.equity)}`, `${xAt(p.x)},${yAt(p.equity)}`]).join(" "),
+            ),
+        [curves, xAt, yAt],
+    );
     const activeHover = hover?.nodeId === data.nodeId && visible[hover.player] ? hover : undefined;
     return (
         <div className="equity-chart">
@@ -105,35 +117,31 @@ export default function EquityChart({
                             </text>
                         </g>
                     ))}
-                    {curves
-                        .filter((c) => visible[c.player])
-                        .map((c) => (
-                            <g key={c.player}>
-                                <polyline
-                                    fill="none"
-                                    stroke={colors[c.player]}
-                                    strokeWidth="2"
-                                    points={c.points
-                                        .flatMap((p) => [
-                                            `${xAt(p.start)},${yAt(p.equity)}`,
-                                            `${xAt(p.x)},${yAt(p.equity)}`,
-                                        ])
-                                        .join(" ")}
-                                />
-                                {c.points
-                                    .filter((p) => toHandClass(p.cards) === selected)
-                                    .map((p) => (
-                                        <circle
-                                            key={p.cards.join("")}
-                                            cx={xAt(p.x)}
-                                            cy={yAt(p.equity)}
-                                            r="3"
-                                            fill={colors[c.player]}
-                                            stroke="#eee"
-                                        />
-                                    ))}
-                            </g>
-                        ))}
+                    {curves.map(
+                        (c, index) =>
+                            visible[c.player] && (
+                                <g key={c.player}>
+                                    <polyline
+                                        fill="none"
+                                        stroke={colors[c.player]}
+                                        strokeWidth="2"
+                                        points={lines[index]}
+                                    />
+                                    {c.points
+                                        .filter((p) => p.label === selected)
+                                        .map((p) => (
+                                            <circle
+                                                key={p.cards.join("")}
+                                                cx={xAt(p.x)}
+                                                cy={yAt(p.equity)}
+                                                r="3"
+                                                fill={colors[c.player]}
+                                                stroke="#eee"
+                                            />
+                                        ))}
+                                </g>
+                            ),
+                    )}
                     {activeHover && (
                         <g>
                             <line

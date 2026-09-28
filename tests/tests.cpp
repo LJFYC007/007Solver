@@ -256,6 +256,27 @@ TEST(AnalysisSessionTest, FixedPoliciesMatchIndependentNodeValuesAndReach)
                 if (actual->nodeStrategyEv.has_value())
                     EXPECT_NEAR(*actual->nodeStrategyEv, hand.at("nodeStrategyEv").get<float>(), 1e-5f);
                 EXPECT_EQ(actual->strategy, hand.at("strategy").get<std::vector<float>>());
+                const auto actionEvs = hand.at("actionEvs").get<std::vector<float>>();
+                ASSERT_EQ(actual->actionEvs.size(), actionEvs.size());
+                for (std::size_t action = 0; action < actionEvs.size(); ++action)
+                    EXPECT_NEAR(actual->actionEvs[action], actionEvs[action], 1e-5f);
+            }
+            const auto opponent = session.QueryOpponentEv(node.nodeId);
+            EXPECT_EQ(opponent.player, node.actor->Other());
+            ASSERT_EQ(opponent.hands.size(), expected.at("opponentHands").size());
+            for (const auto& hand : expected.at("opponentHands"))
+            {
+                SCOPED_TRACE("opponent " + hand.at("cards").get<std::string>());
+                const auto cards = core::ParseHoleCards(hand.at("cards").get<std::string>());
+                const auto actual = std::find_if(
+                    opponent.hands.begin(), opponent.hands.end(), [&](const auto& candidate) { return candidate.cards == cards; }
+                );
+                ASSERT_NE(actual, opponent.hands.end());
+                const float mass = hand.at("marginalReachMass").get<float>();
+                EXPECT_NEAR(actual->marginalReachMass, mass, std::max(1e-12f, mass * 1e-5f));
+                ASSERT_EQ(actual->nodeStrategyEv.has_value(), !hand.at("nodeStrategyEv").is_null());
+                if (actual->nodeStrategyEv.has_value())
+                    EXPECT_NEAR(*actual->nodeStrategyEv, hand.at("nodeStrategyEv").get<float>(), 1e-5f);
             }
         }
     }

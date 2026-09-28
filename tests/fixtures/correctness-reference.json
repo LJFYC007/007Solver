@@ -7,6 +7,10 @@
         "board": "Ks 9s 2d Qc",
         "hands": [
           {
+            "actionEvs": [
+              -0.07386376708745956,
+              -0.11931835860013962
+            ],
             "cards": "Qd Ad",
             "inputRangeWeight": 0.3571285605430603,
             "marginalReachMass": 0.0009259259095415473,
@@ -18,6 +22,10 @@
             ]
           },
           {
+            "actionEvs": [
+              -0.07386376708745956,
+              -0.11931835860013962
+            ],
             "cards": "Qh Ah",
             "inputRangeWeight": 0.3571285605430603,
             "marginalReachMass": 0.0009259259095415473,
@@ -29,6 +37,10 @@
             ]
           },
           {
+            "actionEvs": [
+              1.0681817531585693,
+              1.0909090042114258
+            ],
             "cards": "Qs As",
             "inputRangeWeight": 0.3571285605430603,
             "marginalReachMass": 0.0009259259095415473,
@@ -38,6 +50,23 @@
               0.5,
               0.5
             ]
+          }
+        ],
+        "opponentHands": [
+          {
+            "cards": "Jc Kc",
+            "marginalReachMass": 0.0009259259095415473,
+            "nodeStrategyEv": 3.7045459747314453
+          },
+          {
+            "cards": "Jd Kd",
+            "marginalReachMass": 0.0009259259095415473,
+            "nodeStrategyEv": 3.7045459747314453
+          },
+          {
+            "cards": "Jh Kh",
+            "marginalReachMass": 0.0009259259095415473,
+            "nodeStrategyEv": 3.7045459747314453
           }
         ],
         "path": [
@@ -56,6 +85,11 @@
         "board": "Ks 9s 2d Qc",
         "hands": [
           {
+            "actionEvs": [
+              0.0,
+              4.284091472625732,
+              6.8636369705200195
+            ],
             "cards": "Jc Kc",
             "inputRangeWeight": 0.1735173463821411,
             "marginalReachMass": 0.00046296295477077365,
@@ -68,6 +102,11 @@
             ]
           },
           {
+            "actionEvs": [
+              0.0,
+              4.284091472625732,
+              6.8636369705200195
+            ],
             "cards": "Jd Kd",
             "inputRangeWeight": 0.1735173463821411,
             "marginalReachMass": 0.00046296295477077365,
@@ -80,6 +119,11 @@
             ]
           },
           {
+            "actionEvs": [
+              0.0,
+              4.284091472625732,
+              6.8636369705200195
+            ],
             "cards": "Jh Kh",
             "inputRangeWeight": 0.1735173463821411,
             "marginalReachMass": 0.00046296295477077365,
@@ -90,6 +134,23 @@
               0.3333333432674408,
               0.3333333432674408
             ]
+          }
+        ],
+        "opponentHands": [
+          {
+            "cards": "Qd Ad",
+            "marginalReachMass": 0.00046296295477077365,
+            "nodeStrategyEv": 1.8806816339492798
+          },
+          {
+            "cards": "Qh Ah",
+            "marginalReachMass": 0.00046296295477077365,
+            "nodeStrategyEv": 1.8806816339492798
+          },
+          {
+            "cards": "Qs As",
+            "marginalReachMass": 0.00046296295477077365,
+            "nodeStrategyEv": 3.090909242630005
           }
         ],
         "path": [
@@ -371,6 +432,10 @@
         "board": "Ks 9s 2d",
         "hands": [
           {
+            "actionEvs": [
+              -0.3723698854446411,
+              -0.3796556293964386
+            ],
             "cards": "5c Ac",
             "inputRangeWeight": 0.19009599089622498,
             "marginalReachMass": 0.11632555723190308,
@@ -382,6 +447,10 @@
             ]
           },
           {
+            "actionEvs": [
+              -0.2335168421268463,
+              -0.23876990377902985
+            ],
             "cards": "5d Ad",
             "inputRangeWeight": 0.19009599089622498,
             "marginalReachMass": 0.11632555723190308,
@@ -393,6 +462,10 @@
             ]
           },
           {
+            "actionEvs": [
+              -0.3723698854446411,
+              -0.3796556293964386
+            ],
             "cards": "5h Ah",
             "inputRangeWeight": 0.19009599089622498,
             "marginalReachMass": 0.11632555723190308,
@@ -404,6 +477,10 @@
             ]
           },
           {
+            "actionEvs": [
+              0.7238844037055969,
+              0.7304419875144958
+            ],
             "cards": "5s As",
             "inputRangeWeight": 0.19009599089622498,
             "marginalReachMass": 0.1582748144865036,
@@ -415,6 +492,10 @@
             ]
           },
           {
+            "actionEvs": [
+              2.64823579788208,
+              2.7044267654418945
+            ],
             "cards": "Kc Kd",
             "inputRangeWeight": 0.4198000133037567,
             "marginalReachMass": 0.1642494946718216,
@@ -426,6 +507,10 @@
             ]
           },
           {
+            "actionEvs": [
+              2.5802979469299316,
+              2.636488676071167
+            ],
             "cards": "Kc Kh",
             "inputRangeWeight": 0.4198000133037567,
             "marginalReachMass": 0.1642494946718216,
@@ -437,6 +522,10 @@
             ]
           },
           {
+            "actionEvs": [
+              2.64823579788208,
+              2.7044267654418945
+            ],
             "cards": "Kd Kh",
             "inputRangeWeight": 0.4198000133037567,
             "marginalReachMass": 0.1642494946718216,
@@ -446,6 +535,53 @@
               1.0,
               0.0
             ]
+          }
+        ],
+        "opponentHands": [
+          {
+            "cards": "Qc Qd",
+            "marginalReachMass": 0.057423271238803864,
+            "nodeStrategyEv": 0.31431934237480164
+          },
+          {
+            "cards": "Qc Qh",
+            "marginalReachMass": 0.057423271238803864,
+            "nodeStrategyEv": 0.3121461272239685
+          },
+          {
+            "cards": "Qc Qs",
+            "marginalReachMass": 0.057423271238803864,
+            "nodeStrategyEv": 0.39904022216796875
+          },
+          {
+            "cards": "Qd Qh",
+            "marginalReachMass": 0.057423271238803864,
+            "nodeStrategyEv": 0.31431934237480164
+          },
+          {
+            "cards": "Qd Qs",
+            "marginalReachMass": 0.057423271238803864,
+            "nodeStrategyEv": 0.4012134373188019
+          },
+          {
+            "cards": "Qh Qs",
+            "marginalReachMass": 0.057423271238803864,
+            "nodeStrategyEv": 0.39904022216796875
+          },
+          {
+            "cards": "Kc Ac",
+            "marginalReachMass": 0.21848677098751068,
+            "nodeStrategyEv": 0.8633831143379211
+          },
+          {
+            "cards": "Kd Ad",
+            "marginalReachMass": 0.21848677098751068,
+            "nodeStrategyEv": 0.9440075755119324
+          },
+          {
+            "cards": "Kh Ah",
+            "marginalReachMass": 0.21848677098751068,
+            "nodeStrategyEv": 0.8633831143379211
           }
         ],
         "path": [],
@@ -460,6 +596,10 @@
         "board": "Ks 9s 2d",
         "hands": [
           {
+            "actionEvs": [
+              -0.2636539340019226,
+              -0.3773898780345917
+            ],
             "cards": "Qc Qd",
             "inputRangeWeight": 0.041999999433755875,
             "marginalReachMass": 0.04120975732803345,
@@ -471,6 +611,10 @@
             ]
           },
           {
+            "actionEvs": [
+              -0.2643784284591675,
+              -0.3781578242778778
+            ],
             "cards": "Qc Qh",
             "inputRangeWeight": 0.041999999433755875,
             "marginalReachMass": 0.04120975732803345,
@@ -482,6 +626,10 @@
             ]
           },
           {
+            "actionEvs": [
+              -0.1623850166797638,
+              -0.27004480361938477
+            ],
             "cards": "Qc Qs",
             "inputRangeWeight": 0.041999999433755875,
             "marginalReachMass": 0.04120975732803345,
@@ -493,6 +641,10 @@
             ]
           },
           {
+            "actionEvs": [
+              -0.2636539340019226,
+              -0.3773898780345917
+            ],
             "cards": "Qd Qh",
             "inputRangeWeight": 0.041999999433755875,
             "marginalReachMass": 0.04120975732803345,
@@ -504,6 +656,10 @@
             ]
           },
           {
+            "actionEvs": [
+              -0.16166064143180847,
+              -0.26927685737609863
+            ],
             "cards": "Qd Qs",
             "inputRangeWeight": 0.041999999433755875,
             "marginalReachMass": 0.04120975732803345,
@@ -515,6 +671,10 @@
             ]
           },
           {
+            "actionEvs": [
+              -0.1623850166797638,
+              -0.27004480361938477
+            ],
             "cards": "Qh Qs",
             "inputRangeWeight": 0.041999999433755875,
             "marginalReachMass": 0.04120975732803345,
@@ -526,6 +686,10 @@
             ]
           },
           {
+            "actionEvs": [
+              0.05454510450363159,
+              -0.040098875761032104
+            ],
             "cards": "Kc Ac",
             "inputRangeWeight": 0.32600000500679016,
             "marginalReachMass": 0.1241009309887886,
@@ -537,6 +701,10 @@
             ]
           },
           {
+            "actionEvs": [
+              0.15164300799369812,
+              0.06282489001750946
+            ],
             "cards": "Kd Ad",
             "inputRangeWeight": 0.32600000500679016,
             "marginalReachMass": 0.1241009309887886,
@@ -548,6 +716,10 @@
             ]
           },
           {
+            "actionEvs": [
+              0.05454510450363159,
+              -0.040098875761032104
+            ],
             "cards": "Kh Ah",
             "inputRangeWeight": 0.32600000500679016,
             "marginalReachMass": 0.1241009309887886,
@@ -557,6 +729,43 @@
               0.0,
               1.0
             ]
+          }
+        ],
+        "opponentHands": [
+          {
+            "cards": "5c Ac",
+            "marginalReachMass": 0.02908138930797577,
+            "nodeStrategyEv": -0.3723698854446411
+          },
+          {
+            "cards": "5d Ad",
+            "marginalReachMass": 0.02908138930797577,
+            "nodeStrategyEv": -0.2335168421268463
+          },
+          {
+            "cards": "5h Ah",
+            "marginalReachMass": 0.02908138930797577,
+            "nodeStrategyEv": -0.3723698854446411
+          },
+          {
+            "cards": "5s As",
+            "marginalReachMass": 0.0395687036216259,
+            "nodeStrategyEv": 0.7238844037055969
+          },
+          {
+            "cards": "Kc Kd",
+            "marginalReachMass": 0.1642494946718216,
+            "nodeStrategyEv": 2.64823579788208
+          },
+          {
+            "cards": "Kc Kh",
+            "marginalReachMass": 0.1642494946718216,
+            "nodeStrategyEv": 2.5802979469299316
+          },
+          {
+            "cards": "Kd Kh",
+            "marginalReachMass": 0.1642494946718216,
+            "nodeStrategyEv": 2.64823579788208
           }
         ],
         "path": [
@@ -573,6 +782,11 @@
         "board": "Ks 9s 2d",
         "hands": [
           {
+            "actionEvs": [
+              0.0,
+              -1.063983678817749,
+              -0.40656578540802
+            ],
             "cards": "5c Ac",
             "inputRangeWeight": 0.19009599089622498,
             "marginalReachMass": 0.02097463048994541,
@@ -585,6 +799,11 @@
             ]
           },
           {
+            "actionEvs": [
+              0.0,
+              -0.8470329642295837,
+              -0.18686877191066742
+            ],
             "cards": "5d Ad",
             "inputRangeWeight": 0.19009599089622498,
             "marginalReachMass": 0.02097463048994541,
@@ -597,6 +816,11 @@
             ]
           },
           {
+            "actionEvs": [
+              0.0,
+              -1.063983678817749,
+              -0.40656578540802
+            ],
             "cards": "5h Ah",
             "inputRangeWeight": 0.19009599089622498,
             "marginalReachMass": 0.02097463048994541,
@@ -609,6 +833,11 @@
             ]
           },
           {
+            "actionEvs": [
+              0.0,
+              0.6774411797523499,
+              1.3569023609161377
+            ],
             "cards": "5s As",
             "inputRangeWeight": 0.19009599089622498,
             "marginalReachMass": 0.03146194666624069,
@@ -621,6 +850,11 @@
             ]
           },
           {
+            "actionEvs": [
+              0.0,
+              3.7662880420684814,
+              4.484848499298096
+            ],
             "cards": "Kc Kd",
             "inputRangeWeight": 0.4198000133037567,
             "marginalReachMass": 0.09263899177312851,
@@ -633,6 +867,11 @@
             ]
           },
           {
+            "actionEvs": [
+              0.0,
+              3.586742639541626,
+              4.303030490875244
+            ],
             "cards": "Kc Kh",
             "inputRangeWeight": 0.4198000133037567,
             "marginalReachMass": 0.09263899177312851,
@@ -645,6 +884,11 @@
             ]
           },
           {
+            "actionEvs": [
+              0.0,
+              3.7662880420684814,
+              4.484848499298096
+            ],
             "cards": "Kd Kh",
             "inputRangeWeight": 0.4198000133037567,
             "marginalReachMass": 0.09263899177312851,
@@ -655,6 +899,53 @@
               0.3333333432674408,
               0.3333333432674408
             ]
+          }
+        ],
+        "opponentHands": [
+          {
+            "cards": "Qc Qd",
+            "marginalReachMass": 0.0,
+            "nodeStrategyEv": null
+          },
+          {
+            "cards": "Qc Qh",
+            "marginalReachMass": 0.0,
+            "nodeStrategyEv": null
+          },
+          {
+            "cards": "Qc Qs",
+            "marginalReachMass": 0.0,
+            "nodeStrategyEv": null
+          },
+          {
+            "cards": "Qd Qh",
+            "marginalReachMass": 0.0,
+            "nodeStrategyEv": null
+          },
+          {
+            "cards": "Qd Qs",
+            "marginalReachMass": 0.0,
+            "nodeStrategyEv": null
+          },
+          {
+            "cards": "Qh Qs",
+            "marginalReachMass": 0.0,
+            "nodeStrategyEv": null
+          },
+          {
+            "cards": "Kc Ac",
+            "marginalReachMass": 0.1241009309887886,
+            "nodeStrategyEv": 0.9599010944366455
+          },
+          {
+            "cards": "Kd Ad",
+            "marginalReachMass": 0.1241009309887886,
+            "nodeStrategyEv": 1.0628249645233154
+          },
+          {
+            "cards": "Kh Ah",
+            "marginalReachMass": 0.1241009309887886,
+            "nodeStrategyEv": 0.9599010944366455
           }
         ],
         "path": [
@@ -672,6 +963,10 @@
         "board": "Ks 9s 2d As",
         "hands": [
           {
+            "actionEvs": [
+              2.098484754562378,
+              2.228219747543335
+            ],
             "cards": "5c Ac",
             "inputRangeWeight": 0.19009599089622498,
             "marginalReachMass": 0.00018015019304584712,
@@ -683,6 +978,10 @@
             ]
           },
           {
+            "actionEvs": [
+              2.098484754562378,
+              2.228219747543335
+            ],
             "cards": "5d Ad",
             "inputRangeWeight": 0.19009599089622498,
             "marginalReachMass": 0.00018015019304584712,
@@ -694,6 +993,10 @@
             ]
           },
           {
+            "actionEvs": [
+              2.098484754562378,
+              2.228219747543335
+            ],
             "cards": "5h Ah",
             "inputRangeWeight": 0.19009599089622498,
             "marginalReachMass": 0.00018015019304584712,
@@ -705,6 +1008,10 @@
             ]
           },
           {
+            "actionEvs": [
+              2.26893949508667,
+              2.41287899017334
+            ],
             "cards": "Kc Kd",
             "inputRangeWeight": 0.4198000133037567,
             "marginalReachMass": 0.0015913444804027677,
@@ -716,6 +1023,10 @@
             ]
           },
           {
+            "actionEvs": [
+              2.26893949508667,
+              2.41287899017334
+            ],
             "cards": "Kc Kh",
             "inputRangeWeight": 0.4198000133037567,
             "marginalReachMass": 0.0015913444804027677,
@@ -727,6 +1038,10 @@
             ]
           },
           {
+            "actionEvs": [
+              2.26893949508667,
+              2.41287899017334
+            ],
             "cards": "Kd Kh",
             "inputRangeWeight": 0.4198000133037567,
             "marginalReachMass": 0.0015913444804027677,
@@ -736,6 +1051,53 @@
               0.5,
               0.5
             ]
+          }
+        ],
+        "opponentHands": [
+          {
+            "cards": "Qc Qd",
+            "marginalReachMass": 0.0008857473731040955,
+            "nodeStrategyEv": -0.6105551719665527
+          },
+          {
+            "cards": "Qc Qh",
+            "marginalReachMass": 0.0008857473731040955,
+            "nodeStrategyEv": -0.6105551719665527
+          },
+          {
+            "cards": "Qc Qs",
+            "marginalReachMass": 0.0008857473731040955,
+            "nodeStrategyEv": -0.03515063598752022
+          },
+          {
+            "cards": "Qd Qh",
+            "marginalReachMass": 0.0008857473731040955,
+            "nodeStrategyEv": -0.6105551719665527
+          },
+          {
+            "cards": "Qd Qs",
+            "marginalReachMass": 0.0008857473731040955,
+            "nodeStrategyEv": -0.03515063598752022
+          },
+          {
+            "cards": "Qh Qs",
+            "marginalReachMass": 0.0008857473731040955,
+            "nodeStrategyEv": -0.03515063598752022
+          },
+          {
+            "cards": "Kc Ac",
+            "marginalReachMass": 0.0,
+            "nodeStrategyEv": null
+          },
+          {
+            "cards": "Kd Ad",
+            "marginalReachMass": 0.0,
+            "nodeStrategyEv": null
+          },
+          {
+            "cards": "Kh Ah",
+            "marginalReachMass": 0.0,
+            "nodeStrategyEv": null
           }
         ],
         "path": [
@@ -754,6 +1116,10 @@
         "board": "Ks 9s 2d Qc",
         "hands": [
           {
+            "actionEvs": [
+              0.025611206889152527,
+              -0.23488378524780273
+            ],
             "cards": "Qd Qh",
             "inputRangeWeight": 0.041999999433755875,
             "marginalReachMass": 0.00045788619900122285,
@@ -765,6 +1131,10 @@
             ]
           },
           {
+            "actionEvs": [
+              0.025611206889152527,
+              -0.23488378524780273
+            ],
             "cards": "Qd Qs",
             "inputRangeWeight": 0.041999999433755875,
             "marginalReachMass": 0.00045788619900122285,
@@ -776,6 +1146,10 @@
             ]
           },
           {
+            "actionEvs": [
+              0.025611206889152527,
+              -0.23488378524780273
+            ],
             "cards": "Qh Qs",
             "inputRangeWeight": 0.041999999433755875,
             "marginalReachMass": 0.00045788619900122285,
@@ -787,6 +1161,7 @@
             ]
           },
           {
+            "actionEvs": [],
             "cards": "Kc Ac",
             "inputRangeWeight": 0.32600000500679016,
             "marginalReachMass": 0.0,
@@ -795,6 +1170,7 @@
             "strategy": []
           },
           {
+            "actionEvs": [],
             "cards": "Kd Ad",
             "inputRangeWeight": 0.32600000500679016,
             "marginalReachMass": 0.0,
@@ -803,12 +1179,50 @@
             "strategy": []
           },
           {
+            "actionEvs": [],
             "cards": "Kh Ah",
             "inputRangeWeight": 0.32600000500679016,
             "marginalReachMass": 0.0,
             "nodeStrategyEv": null,
             "ownReachWeight": 0.0,
             "strategy": []
+          }
+        ],
+        "opponentHands": [
+          {
+            "cards": "5c Ac",
+            "marginalReachMass": 0.00004503754826146178,
+            "nodeStrategyEv": -0.4583336114883423
+          },
+          {
+            "cards": "5d Ad",
+            "marginalReachMass": 0.00004503754826146178,
+            "nodeStrategyEv": -0.4583336114883423
+          },
+          {
+            "cards": "5h Ah",
+            "marginalReachMass": 0.00004503754826146178,
+            "nodeStrategyEv": -0.4583336114883423
+          },
+          {
+            "cards": "5s As",
+            "marginalReachMass": 0.00004503754826146178,
+            "nodeStrategyEv": 0.01893920823931694
+          },
+          {
+            "cards": "Kc Kd",
+            "marginalReachMass": 0.0003978361201006919,
+            "nodeStrategyEv": 2.473484992980957
+          },
+          {
+            "cards": "Kc Kh",
+            "marginalReachMass": 0.0003978361201006919,
+            "nodeStrategyEv": 2.473484992980957
+          },
+          {
+            "cards": "Kd Kh",
+            "marginalReachMass": 0.0003978361201006919,
+            "nodeStrategyEv": 2.473484992980957
           }
         ],
         "path": [
@@ -828,6 +1242,10 @@
         "board": "Ks 9s 2d Qc Th",
         "hands": [
           {
+            "actionEvs": [
+              -0.25000011920928955,
+              -0.5000001192092896
+            ],
             "cards": "5c Ac",
             "inputRangeWeight": 0.19009599089622498,
             "marginalReachMass": 5.117903469908924e-7,
@@ -839,6 +1257,10 @@
             ]
           },
           {
+            "actionEvs": [
+              -0.25000011920928955,
+              -0.5000001192092896
+            ],
             "cards": "5d Ad",
             "inputRangeWeight": 0.19009599089622498,
             "marginalReachMass": 5.117903469908924e-7,
@@ -850,6 +1272,10 @@
             ]
           },
           {
+            "actionEvs": [
+              -0.25000011920928955,
+              -0.5000001192092896
+            ],
             "cards": "5h Ah",
             "inputRangeWeight": 0.19009599089622498,
             "marginalReachMass": 5.117903469908924e-7,
@@ -861,6 +1287,10 @@
             ]
           },
           {
+            "actionEvs": [
+              -0.25000011920928955,
+              -0.5000001192092896
+            ],
             "cards": "5s As",
             "inputRangeWeight": 0.19009599089622498,
             "marginalReachMass": 5.117903469908924e-7,
@@ -872,6 +1302,10 @@
             ]
           },
           {
+            "actionEvs": [
+              2.25,
+              2.5
+            ],
             "cards": "Kc Kd",
             "inputRangeWeight": 0.4198000133037567,
             "marginalReachMass": 4.5208648771222215e-6,
@@ -883,6 +1317,10 @@
             ]
           },
           {
+            "actionEvs": [
+              2.25,
+              2.5
+            ],
             "cards": "Kc Kh",
             "inputRangeWeight": 0.4198000133037567,
             "marginalReachMass": 4.5208648771222215e-6,
@@ -894,6 +1332,10 @@
             ]
           },
           {
+            "actionEvs": [
+              2.25,
+              2.5
+            ],
             "cards": "Kd Kh",
             "inputRangeWeight": 0.4198000133037567,
             "marginalReachMass": 4.5208648771222215e-6,
@@ -903,6 +1345,38 @@
               0.5,
               0.5
             ]
+          }
+        ],
+        "opponentHands": [
+          {
+            "cards": "Qd Qh",
+            "marginalReachMass": 5.203251930652186e-6,
+            "nodeStrategyEv": -0.01434796117246151
+          },
+          {
+            "cards": "Qd Qs",
+            "marginalReachMass": 5.203251930652186e-6,
+            "nodeStrategyEv": -0.01434796117246151
+          },
+          {
+            "cards": "Qh Qs",
+            "marginalReachMass": 5.203251930652186e-6,
+            "nodeStrategyEv": -0.01434796117246151
+          },
+          {
+            "cards": "Kc Ac",
+            "marginalReachMass": 0.0,
+            "nodeStrategyEv": null
+          },
+          {
+            "cards": "Kd Ad",
+            "marginalReachMass": 0.0,
+            "nodeStrategyEv": null
+          },
+          {
+            "cards": "Kh Ah",
+            "marginalReachMass": 0.0,
+            "nodeStrategyEv": null
           }
         ],
         "path": [
