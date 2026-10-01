@@ -172,10 +172,19 @@ export function ActionSummary({
                                 style={{ "--action": a.color } as CSSProperties}
                                 onClick={a.onSelect}
                                 disabled={!a.onSelect}
-                                title={a.size ? `${a.label} · ${a.size} pot` : a.label}
+                                title={
+                                    a.locked
+                                        ? "This branch has not been downloaded"
+                                        : a.size
+                                          ? `${a.label} · ${a.size} pot`
+                                          : a.label
+                                }
                             >
                                 <span className="action-card-name">
-                                    <h3>{a.label}</h3>
+                                    <h3>
+                                        {a.locked && "🔒 "}
+                                        {a.label}
+                                    </h3>
                                     {a.size && <small>{a.size} pot</small>}
                                 </span>
                                 <span className="action-card-stats">

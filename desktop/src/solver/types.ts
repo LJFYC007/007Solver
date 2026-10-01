@@ -36,6 +36,8 @@ export interface DecisionNode {
     hands: HandStrategy[];
     nodeId: number;
     kind: "decision";
+    /** Each player's node strategy EV averaged over joint reach; null without joint reach. */
+    rangeEvs: Record<Player, number | null>;
     state: NodeState;
 }
 
@@ -46,6 +48,8 @@ export interface ChanceNode {
         card: string;
         nextNodeId: number;
     }[];
+    /** Forced runouts only: the rake their showdowns pay. */
+    rake?: number;
     state: NodeState;
 }
 
@@ -60,6 +64,7 @@ export interface TerminalNode {
         | {
               reason: "showdown";
           };
+    rake: number;
     state: NodeState;
 }
 

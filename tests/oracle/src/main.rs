@@ -82,7 +82,9 @@ fn game_for(scenario: &Value, scale: f32) -> PostFlopGame {
         turn_bet_sizes: sizes("turn"),
         river_bet_sizes: sizes("river"),
         force_allin_threshold: scenario["bettingTree"]["allInSpr"].as_f64().unwrap(),
-        // Defaults disable rake, additional all-ins and merging of nearby sizes.
+        rake_rate: scenario["rakePercent"].as_f64().unwrap_or(0.0) / 100.0,
+        rake_cap: scenario["rakeCap"].as_f64().unwrap_or(0.0) * scale as f64,
+        // Defaults disable additional all-ins and merging of nearby sizes.
         ..Default::default()
     };
     let mut tree = ActionTree::new(tree).unwrap();
@@ -131,7 +133,7 @@ fn fixed_policy(game: &mut PostFlopGame) -> Value {
                 0.0
             } else {
                 1.0
-            }); // AKs / QQ
+            }); // AKs / TT
         }
         let entries: Vec<_> = hands
             .iter()

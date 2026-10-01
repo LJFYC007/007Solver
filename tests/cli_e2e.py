@@ -119,6 +119,8 @@ class CliEndToEndTest(unittest.TestCase):
         folded = self.follow(process, facing, "fold")
         self.assertEqual(folded["kind"], "terminal")
         self.assertEqual(folded["result"], {"reason": "fold", "foldedBy": "hero"})
+        # The fixture's 5% rake on the matched pot stays below its 3bb cap.
+        self.assertAlmostEqual(folded["rake"], 0.1, delta=1e-6)
         chance = self.follow(process, facing, "call")
         for card, street, count in [("Qc", "turn", 49), ("Th", "river", 48)]:
             self.assertEqual(chance["kind"], "chance")
@@ -135,6 +137,7 @@ class CliEndToEndTest(unittest.TestCase):
             chance = self.follow(process, self.follow(process, node, "check"), "check")
         self.assertEqual(chance["kind"], "terminal")
         self.assertEqual(chance["result"], {"reason": "showdown"})
+        self.assertAlmostEqual(chance["rake"], 0.2, delta=1e-6)
 
         # An invalid request fails alone among queued queries; EOF still answers every line.
         commands = {11: "unknown", 12: "query_equity", 13: "query_node", 14: "query_opponent_ev"}
@@ -159,16 +162,19 @@ class CliEndToEndTest(unittest.TestCase):
         values = [equity["players"][player]["equity"] for player in ("hero", "villain")]
         self.assertTrue(all(0 <= value <= 1 for value in values))
         self.assertAlmostEqual(sum(values), 1, delta=1e-5)
-        # The two players' joint-reach-weighted EVs split the pot.
+        # Range EVs average each player's joint-reach-weighted hand EVs; together they split the
+        # pot less the expected rake, between the 0.1bb and 0.5bb rakes of the smallest and largest pots.
         opponent = responses[14]["opponentEv"]
         self.assertEqual(opponent["player"], "hero")
-        evs = [
-            (hand["nodeStrategyEv"], hand["marginalReachMass"])
-            for hands in (root["hands"], opponent["hands"])
-            for hand in hands
-            if hand["nodeStrategyEv"] is not None
-        ]
-        self.assertAlmostEqual(sum(ev * mass for ev, mass in evs), root["state"]["pot"], delta=1e-4)
+        total = 0
+        for player, hands in (("villain", root["hands"]), ("hero", opponent["hands"])):
+            evs = [(hand["nodeStrategyEv"], hand["marginalReachMass"]) for hand in hands if hand["nodeStrategyEv"] is not None]
+            mass = sum(mass for _, mass in evs)
+            self.assertAlmostEqual(mass, 1, delta=1e-5)
+            self.assertAlmostEqual(root["rangeEvs"][player], sum(ev * mass for ev, mass in evs), delta=1e-5)
+            total += root["rangeEvs"][player]
+        self.assertGreaterEqual(total, root["state"]["pot"] - 0.5 - 1e-5)
+        self.assertLessEqual(total, root["state"]["pot"] - 0.1 + 1e-5)
 
     def test_stdin_auto_device_stops_at_accuracy(self):
         process, ready = self.start("raise-flop", stdin=True, accuracy=100)

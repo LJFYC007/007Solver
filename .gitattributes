@@ -4,3 +4,5 @@
 *.cmd text eol=crlf
 *.ico binary
 *.png binary
+# Raw capture checkpoints, stored byte for byte.
+resources/gtowizard-preflop/raw/*.raw.jsonl filter=lfs diff=lfs merge=lfs -text

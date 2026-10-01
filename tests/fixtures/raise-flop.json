@@ -7,6 +7,8 @@
     "heroStack": 8.0,
     "villainStack": 8.0,
     "iterations": 200,
+    "rakePercent": 0,
+    "rakeCap": 0,
     "bettingTree": {
         "oop": {
             "flop": {
@@ -65,16 +67,16 @@
     },
     "ranges": {
         "UTG": {
-            "KJs": 0.17351735173517352
+            "KJs": 0.255
         },
         "BB": {
-            "AQs": 0.35712856000000004
+            "AQs": 0.42565743
         }
     },
     "rangeSource": {
-        "catalog": "resources/gtowizard-preflop",
-        "sha256": "5f41502181c1777114f9ac5a72df24486e6ee8d6b22b8768f6a0d502bc83b741",
-        "solution": "6max",
+        "catalog": "resources/gtowizard-preflop/cases/Cash6mSimple_6mcEVR25_100",
+        "sha256": "ddf3b630c6664143bad58f7d440a2a53f39b60b551e007325067543f37406c3c",
+        "solution": "Cash6mSimple_6mcEVR25_100",
         "history": [
             {
                 "actor": "UTG",

@@ -1,0 +1,59 @@
+{
+  "scope": {
+    "format": "Cash",
+    "tableType": "Classic",
+    "postflopSizing": "single",
+    "players": "6max",
+    "stacks": [
+      100
+    ],
+    "openingSize": "2.5x",
+    "cashDrop": "-",
+    "preflopSizing": [
+      "No cold calls",
+      "With cold calls"
+    ],
+    "rake": [
+      "cEV",
+      "GG R&C"
+    ]
+  },
+  "targetCases": [
+    "Cash6mSimple_6mcEVR25_100",
+    "Cash6mSimple_6mGGrcR25_100",
+    "Cash6mGeneral_6mGGrcR25_100",
+    "Cash6mGeneral_6mcEVR25_100"
+  ],
+  "currentCase": "Cash6mSimple_6mcEVR25_100",
+  "requestIntervalMs": 0,
+  "concurrency": 1,
+  "casePriority": [
+    "Cash6mSimple_6mcEVR25_100",
+    "Cash6mSimple_6mGGrcR25_100",
+    "Cash6mGeneral_6mGGrcR25_100",
+    "Cash6mGeneral_6mcEVR25_100"
+  ],
+  "browsers": {
+    "edge": [
+      "Cash6mSimple_6mcEVR25_100",
+      "Cash6mSimple_6mGGrcR25_100",
+      "Cash6mGeneral_6mGGrcR25_100"
+    ],
+    "chrome": [
+      "Cash6mGeneral_6mcEVR25_100"
+    ]
+  },
+  "nodePriority": "Shortest source history first, then fewer raises; skip known nodes and stop at source ZERO_RANGE",
+  "selectionPolicy": "Open an unlocked target after its root node is saved. Missing node branches remain locked.",
+  "nodesPerChunk": 128,
+  "stopOn": [
+    "HTTP error other than 401",
+    "daily browsing limit",
+    "security prompt",
+    "CAPTCHA",
+    "login required"
+  ],
+  "siteDailyLimit": null,
+  "siteResetTime": null,
+  "note": "Start all four cases afresh. No self-imposed daily request cap. Keep the shared stop ledger when discarding old strategies; other account activity can consume quota."
+}

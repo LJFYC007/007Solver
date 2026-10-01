@@ -153,12 +153,16 @@ function backdoorFlushCards(hole: readonly string[], board: readonly string[]): 
     );
 }
 
+/** Both unpaired hole ranks in a three-rank run with a board card; false when the hand already has a straight. */
 function hasBackdoorStraight(hole: readonly string[], board: readonly string[]): boolean {
     const [first, second] = hole.map((card) => rankBits(rankOf(card)));
     const boardMask = rankMask(board);
     if (first === second || (first | second) & boardMask) return false;
     const mask = first | second | boardMask;
-    return BACKDOOR_RUNS.some((run) => (mask & run) === run && (first & run) !== 0 && (second & run) !== 0);
+    return (
+        !hasStraight(mask) &&
+        BACKDOOR_RUNS.some((run) => (mask & run) === run && (first & run) !== 0 && (second & run) !== 0)
+    );
 }
 
 export function classifyDraw(hole: readonly string[], board: readonly string[]): string | undefined {

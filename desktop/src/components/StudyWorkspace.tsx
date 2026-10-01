@@ -35,11 +35,59 @@ import SolutionSettings from "./SolutionSettings";
 import PreflopTimeline from "./PreflopTimeline";
 import { PostflopTimeline } from "./PostflopTimeline";
 import WindowControls from "./WindowControls";
+import { capturedSolutions } from "../solver/catalog";
 
 export default function StudyWorkspace(props: StudyWorkspaceProps) {
+    if (!capturedSolutions.length)
+        return (
+            <main className={`app-shell${isDesktopApp ? "" : " browser"}`}>
+                <StudyHeader />
+                <div className="study-browser">
+                    <SolutionSettings disabled={false} onChange={() => {}} onReset={() => {}} />
+                    <nav className="spot-timeline" aria-label="Action history" />
+                </div>
+                <div className="workspace">
+                    <section className="strategy-panel">
+                        <div className="panel-strip-title strategy-toolbar">Strategy</div>
+                        <div className="study-placeholder">
+                            <h2>🔒 No downloaded solutions</h2>
+                            <p>Open Change to browse the solutions library.</p>
+                            <p>Saved branches unlock as the daily capture progresses.</p>
+                        </div>
+                    </section>
+                    <aside className="inspector">
+                        <section className="line-complete">Select a downloaded solution to study.</section>
+                    </aside>
+                </div>
+            </main>
+        );
+    return <LoadedStudyWorkspace {...props} />;
+}
+
+function StudyHeader() {
+    return (
+        isDesktopApp && (
+            <header className="app-header" data-tauri-drag-region>
+                <div className="brand" data-tauri-drag-region>
+                    <div className="brand-mark" data-tauri-drag-region>
+                        007
+                    </div>
+                    <strong data-tauri-drag-region>007 Solver</strong>
+                    <span className="preflop-nav-label" data-tauri-drag-region>
+                        Study
+                    </span>
+                </div>
+                <WindowControls />
+            </header>
+        )
+    );
+}
+
+function LoadedStudyWorkspace(props: StudyWorkspaceProps) {
     const { root, status, generation, changing } = props;
     const {
         format,
+        loading,
         history,
         preIndex,
         board,
@@ -172,24 +220,11 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
     return (
         <main className={`app-shell${isDesktopApp ? "" : " browser"}`}>
             {/* Browsers have no window for a title bar to move or control. */}
-            {isDesktopApp && (
-                <header className="app-header" data-tauri-drag-region>
-                    <div className="brand" data-tauri-drag-region>
-                        <div className="brand-mark" data-tauri-drag-region>
-                            007
-                        </div>
-                        <strong data-tauri-drag-region>007 Solver</strong>
-                        <span className="preflop-nav-label" data-tauri-drag-region>
-                            Study
-                        </span>
-                    </div>
-                    <WindowControls />
-                </header>
-            )}
+            <StudyHeader />
             <div className="study-browser">
                 <SolutionSettings
                     format={format}
-                    disabled={changing}
+                    disabled={changing || loading}
                     onChange={(value) => void reset(value)}
                     onReset={() => void reset()}
                 />
@@ -198,7 +233,7 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                         entries={preflop.timeline}
                         history={history}
                         activeIndex={preIndex}
-                        disabled={changing}
+                        disabled={changing || loading}
                         onView={viewPreTimeline}
                         onAction={(entry, action) => void choose(entry.history, entry.node.actor, action)}
                     />
@@ -330,7 +365,11 @@ export default function StudyWorkspace(props: StudyWorkspaceProps) {
                             onBoard: boardAction,
                         }}
                     />
-                    {view.panel === "solve" ? (
+                    {strategy.unavailable || loading ? (
+                        <section className="line-complete" role="status">
+                            <strong>{loading ? "Loading strategy…" : strategy.unavailable}</strong>
+                        </section>
+                    ) : view.panel === "solve" ? (
                         <SolvePanel
                             board={board}
                             status={status}

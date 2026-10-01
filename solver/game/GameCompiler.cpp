@@ -2,6 +2,7 @@
 #include "game/BettingRules.h"
 #include "game/CompiledGame.h"
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 
@@ -117,6 +118,9 @@ std::shared_ptr<const CompiledGame> CompileGame(const GameSpec& spec)
         throw std::invalid_argument("The game compiler requires a three-card flop");
     if (spec.initialPot < core::Chips{} || spec.initialStacks[0] < core::Chips{} || spec.initialStacks[1] < core::Chips{})
         throw std::invalid_argument("Game pot and stacks cannot be negative");
+    if (!std::isfinite(spec.rakePercent) || spec.rakePercent < 0.0f || spec.rakePercent > 100.0f || !std::isfinite(spec.rakeCap) ||
+        spec.rakeCap < 0.0f)
+        throw std::invalid_argument("Rake percent must be between 0 and 100 and rake cap must be finite and non-negative");
     const std::int64_t maximumPot = static_cast<std::int64_t>(spec.initialPot.Raw()) +
                                     2 * static_cast<std::int64_t>(std::min(spec.initialStacks[0], spec.initialStacks[1]).Raw());
     if (maximumPot > std::numeric_limits<std::int32_t>::max())

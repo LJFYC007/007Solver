@@ -4,6 +4,7 @@
 #include <algorithm>
 #include "game/BettingRules.h"
 #include "game/CompiledGame.h"
+#include "game/TerminalSettlement.h"
 #include <cstdint>
 #include <map>
 #include <stdexcept>
@@ -31,11 +32,14 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
     if (node.Kind() == game::NodeKind::Terminal)
     {
         report.terminal = node.Terminal();
+        report.rake = game::TerminalRake(result_.Problem().game->Spec(), node.State());
         return report;
     }
 
     if (node.Kind() == game::NodeKind::Chance)
     {
+        if (node.IsForcedRunout())
+            report.rake = game::TerminalRake(result_.Problem().game->Spec(), node.State());
         // A card is unavailable only if every supported private pair blocks it.
         // Inspect the current reach without populating caches for unvisited children.
         const auto blockedByAll = reachCalculator_.CommonBlockers(currentReach, node.State().board);
@@ -58,6 +62,8 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
         nodeId, result_.Problem().ranges.For(player), marginalReachMasses, currentReach.ownReachWeights[player.Index()], player
     );
     const auto evs = JointReachEvs(nodeId, player, marginalReachMasses);
+    // Joint reach weights the hands with EVs and the rake they expect to pay.
+    double value = 0.0, rake = 0.0, mass = 0.0;
     for (auto& hand : report.hands)
     {
         const auto ev = evs.find(hand.cards);
@@ -65,7 +71,16 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
         {
             hand.nodeStrategyEv = ev->second.ev;
             hand.actionEvs = ev->second.actionEvs;
+            value += static_cast<double>(hand.marginalReachMass) * ev->second.ev;
+            rake += static_cast<double>(hand.marginalReachMass) * ev->second.expectedRake;
+            mass += hand.marginalReachMass;
         }
+    }
+    if (mass > 0.0)
+    {
+        // Each terminal's two node EVs sum to the pot at this node less the rake it pays.
+        report.rangeEvs[player.Index()] = static_cast<float>(value / mass);
+        report.rangeEvs[player.Other().Index()] = static_cast<float>(core::ToChipUnits(node.State().pot) - (value + rake) / mass);
     }
 
     for (std::size_t edgeIndex = 0; edgeIndex < node.BettingEdgeCount(); ++edgeIndex)

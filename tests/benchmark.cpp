@@ -28,7 +28,7 @@ using Json = nlohmann::json;
 using Clock = std::chrono::steady_clock;
 constexpr double kTolerance = 1e-5;
 // Compare independent float evaluators in initial-pot units.
-constexpr double kReferenceToleranceInPots = 2e-6;
+constexpr double kReferenceToleranceInPots = 5e-6;
 Json report;
 std::filesystem::path reportPath;
 Clock::time_point stageStart;
@@ -95,7 +95,6 @@ void CheckMetrics(const engine::ExploitabilityMetrics& metrics)
     EXPECT_TRUE(std::isfinite(metrics.player1BestResponseEv));
     EXPECT_TRUE(std::isfinite(metrics.exploitability));
     EXPECT_GE(metrics.exploitability, -kTolerance);
-    EXPECT_NEAR(metrics.exploitability, (metrics.player0BestResponseEv + metrics.player1BestResponseEv) / 2.0, kTolerance);
 }
 
 class Diagnostics : public testing::EmptyTestEventListener

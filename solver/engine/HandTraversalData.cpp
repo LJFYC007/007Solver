@@ -41,19 +41,25 @@ HandTraversalData::HandTraversalData(const SolveProblem& problem, game::NodeId r
         else
         {
             game::TerminalSettlement settlement{
-                state.pot, {rootState.stacks[0] - state.stacks[0], rootState.stacks[1] - state.stacks[1]}, std::nullopt
+                state.pot,
+                {rootState.stacks[0] - state.stacks[0], rootState.stacks[1] - state.stacks[1]},
+                std::nullopt,
+                game::TerminalRake(tables.game->Spec(), state),
             };
+            node.rake = settlement.rake;
             if (kind == Kind::Fold)
             {
                 settlement.winner = source.Terminal().foldedPlayer->Other();
-                node.utilities[0] = settlement.NetPayoffFromStart(core::PlayerId::Player0()) - rootHalfPot;
+                node.utilities[0][0] = settlement.NetPayoffFromStart(core::PlayerId::Player0()) - rootHalfPot;
+                node.utilities[1][0] = -node.utilities[0][0] - settlement.rake;
             }
             else
             {
                 for (std::size_t outcome = 0; outcome < 3; ++outcome)
                 {
                     settlement.winner = outcome == 1 ? std::nullopt : std::optional<core::PlayerId>(core::PlayerId(outcome == 0 ? 0 : 1));
-                    node.utilities[outcome] = settlement.NetPayoffFromStart(core::PlayerId::Player0()) - rootHalfPot;
+                    node.utilities[0][outcome] = settlement.NetPayoffFromStart(core::PlayerId::Player0()) - rootHalfPot;
+                    node.utilities[1][2 - outcome] = -node.utilities[0][outcome] - settlement.rake;
                 }
                 if (kind == Kind::Showdown)
                     node.rankRow = tables.RankRow(state.board);

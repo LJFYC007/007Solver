@@ -58,8 +58,8 @@ MemoryEstimate EstimateCpuMemory(const SolveProblem& problem, int workers)
     const std::uint64_t trainingPeak =
         TrainingStateBytes(counts) + sizeof(std::uint32_t) * size.traversalNodes + workspace + storage.runoutOutcomesBytes;
     // Checkpoints borrow sums while all training allocations remain resident; evaluation
-    // walks use the default team.
-    const std::uint64_t evaluationWalk = storage.WalkBytes(CpuWorkerCount());
+    // walks use the default team, and raked games walk policy values beside the best response.
+    const std::uint64_t evaluationWalk = storage.WalkBytes(CpuWorkerCount(), problem.game->Spec().HasRake() ? 2 : 1);
     const auto checkpointPeak = trainingPeak + evaluationWalk;
     // Final export releases regrets and workspaces before allocating the snapshot, whose
     // probabilities are normalized from the still resident quantized sums. Strategy entries

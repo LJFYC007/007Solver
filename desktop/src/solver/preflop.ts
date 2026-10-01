@@ -1,7 +1,14 @@
 import { HAND_CLASSES, handClassCombos } from "./strategy";
 import type { DecisionAction } from "./types";
 import type { BettingTree } from "./bettingTree";
-import { nodeFor, solutionFor, type PreflopChoice, type PreflopNode, type TableFormat } from "./catalog";
+import {
+    nodeFor,
+    solutionFor,
+    type PreflopChoice,
+    type PreflopLine,
+    type PreflopNode,
+    type TableFormat,
+} from "./catalog";
 
 export const probabilities = (node: PreflopNode, hand: string) => {
     const row = node.hands[hand];
@@ -36,6 +43,7 @@ export function aggregatePreflopActions(node: PreflopNode, range: Record<string,
         kind: preflopActionKind(action.label),
         label: action.label,
         color: action.color,
+        locked: action.locked,
         probability: total > 0 ? totals[index] / total : 0,
         combos: totals[index],
     }));
@@ -49,7 +57,6 @@ export interface PreflopSeat {
 }
 export interface PreflopState {
     seats: PreflopSeat[];
-    pending: string[];
     pot: number;
     complete: boolean;
 }
@@ -62,8 +69,8 @@ export function preflopOutcome(state: PreflopState, stack: number) {
     return alive.length === 2 ? "headsUp" : "multiway";
 }
 
-export function replayPreflop(format: TableFormat, history: PreflopChoice[]): PreflopState {
-    const solution = solutionFor(format);
+export function replayPreflop(line: PreflopLine, history: PreflopChoice[]): PreflopState {
+    const solution = solutionFor(line.format);
     const seats: PreflopSeat[] = solution.positions.map((position) => ({
         position,
         committed:
@@ -71,15 +78,24 @@ export function replayPreflop(format: TableFormat, history: PreflopChoice[]): Pr
         folded: false,
         range: Object.fromEntries(HAND_CLASSES.map((hand) => [hand, 1])),
     }));
-    let pending = [...solution.positions];
     let highest = solution.bigBlind + solution.ante;
+    let complete = false;
+    const sourceRanges = (node?: PreflopNode) => {
+        for (const seat of seats) {
+            const range = node?.incomingRanges?.[seat.position];
+            if (range) seat.range = range;
+        }
+    };
     for (let index = 0; index < history.length; index++) {
         const choice = history[index];
-        const node = nodeFor(format, history.slice(0, index));
-        if (!node || node.actor !== choice.actor || pending[0] !== choice.actor)
+        const node = nodeFor(line, history.slice(0, index));
+        if (complete || !node || node.actor !== choice.actor)
             throw new Error("This action history has no captured strategy.");
+        if (node.sourceWarning === "ZERO_RANGE") throw new Error("zero_range");
         const actionIndex = node.actions.findIndex((action) => action.label === choice.action);
         if (actionIndex < 0) throw new Error("This action is absent from the captured solution.");
+        sourceRanges(node);
+        complete = node.actions[actionIndex].next.kind !== "node";
         const seat = seats.find((item) => item.position === choice.actor)!;
         // Empty source cells carry no usable strategy; never invent a continuation for them.
         seat.range = Object.fromEntries(
@@ -88,7 +104,6 @@ export function replayPreflop(format: TableFormat, history: PreflopChoice[]): Pr
                 return probability && weight > 0 ? [[hand, weight * probability]] : [];
             }),
         );
-        pending = pending.slice(1);
         if (choice.action === "Fold") seat.folded = true;
         else if (choice.action === "Call") seat.committed = Math.min(solution.stack, highest);
         else if (choice.action === "Check") {
@@ -99,25 +114,15 @@ export function replayPreflop(format: TableFormat, history: PreflopChoice[]): Pr
                 throw new Error("Invalid source raise size.");
             seat.committed = amountTo;
             highest = amountTo;
-            const seatIndex = seats.indexOf(seat);
-            pending = [...seats.slice(seatIndex + 1), ...seats.slice(0, seatIndex)]
-                .filter((item) => !item.folded && item.committed < solution.stack)
-                .map((item) => item.position);
         }
-        if (seats.filter((item) => !item.folded).length === 1) pending = [];
-        // With no opponent able to act, an all-in needs only the outstanding call/fold decision.
-        if (
-            pending.length === 1 &&
-            seats.filter((item) => !item.folded && item.committed < solution.stack).length === 1 &&
-            seats.find((item) => item.position === pending[0])!.committed === highest
-        )
-            pending = [];
     }
+    const current = nodeFor(line, history);
+    if (history.length && !complete && !current) throw new Error("This branch has not been downloaded.");
+    sourceRanges(current);
     return {
         seats,
-        pending,
         pot: seats.reduce((sum, seat) => sum + seat.committed, 0),
-        complete: pending.length === 0,
+        complete,
     };
 }
 
@@ -129,6 +134,8 @@ export interface PostflopScenario {
     initialPot: number;
     heroStack: number;
     villainStack: number;
+    rakePercent: number;
+    rakeCap: number;
     iterations: number;
     accuracyPercent: number;
     bettingTree: BettingTree;
@@ -136,15 +143,15 @@ export interface PostflopScenario {
     rangeSource: { solution: TableFormat; history: PreflopChoice[] };
 }
 export function postflopScenario(
-    format: TableFormat,
+    line: PreflopLine,
     history: PreflopChoice[],
     board: string[],
     iterations: number,
     accuracyPercent: number,
     bettingTree: BettingTree,
 ): PostflopScenario {
-    const state = replayPreflop(format, history);
-    const solution = solutionFor(format);
+    const state = replayPreflop(line, history);
+    const solution = solutionFor(line.format);
     const alive = state.seats.filter((seat) => !seat.folded);
     if (!state.complete || alive.length !== 2) throw new Error("Select a completed heads-up preflop line.");
     if (preflopOutcome(state, solution.stack) === "allIn")
@@ -175,10 +182,12 @@ export function postflopScenario(
         initialPot: state.pot,
         heroStack: solution.stack - hero.committed,
         villainStack: solution.stack - villain.committed,
+        rakePercent: solution.rakePercent,
+        rakeCap: solution.rakeCap,
         iterations,
         accuracyPercent,
         bettingTree,
         ranges: { [hero.position]: hero.range, [villain.position]: villain.range },
-        rangeSource: { solution: format, history },
+        rangeSource: { solution: line.format, history },
     };
 }

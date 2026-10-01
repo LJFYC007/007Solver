@@ -16,7 +16,8 @@ export interface SpotSummary {
     toCall?: number;
     players?: Record<Player, string>;
     nodeId?: number;
-    showdown?: boolean;
+    /** At a showdown or forced runout, the pot after rake that equity shares. */
+    showdownPot?: number;
     selectedHand?: string;
     onSeat?: (seat: string) => void;
     onBoard?: () => void;
@@ -38,7 +39,7 @@ function PlayerStats({ spot, data }: { spot: SpotSummary; data?: EquityReport })
             {seats.map(({ seat, player }) => {
                 if (!seat) return null;
                 const equity = player ? data?.players[player].equity : undefined;
-                const ev = spot.showdown && equity != null ? equity * spot.pot : seat.ev;
+                const ev = spot.showdownPot !== undefined && equity != null ? equity * spot.showdownPot : seat.ev;
                 const eqr = equityRealization(ev, equity, spot.pot);
                 return (
                     <article key={seat.position}>
@@ -134,7 +135,7 @@ export default function SpotOverview({ spot, equityCache }: { spot: SpotSummary;
                                 title={
                                     potOdds === undefined
                                         ? "No call to make"
-                                        : `Call ${formatNumber(spot.toCall!)} / ${formatNumber(spot.pot + spot.toCall!)} pot after calling. Break-even equity if no further betting.`
+                                        : `Call ${formatNumber(spot.toCall!)} / ${formatNumber(spot.pot + spot.toCall!)} pot after calling. Break-even equity if no further betting and no rake.`
                                 }
                             >
                                 <span>Pot odds ⓘ</span>

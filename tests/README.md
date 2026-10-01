@@ -32,9 +32,9 @@ cmake --build --preset RelWithDebInfo --target 007SolverBenchmark
 
 Direct invocation accepts `--report=<new-json-path>`, `--iterations=<count>`, `--workers=<count>` and `--device=cpu|gpu|auto`. It defaults to CPU; `--workers` affects only CPU training. See [benchmark.cpp](benchmark.cpp) for workload and report definitions.
 
-The [workload](fixtures/utg-bb-wide.json) uses full 8-max UTG open / BB call single-raised-pot ranges, pot 5.5bb, stacks 97.5bb, three-street bets of 33%/125%, raises of 50%, and 1000 player updates. `maxRaises: 2` and `allInSpr: 0` preserve larger branches. Its ranges hold 172 and 291 hands on its flop (the report's `legal_hands`); GPU kernels take other paths and batch differently for wider ranges, so also time GPU performance changes on a scenario with wider catalog ranges, such as both players' full ranges from the catalog's root node.
+The [workload](fixtures/utg-bb-wide.json) uses full 6-max GG R&C UTG open / BB call single-raised-pot ranges with 5% rake capped at 3bb, pot 5.5bb, stacks 97.5bb, three-street bets of 33%/125%, raises of 50%, and 1000 player updates. `maxRaises: 2` and `allInSpr: 0` preserve larger branches. Its ranges hold 254 and 287 hands on its flop (the report's `legal_hands`); GPU kernels take other paths and batch differently for wider ranges, so also time GPU performance changes on a scenario with wider catalog ranges, such as both players' full ranges from the catalog's root node.
 
-Passing checks the independent uniform reference (`2e-6` initial-pot tolerance), training improvement and root queries; it **does not require convergence**. Reports include the tree size, updates per second, achieved accuracy and `target_reached`.
+Passing checks the independent uniform reference (`5e-6` initial-pot tolerance), training improvement and root queries; it **does not require convergence**. Reports include the tree size, updates per second, achieved accuracy and `target_reached`.
 
 `--convergence` records periodic checkpoints; `--stop-at-accuracy` also permits early stopping under the [CPU certification contract](../solver/ARCHITECTURE.md#training-and-memory). The exported snapshot is independently evaluated. Checkpoint time is separate from training time.
 
@@ -42,7 +42,7 @@ Compare runs without competing builds/solves, holding inputs, references, update
 
 ## Updating inputs and references
 
-All ranges derive from [the captured catalog](../resources/gtowizard-preflop/); fixture subsets and pot/stack provenance are recorded in each input's `rangeSource`. Edit scenario definitions in [sync-preflop-fixtures.py](../scripts/sync-preflop-fixtures.py), then regenerate inputs:
+The four fixtures derive from [captured cases](../resources/gtowizard-preflop/cases/) the way the desktop replays preflop lines. The benchmark, backend parity and weighted-flop inputs use the 6-max Simple GG R&C case (5% rake, 3bb cap); raise-flop uses the rake-free cEV case. Each input's `rangeSource` records its history, fixture subsets, pot/stack reductions and the sha256 of the saved nodes it reads. Edit scenario definitions in [sync-preflop-fixtures.py](../scripts/sync-preflop-fixtures.py), then regenerate inputs:
 
 ```sh
 python scripts/sync-preflop-fixtures.py

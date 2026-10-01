@@ -1,6 +1,15 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { isForcedRunout, type ChanceNode, type SolverNode, type SolverStatus } from "../solver";
-import { choiceKey, solutionFor, type PreflopChoice, type TableFormat } from "../solver/catalog";
+import {
+    capturedSolutions,
+    choiceKey,
+    loadPreflopLine,
+    solutionFor,
+    unloadedLine,
+    type PreflopChoice,
+    type PreflopLine,
+    type TableFormat,
+} from "../solver/catalog";
 import { postflopScenario, preflopOutcome, replayPreflop, type PostflopScenario } from "../solver/preflop";
 import { buildStudyView } from "../solver/study";
 import { defaultBettingTree, parseBettingTree } from "../solver/bettingTree";
@@ -28,7 +37,9 @@ export function useStudyWorkspace({
     onSolve,
     onInvalidate,
 }: StudyWorkspaceProps) {
-    const [format, setFormat] = useState<TableFormat>("6max");
+    const [line, setLine] = useState(() => unloadedLine(capturedSolutions[0].id));
+    const format = line.format;
+    const [loading, setLoading] = useState(true);
     const [history, setHistory] = useState<PreflopChoice[]>([]);
     const [preIndex, setPreIndex] = useState<number | null>(0);
     const [board, setBoard] = useState<string[]>([]);
@@ -39,13 +50,17 @@ export function useStudyWorkspace({
     const [error, setError] = useState<string>();
     const [picker, setPicker] = useState<{ kind: "flop" } | { kind: "runout"; node: ChanceNode; index: number }>();
     const editing = useRef(false);
+    // The first line loads like any later change; the editing guard skips a repeated mount effect.
+    const loadFirstLine = useEffectEvent(() => void reset());
+    useEffect(() => loadFirstLine(), []);
     const navigation = useSolverNavigation(root, generation);
     const solveState = status.state;
     const solveError = status.state === "failed" ? status.message : "";
     const view = useMemo(
         () =>
             buildStudyView({
-                format,
+                line,
+                loading,
                 history,
                 preIndex,
                 board,
@@ -57,7 +72,8 @@ export function useStudyWorkspace({
                 solveError,
             }),
         [
-            format,
+            line,
+            loading,
             history,
             preIndex,
             board,
@@ -91,47 +107,64 @@ export function useStudyWorkspace({
         }
         await changeLine(next);
     }
-    async function changeStudy(apply: () => void) {
+    async function changeStudy(apply: (line: PreflopLine) => void, prepare?: () => Promise<PreflopLine>) {
         if (editing.current) return;
         editing.current = true;
+        setLoading(true);
         navigation.suspend();
         setPicker(undefined);
         try {
+            const next = (await prepare?.()) ?? line;
             await onInvalidate();
-            apply();
+            setLine(next);
+            apply(next);
             setError(undefined);
         } catch (failure) {
             setError(String(failure));
         } finally {
             editing.current = false;
+            setLoading(false);
         }
     }
+    /** Loads a line and validates it by replay before the current solve is discarded. */
+    function prepareLine(nextFormat: TableFormat, nextHistory: PreflopChoice[]) {
+        return async () => {
+            const next = await loadPreflopLine(nextFormat, nextHistory, line);
+            replayPreflop(next, nextHistory);
+            return next;
+        };
+    }
     async function changeLine(next: PreflopChoice[]) {
-        await changeStudy(() => {
-            const nextState = replayPreflop(format, next);
-            setHistory(next);
-            setPreIndex(next.length);
-            setBoard([]);
-            setRangeSeat(undefined);
-            setPicker(
-                preflopOutcome(nextState, solutionFor(format).stack) === "headsUp" ? { kind: "flop" } : undefined,
-            );
-        });
+        await changeStudy(
+            (nextLine) => {
+                const nextState = replayPreflop(nextLine, next);
+                setHistory(next);
+                setPreIndex(next.length);
+                setBoard([]);
+                setRangeSeat(undefined);
+                setPicker(
+                    preflopOutcome(nextState, solutionFor(format).stack) === "headsUp" ? { kind: "flop" } : undefined,
+                );
+            },
+            prepareLine(format, next),
+        );
     }
     async function reset(nextFormat = format) {
-        await changeStudy(() => {
-            setFormat(nextFormat);
-            setHistory([]);
-            setPreIndex(0);
-            setBoard([]);
-            setRangeSeat(undefined);
-        });
+        await changeStudy(
+            () => {
+                setHistory([]);
+                setPreIndex(0);
+                setBoard([]);
+                setRangeSeat(undefined);
+            },
+            prepareLine(nextFormat, []),
+        );
     }
     async function solve() {
         if (editing.current || view.busy) return;
         try {
             const next = postflopScenario(
-                format,
+                line,
                 history,
                 board,
                 iterations,
@@ -225,15 +258,16 @@ export function useStudyWorkspace({
         const preNode = view.preflop.node;
         return {
             ...action,
-            onSelect: changing
-                ? undefined
-                : view.showPostflop
-                  ? nodeId !== undefined && !navigation.navigationPending
-                      ? () => void actPost(navigation.activeIndex, nodeId)
-                      : undefined
-                  : preNode
-                    ? () => void choose(view.preflop.shownHistory, preNode.actor, action.label)
-                    : undefined,
+            onSelect:
+                changing || loading || action.locked
+                    ? undefined
+                    : view.showPostflop
+                      ? nodeId !== undefined && !navigation.navigationPending
+                          ? () => void actPost(navigation.activeIndex, nodeId)
+                          : undefined
+                      : preNode
+                        ? () => void choose(view.preflop.shownHistory, preNode.actor, action.label)
+                        : undefined,
         };
     });
     const boardAction =
@@ -246,6 +280,7 @@ export function useStudyWorkspace({
                 : undefined;
     return {
         format,
+        loading,
         history,
         preIndex,
         board,

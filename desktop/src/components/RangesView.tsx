@@ -1,5 +1,5 @@
 import { type CSSProperties, useMemo, useState } from "react";
-import { type DecisionNode, type EquityReport, type Player, nodeEv, strategyGradient } from "../solver";
+import { type DecisionNode, type EquityReport, type Player, strategyGradient } from "../solver";
 import { type ReportCache, useNodeReport } from "../hooks/useNodeReport";
 import {
     PLAYERS,
@@ -83,7 +83,7 @@ export default function RangesView({
             sides.map((side) => postflopCells({ node, rows: side.rows, mode: side.acting ? actorMode : waitingMode })),
         [node, sides, actorMode, waitingMode],
     );
-    const evs = useMemo(() => PLAYERS.map((player) => nodeEv(node, player)), [node]);
+    const evs = PLAYERS.map((player) => node.rangeEvs[player] ?? undefined);
     const equities = PLAYERS.map((player) => report?.players[player].equity);
     const eqrs = PLAYERS.map((_, i) => equityRealization(evs[i], equities[i], pot));
     const bucketSection = BUCKET_SECTIONS.find((section) => section.id === buckets)!;

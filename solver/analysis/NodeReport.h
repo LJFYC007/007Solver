@@ -73,5 +73,10 @@ struct NodeReport
     std::vector<ActionReport> actions;
     std::vector<ChanceOutcomeReport> outcomes;
     std::optional<game::TerminalOutcome> terminal;
+    // Terminals and chance nodes after an all-in, whose pot is final: the rake a showdown or fold
+    // there pays (see game::TerminalRake).
+    std::optional<float> rake;
+    // Decision only: each player's node strategy EV averaged over joint reach, without joint reach null.
+    std::array<std::optional<float>, 2> rangeEvs{};
 };
 } // namespace solver::analysis

@@ -16,5 +16,10 @@ struct GameSpec
     std::array<core::Chips, 2> initialStacks;
     core::PlayerId outOfPositionPlayer;
     BettingAbstraction bettingAbstraction;
+    // Rake is capped in scenario chip units; either zero disables it.
+    float rakePercent = 0.0f;
+    float rakeCap = 0.0f;
+
+    bool HasRake() const { return rakePercent > 0.0f && rakeCap > 0.0f; }
 };
 } // namespace solver::game

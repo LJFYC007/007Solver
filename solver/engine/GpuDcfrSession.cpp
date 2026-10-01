@@ -24,8 +24,9 @@ GpuDcfrSession::GpuDcfrSession(const SolveProblem& problem)
     const auto host = size.storageBytes + fixed.fixedBytes;
     const auto sumsBytes = plan.Buffers()[gpu::SumsBuffer].bytes;
     const auto initialization = device + plan.HostBytes();
-    // CPU certification evaluates a host copy of the sums while training stays resident.
-    const auto certification = device + sumsBytes + fixed.WalkBytes(CpuWorkerCount());
+    // CPU certification evaluates a host copy of the sums while training stays resident; raked
+    // games walk policy values beside the best response.
+    const auto certification = device + sumsBytes + fixed.WalkBytes(CpuWorkerCount(), problem.game->Spec().HasRake() ? 2 : 1);
     const auto snapshot = StrategySnapshot::EstimateStorageBytes(size.decisionNodes[0] + size.decisionNodes[1], counts.strategyEntries);
     // Download releases other device buffers first; the snapshot's probabilities are
     // normalized from the downloaded sums.
@@ -54,15 +55,23 @@ void GpuDcfrSession::Update(std::size_t player, const UpdateWeights& weights)
 
 ExploitabilityMetrics GpuDcfrSession::EvaluateExploitability() const
 {
-    auto state = state_;
-    state.evaluation = 1;
-    std::array<std::vector<float>, 2> values;
-    for (gpu::U32 p = 0; p < 2; ++p)
-    {
-        state.player = p;
-        values[p] = executor_->RootValues(state);
-    }
-    return RootExploitability(data_->tables, values);
+    return RootExploitability(
+        data_->tables,
+        [&](std::size_t player, bool policy)
+        {
+            auto state = state_;
+            state.player = static_cast<gpu::U32>(player);
+            state.evaluation = gpu::Evaluation::BestResponse;
+            auto values = executor_->RootValues(state);
+            if (policy)
+            {
+                state.evaluation = gpu::Evaluation::StrategyValue;
+                const auto policyValues = executor_->RootValues(state);
+                values.insert(values.end(), policyValues.begin(), policyValues.end());
+            }
+            return values;
+        }
+    );
 }
 
 ExploitabilityMetrics GpuDcfrSession::EvaluateExploitabilityOnCpu() const

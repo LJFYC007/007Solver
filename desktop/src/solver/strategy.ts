@@ -1,4 +1,4 @@
-import type { DecisionAction, DecisionNode, HandStrategy, Player, SolverNode } from "./types";
+import type { DecisionAction, DecisionNode, HandStrategy, SolverNode } from "./types";
 
 export const isForcedRunout = (node?: SolverNode) =>
     node?.kind === "chance" && (node.state.stacks.hero === 0 || node.state.stacks.villain === 0);
@@ -187,19 +187,6 @@ export function weightedMean<T>(
         total += w;
     }
     return total > 0 ? sum / total : undefined;
-}
-
-/**
- * A player's EV at a decision node. The actor's is weighted by joint reach, and hands without an EV do not
- * count; the waiting player holds the rest of the pot.
- */
-export function nodeEv(node: DecisionNode, player: Player): number | undefined {
-    const ev = weightedMean(
-        node.hands,
-        (hand) => hand.nodeStrategyEv,
-        (hand) => hand.marginalReachMass,
-    );
-    return ev === undefined || player === node.actor ? ev : node.state.pot - ev;
 }
 
 export function handClassCombos(label: string): string[][] {

@@ -1,4 +1,4 @@
-import { nodeFor, solutionFor, type PreflopChoice, type PreflopNode, type TableFormat } from "./catalog";
+import { foldPreview, nodeFor, solutionFor, type PreflopChoice, type PreflopLine, type PreflopNode } from "./catalog";
 import {
     aggregatePreflopActions,
     comboCount,
@@ -11,15 +11,7 @@ import {
     type PreflopState,
 } from "./preflop";
 import { type HandRow, equityRealization, evShare } from "./display";
-import {
-    aggregateActions,
-    cardsKey,
-    describeActions,
-    formatNumber,
-    handClassCombos,
-    isForcedRunout,
-    nodeEv,
-} from "./strategy";
+import { aggregateActions, cardsKey, describeActions, formatNumber, handClassCombos, isForcedRunout } from "./strategy";
 import type { DecisionAction, DecisionNode, Player, SolverNode, SolverStatus } from "./types";
 
 export interface PreflopEntry {
@@ -34,6 +26,7 @@ export interface DetailAction {
     size?: string;
     color: string;
     probability: number;
+    locked?: boolean;
     /** Postflop only: the EV of taking the action, then following the strategy. */
     ev?: number;
 }
@@ -72,25 +65,24 @@ export const stopReasonLabel = (reason: "accuracy" | "iterationLimit") =>
 
 const percent = (value: number) => `${(value * 100).toFixed(2)}%`;
 
-function buildPreflopTimeline(format: TableFormat, history: PreflopChoice[]): PreflopEntry[] {
-    const solution = solutionFor(format);
+function buildPreflopTimeline(line: PreflopLine, history: PreflopChoice[]): PreflopEntry[] {
+    const solution = solutionFor(line.format);
     const entries: PreflopEntry[] = [];
     function add(node: PreflopNode, prefix: PreflopChoice[]) {
-        const seat = replayPreflop(format, prefix).seats.find((s) => s.position === node.actor)!;
+        const seat = replayPreflop(line, prefix).seats.find((s) => s.position === node.actor)!;
         entries.push({ node, history: prefix, stack: solution.stack - seat.committed });
     }
     for (let i = 0; i < history.length; i++) {
         const prefix = history.slice(0, i),
-            node = nodeFor(format, prefix);
+            node = nodeFor(line, prefix);
         if (node) add(node, prefix);
     }
-    let prefix = history;
-    for (let i = 0; i < solution.positions.length; i++) {
-        const node = nodeFor(format, prefix);
+    let prefix: PreflopChoice[] | undefined = history;
+    for (let i = 0; prefix && i < solution.positions.length; i++) {
+        const node = nodeFor(line, prefix);
         if (!node) break;
         add(node, prefix);
-        if (!node.actions.some((a) => a.label === "Fold")) break;
-        prefix = [...prefix, { actor: node.actor, action: "Fold" }];
+        prefix = foldPreview(node);
     }
     return entries;
 }
@@ -105,6 +97,7 @@ function preflopHandDetails(selected: string, range: Record<string, number>, pre
                   label: action.label,
                   color: action.color,
                   probability: selectedWeights[index],
+                  ev: preNode.actionEvs?.[selected]?.[index] ?? undefined,
               }))
             : [];
     return handClassCombos(selected).map((cards) => ({
@@ -112,6 +105,7 @@ function preflopHandDetails(selected: string, range: Record<string, number>, pre
         label: selected,
         weight: range[selected] ?? 0,
         actions: selectedActions,
+        ev: preNode?.nodeEvs?.[selected],
         matches: true,
         description:
             preNode && !selectedWeights ? "No captured strategy" : `Range weight ${percent(range[selected] ?? 0)}`,
@@ -205,10 +199,10 @@ function buildSpotSeats({
             seat.combos = current.state.rangeCombos[player];
             if (current.kind === "terminal" && current.result.reason === "fold") {
                 seat.folded = current.result.foldedBy === player;
-                seat.ev = seat.folded ? 0 : current.state.pot;
+                seat.ev = seat.folded ? 0 : current.state.pot - current.rake;
             }
-            const ev = current.kind === "decision" ? nodeEv(current, player) : undefined;
-            if (ev !== undefined) seat.ev = ev;
+            const ev = current.kind === "decision" ? current.rangeEvs[player] : undefined;
+            if (ev != null) seat.ev = ev;
         }
     }
     return seats;
@@ -220,7 +214,8 @@ type StudyMatrix =
     | { kind: "empty"; title: string; description: string };
 
 export function buildStudyView({
-    format,
+    line,
+    loading,
     history,
     preIndex,
     board,
@@ -231,7 +226,8 @@ export function buildStudyView({
     solveState,
     solveError,
 }: {
-    format: TableFormat;
+    line: PreflopLine;
+    loading: boolean;
     history: PreflopChoice[];
     preIndex: number | null;
     board: string[];
@@ -242,11 +238,22 @@ export function buildStudyView({
     solveState: SolverStatus["state"];
     solveError: string;
 }) {
-    const solution = solutionFor(format);
-    const fullState = replayPreflop(format, history);
+    const solution = solutionFor(line.format);
+    const fullState = replayPreflop(line, history);
     const shownHistory = history.slice(0, preIndex ?? history.length);
-    const state = replayPreflop(format, shownHistory);
-    const preNode = nodeFor(format, shownHistory);
+    const state = replayPreflop(line, shownHistory);
+    const preNode = nodeFor(line, shownHistory);
+    // Shown in place of the preflop strategy, combos and hand details.
+    const unavailable =
+        preIndex === null
+            ? undefined
+            : !line.blocks.size
+              ? loading
+                  ? "Loading strategy…"
+                  : "Strategy not loaded"
+              : preNode?.sourceWarning === "ZERO_RANGE"
+                ? "zero_range"
+                : undefined;
     const outcome = preflopOutcome(fullState, solution.stack);
     const canPlayPostflop = outcome === "headsUp";
     const showPostflop = preIndex === null;
@@ -257,6 +264,12 @@ export function buildStudyView({
     };
     const current = showPostflop ? path[activeIndex] : undefined;
     const forcedRunout = isForcedRunout(current);
+    const showdownPot =
+        current?.kind === "chance" && forcedRunout
+            ? current.state.pot - (current.rake ?? 0)
+            : current?.kind === "terminal" && current.result.reason === "showdown"
+              ? current.state.pot - current.rake
+              : undefined;
     const decision =
         current?.kind === "decision"
             ? current
@@ -313,12 +326,7 @@ export function buildStudyView({
                 description:
                     solveState === "failed" ? solveError : "Preparing your strategy. Progress is shown on the right.",
             };
-    } else if (!preNode && !state.complete)
-        matrix = {
-            kind: "empty",
-            title: "This branch is unavailable",
-            description: "The saved GTO Wizard catalog has no strategy for this action history.",
-        };
+    } else if (unavailable) matrix = { kind: "empty", title: unavailable, description: "" };
     else matrix = { kind: "preflop", node: preNode, range };
 
     return {
@@ -328,7 +336,7 @@ export function buildStudyView({
         preflop: {
             node: preNode,
             shownHistory,
-            timeline: buildPreflopTimeline(format, history),
+            timeline: buildPreflopTimeline(line, history),
             complete: fullState.complete,
             pot: fullState.pot,
             canPlayPostflop,
@@ -348,6 +356,7 @@ export function buildStudyView({
                       : "Multiway pot",
         },
         strategy: {
+            unavailable,
             matrix,
             title: showPostflop
                 ? decision
@@ -358,7 +367,9 @@ export function buildStudyView({
                   : "Preflop ranges",
             combos: showPostflop
                 ? decision?.hands.reduce((sum, hand) => sum + hand.ownReachWeight, 0)
-                : comboCount(available),
+                : unavailable
+                  ? undefined
+                  : comboCount(available),
             actor: showPostflop && decision ? players[decision.actor] : preNode?.actor,
             actions,
             // Postflop combinations need the equity report and filters (see postflopHandDetails).
@@ -373,7 +384,7 @@ export function buildStudyView({
                 current,
                 players: scenario ? players : undefined,
                 streetRoot,
-            }),
+            }).map((seat) => (unavailable ? { ...seat, combos: undefined } : seat)),
             pot: current?.state.pot ?? state.pot,
             board: current?.state.board ?? (state.complete ? board : []),
             toCall:
@@ -384,7 +395,7 @@ export function buildStudyView({
                       : undefined,
             basePot: streetRoot?.state.pot,
             players: current ? players : undefined,
-            showdown: forcedRunout || (current?.kind === "terminal" && current.result.reason === "showdown"),
+            showdownPot,
             nodeId: current?.nodeId,
         },
         panel:

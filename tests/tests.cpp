@@ -71,15 +71,21 @@ void CheckSolve(const std::string& name, engine::ComputeDevice requestedDevice, 
     const auto actual = engine::EvaluateExploitability(*problem, strategy);
     EXPECT_NEAR(checkpoint.player0BestResponseEv, actual.player0BestResponseEv, 1e-6f);
     EXPECT_NEAR(checkpoint.player1BestResponseEv, actual.player1BestResponseEv, 1e-6f);
+    // Raked checkpoints also depend on each player's average-strategy value.
+    EXPECT_NEAR(checkpoint.exploitability, actual.exploitability, 1e-6f);
     const auto& expected = References().at(name).at("solved");
     ASSERT_TRUE(std::isfinite(actual.player0BestResponseEv));
     ASSERT_TRUE(std::isfinite(actual.player1BestResponseEv));
     ASSERT_TRUE(std::isfinite(actual.exploitability));
-    // [-villain BR, hero BR] must intersect the external value interval.
-    constexpr float roundingTolerance = 1e-5f;
-    EXPECT_GE(actual.player0BestResponseEv, -expected.at("villainBestResponseEv").get<float>() - roundingTolerance);
-    EXPECT_GE(actual.player1BestResponseEv, -expected.at("heroBestResponseEv").get<float>() - roundingTolerance);
-    EXPECT_NEAR(actual.exploitability, (actual.player0BestResponseEv + actual.player1BestResponseEv) / 2.0f, roundingTolerance);
+    // Zero-sum games only: [-villain BR, hero BR] must intersect the external value interval.
+    // Raked references are checked by the uniform and fixed-policy evaluations instead.
+    if (!problem->game->Spec().HasRake())
+    {
+        constexpr float roundingTolerance = 1e-5f;
+        EXPECT_GE(actual.player0BestResponseEv, -expected.at("villainBestResponseEv").get<float>() - roundingTolerance);
+        EXPECT_GE(actual.player1BestResponseEv, -expected.at("heroBestResponseEv").get<float>() - roundingTolerance);
+        EXPECT_NEAR(actual.exploitability, (actual.player0BestResponseEv + actual.player1BestResponseEv) / 2.0f, roundingTolerance);
+    }
     EXPECT_LE(actual.exploitability, 0.01f); // 0.5% of the fixtures' initial pot.
     ASSERT_FALSE(testing::Test::HasFailure());
 }

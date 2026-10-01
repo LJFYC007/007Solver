@@ -18,7 +18,8 @@ void Check(cudaError_t status)
 class CudaExecutor final : public Executor
 {
 public:
-    explicit CudaExecutor(const Plan& plan) : shape_(plan.state), entries_(plan.entries)
+    explicit CudaExecutor(const Plan& plan)
+        : shape_(plan.state), entries_(plan.entries), passes_(plan.passes), predecessors_(plan.predecessors)
     {
         try
         {
@@ -43,7 +44,7 @@ public:
                 Dispatch(pass, stream_);
             Check(cudaStreamSynchronize(stream_));
             for (U32 player = 0; player < 2; ++player)
-                Capture(plan, player);
+                Capture(player, false);
         }
         catch (...)
         {
@@ -62,7 +63,12 @@ public:
         Check(cudaEventSynchronize(done_[slot_]));
         staging_[slot_] = state;
         Check(cudaMemcpyAsync(buffers_[StateBuffer], &staging_[slot_], sizeof(State), cudaMemcpyHostToDevice, stream_));
-        Check(cudaGraphLaunch(executables_[state.player], stream_));
+        // Strategy values run the Averaging kernels (see Terminal) in graphs of their own, captured
+        // at first use.
+        const bool averaging = state.evaluation == Evaluation::StrategyValue;
+        if (!executables_[averaging][state.player])
+            Capture(state.player, averaging);
+        Check(cudaGraphLaunch(executables_[averaging][state.player], stream_));
         Check(cudaEventRecord(done_[slot_], stream_));
         slot_ = (slot_ + 1) % done_.size();
     }
@@ -117,6 +123,8 @@ private:
     std::array<void*, kBufferCount> buffers_{};
     State shape_;
     std::size_t entries_;
+    std::vector<Pass> passes_;
+    std::vector<std::vector<U32>> predecessors_;
     // One stream per Pass::lane; the first is the capture origin and update stream. Each
     // pass records an event so passes in other streams can wait for their predecessors.
     std::array<cudaStream_t, kLaneCount> streams_{};
@@ -128,8 +136,9 @@ private:
     State* staging_ = nullptr;
     std::array<cudaEvent_t, 2> done_{};
     std::size_t slot_ = 0;
-    std::array<cudaGraph_t, 2> graphs_{};
-    std::array<cudaGraphExec_t, 2> executables_{};
+    // Per mode, training and best response or else Averaging, and per player.
+    std::array<std::array<cudaGraph_t, 2>, 2> graphs_{};
+    std::array<std::array<cudaGraphExec_t, 2>, 2> executables_{};
     int lowPriority_ = 0, highPriority_ = 0;
     void Upload(std::size_t index, const BufferData& source)
     {
@@ -146,25 +155,26 @@ private:
         Check(cudaMemcpyAsync(target, source, bytes, kind, stream_));
         Check(cudaStreamSynchronize(stream_));
     }
-    // Captures one player's update: every stream forks from the origin at its first pass,
-    // waits for the events of the pass's predecessors, and joins the origin at the end.
-    void Capture(const Plan& plan, U32 player)
+    // Captures one player's update, or with averaging its strategy-value evaluation: every stream
+    // forks from the origin at its first pass, waits for the events of the pass's predecessors, and
+    // joins the origin at the end.
+    void Capture(U32 player, bool averaging)
     {
         Check(cudaStreamBeginCapture(stream_, cudaStreamCaptureModeThreadLocal));
         Check(cudaEventRecord(fork_, stream_));
         std::array<bool, kLaneCount> used{true};
-        for (std::size_t i = 0; i < plan.passes.size(); ++i)
+        for (std::size_t i = 0; i < passes_.size(); ++i)
         {
-            const Pass pass = LaunchPass(plan.passes[i], shape_, player);
+            const Pass pass = LaunchPass(passes_[i], shape_, player);
             cudaStream_t stream = streams_[pass.lane];
             if (!used[pass.lane])
             {
                 Check(cudaStreamWaitEvent(stream, fork_, 0));
                 used[pass.lane] = true;
             }
-            for (const U32 predecessor : plan.predecessors[i])
+            for (const U32 predecessor : predecessors_[i])
                 Check(cudaStreamWaitEvent(stream, events_[predecessor], 0));
-            Dispatch(pass, stream);
+            Dispatch(pass, stream, averaging);
             Check(cudaEventRecord(events_[i], stream));
         }
         for (std::size_t lane = 1; lane < streams_.size(); ++lane)
@@ -173,10 +183,11 @@ private:
                 Check(cudaEventRecord(join_, streams_[lane]));
                 Check(cudaStreamWaitEvent(stream_, join_, 0));
             }
-        Check(cudaStreamEndCapture(stream_, &graphs_[player]));
-        Check(cudaGraphInstantiateWithFlags(&executables_[player], graphs_[player], cudaGraphInstantiateFlagUseNodePriority));
+        auto& graph = graphs_[averaging][player];
+        Check(cudaStreamEndCapture(stream_, &graph));
+        Check(cudaGraphInstantiateWithFlags(&executables_[averaging][player], graph, cudaGraphInstantiateFlagUseNodePriority));
     }
-    void Dispatch(const Pass& pass, cudaStream_t stream)
+    void Dispatch(const Pass& pass, cudaStream_t stream, bool averaging = false)
     {
         if (pass.count == 0)
             return;
@@ -204,8 +215,8 @@ private:
         config.attrs = &priority;
         config.numAttrs = 1;
         const auto kernel = pass.operation == Kernel::Reach      ? Reach
-                            : pass.operation == Kernel::Terminal ? Terminal
-                            : pass.operation == Kernel::Backup   ? Backup
+                            : pass.operation == Kernel::Terminal ? (averaging ? Terminal<true> : Terminal<false>)
+                            : pass.operation == Kernel::Backup   ? (averaging ? Backup<true> : Backup<false>)
                                                                  : Outcomes;
         Check(cudaLaunchKernelEx(
             &config,
@@ -234,15 +245,16 @@ private:
     }
     void DestroyGraph()
     {
-        for (U32 player = 0; player < 2; ++player)
-        {
-            if (executables_[player])
-                cudaGraphExecDestroy(executables_[player]);
-            if (graphs_[player])
-                cudaGraphDestroy(graphs_[player]);
-            executables_[player] = nullptr;
-            graphs_[player] = nullptr;
-        }
+        for (std::size_t mode = 0; mode < 2; ++mode)
+            for (U32 player = 0; player < 2; ++player)
+            {
+                if (executables_[mode][player])
+                    cudaGraphExecDestroy(executables_[mode][player]);
+                if (graphs_[mode][player])
+                    cudaGraphDestroy(graphs_[mode][player]);
+                executables_[mode][player] = nullptr;
+                graphs_[mode][player] = nullptr;
+            }
     }
     void Release()
     {

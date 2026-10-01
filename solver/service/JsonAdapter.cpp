@@ -144,12 +144,15 @@ Json BuildNodeJson(const analysis::NodeReport& node)
         {
             jsonNode["result"] = {{"reason", "showdown"}};
         }
+        jsonNode["rake"] = *node.rake;
         return jsonNode;
     }
 
     if (node.kind == game::NodeKind::Chance)
     {
         jsonNode["kind"] = "chance";
+        if (node.rake)
+            jsonNode["rake"] = *node.rake;
         jsonNode["outcomes"] = Json::array();
         for (const analysis::ChanceOutcomeReport& outcome : node.outcomes)
         {
@@ -163,6 +166,8 @@ Json BuildNodeJson(const analysis::NodeReport& node)
 
     jsonNode["kind"] = "decision";
     jsonNode["actor"] = PlayerCode(*node.actor);
+    const auto rangeEv = [&](std::size_t player) { return node.rangeEvs[player] ? Json(*node.rangeEvs[player]) : Json(nullptr); };
+    jsonNode["rangeEvs"] = {{"hero", rangeEv(0)}, {"villain", rangeEv(1)}};
     jsonNode["hands"] = Json::array();
     for (const analysis::HandReport& hand : node.hands)
     {

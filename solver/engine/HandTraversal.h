@@ -42,24 +42,31 @@ public:
         std::uint32_t* stamps = nullptr;
         UpdateWeights weights{};
     };
+    // An evaluation walk's value rows, one per requested evaluation, share its reach propagation
+    // and payoffs.
     enum class Evaluation
     {
         StrategyValue,
         BestResponse,
+        // The rake the policy pays in expectation: a strategy value in which every leaf pays its
+        // rake.
+        ExpectedRake,
     };
     // Allocation sizes before constructing the traversal; excludes training/snapshot state.
     struct StorageEstimate
     {
         std::uint64_t fixedBytes;
-        std::uint64_t workspaceBytes;
-        std::uint64_t parallelValuesBytes;
+        std::uint64_t workspaceBytes;      // with one value row
+        std::uint64_t workspaceRowBytes;   // each further value row
+        std::uint64_t parallelValuesBytes; // per value row
         std::uint64_t runoutOutcomesBytes;
         std::uint64_t rootVectorBytes; // a walk's root reach, scales and values
         // One walk's workspaces across a team and its root vectors, with per-thread runtime overhead.
-        std::uint64_t WalkBytes(int team) const
+        // Scaling whole task and root vectors by rows bounds walks with several value rows.
+        std::uint64_t WalkBytes(int team, std::size_t rows = 1) const
         {
-            return workspaceBytes * (team > 1 ? team + 1 : 1) + (team > 1 ? parallelValuesBytes : 0) + (team + 1) * 128 * 1024 +
-                   rootVectorBytes;
+            return (workspaceBytes + (rows - 1) * workspaceRowBytes) * (team > 1 ? team + 1 : 1) +
+                   (team > 1 ? rows * parallelValuesBytes : 0) + (team + 1) * 128 * 1024 + rows * rootVectorBytes;
         }
     };
     static StorageEstimate EstimateStorage(
@@ -77,10 +84,11 @@ public:
     HandTraversal(const SolveProblem& problem, game::NodeId root, bool prepareTraining = false);
     explicit HandTraversal(std::shared_ptr<const HandTraversalData> data);
     const HandTraversalData& Data() const { return *data_; }
-    Workspace MakeWorkspace(bool parallel = false) const;
+    // Training walks one value row.
+    Workspace MakeWorkspace(bool parallel = false, std::size_t rows = 1) const;
     // One workspace per worker when a team of more than one can split chance tasks, otherwise
     // none. The walk from the root then needs MakeWorkspace(!workers.empty()).
-    std::vector<Workspace> MakeWorkers(int team) const;
+    std::vector<Workspace> MakeWorkers(int team, std::size_t rows = 1) const;
     // Walks run chance tasks on one workspace per worker, then the walk from the root consumes
     // their values in serial preorder, so values do not depend on the team size. Evaluation
     // uses the default CPU team (CpuWorkerCount).
@@ -94,20 +102,22 @@ public:
     ) const;
     std::vector<float> OpponentReachAtRoot(const StrategySnapshot& strategy, std::size_t opponentPlayer) const;
     std::vector<float> CompatibleMasses(std::size_t player, const float* opponentReach) const;
-    // When player acts at the root, actionValues receives each root action's values, action-major.
+    // The player's hand values under each evaluation, one row after another. When player acts at
+    // the root, actionValues receives each root action's values under the first, action-major.
     std::vector<float> EvaluateSnapshot(
         const StrategySnapshot& strategy,
         std::size_t player,
         const std::vector<float>& opponentReach,
         const std::vector<float>& scales,
-        Evaluation evaluation,
+        const std::vector<Evaluation>& evaluations,
         std::vector<float>* actionValues = nullptr
     ) const;
-    std::vector<float> EvaluateAverageBestResponse(
+    std::vector<float> EvaluateAverage(
         const std::uint16_t* strategySums,
         std::size_t player,
         const std::vector<float>& opponentReach,
-        const std::vector<float>& scales
+        const std::vector<float>& scales,
+        const std::vector<Evaluation>& evaluations
     ) const;
 
 private:
@@ -129,7 +139,8 @@ private:
         std::size_t depth,
         std::size_t actions,
         const std::array<std::size_t, 2>& handCounts,
-        std::size_t chanceTasks
+        std::size_t chanceTasks,
+        std::size_t rows
     );
     const std::vector<std::uint32_t>& children;
     const std::vector<std::uint8_t>& dealtCards;
@@ -138,6 +149,7 @@ private:
 
     // Only the entry points construct policy combinations. Only training uses the runout
     // outcome rows; read-only paths, including checkpoints, use exact runout accumulation.
+    // Walks write one value row per evaluation, each a row of the player's hands.
     struct WalkContext
     {
         std::size_t player;
@@ -145,7 +157,7 @@ private:
         const StrategySnapshot* strategy = nullptr;
         const std::uint16_t* strategySums = nullptr;
         TrainState* train = nullptr;
-        bool bestResponse = false;
+        std::vector<Evaluation> evaluations{Evaluation::StrategyValue};
     };
     std::vector<float> EvaluateHands(
         const WalkContext& context,

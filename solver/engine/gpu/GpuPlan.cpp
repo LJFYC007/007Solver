@@ -40,8 +40,8 @@ struct LayoutNode
     U32 rankCounts = 0;
     U32 stamp = 0;
     U32 fold = kNoIndex;
-    float foldUtility = 0.0f;
-    float utility[3] = {};
+    float foldUtility[2] = {};
+    float utility[2][3] = {};
 };
 
 Node Pack(const LayoutNode& layout)
@@ -56,8 +56,9 @@ Node Pack(const LayoutNode& layout)
     n.rankCounts = layout.rankCounts;
     n.stamp = layout.stamp;
     n.fold = layout.fold;
-    n.foldUtility = layout.foldUtility;
-    std::copy(layout.utility, layout.utility + 3, n.utility);
+    std::copy(layout.foldUtility, layout.foldUtility + 2, n.foldUtility);
+    for (U32 p = 0; p < 2; ++p)
+        std::copy(layout.utility[p], layout.utility[p] + 3, n.utility[p]);
     return n;
 }
 
@@ -145,7 +146,7 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             "The GPU supports at most " + std::to_string(kMaxActions) + " actions per decision; reduce bet or raise sizes or use CPU"
         );
     const auto& tables = data.tables;
-    static_assert(sizeof(Node) == 64 && sizeof(Hand) == 32 && sizeof(State) == 64 && sizeof(Pass) == 40);
+    static_assert(sizeof(Node) == 80 && sizeof(Hand) == 32 && sizeof(State) == 64 && sizeof(Pass) == 40);
     state.board = data.nodes.front().boardMask;
     for (U32 p = 0; p < 2; ++p)
     {
@@ -249,13 +250,15 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         if (source.rankRow >= 0)
             for (U32 p = 0; p < 2; ++p)
                 n.rankCounts |= static_cast<U32>(tables.rankRows[source.rankRow][p].hands.size()) << (16 * p);
-        std::copy(source.utilities.begin(), source.utilities.end(), n.utility);
-        if (source.kind == NodeKind::ForcedRunout)
+        for (U32 p = 0; p < 2; ++p)
         {
-            // Player 0's scales of win and loss counts (see Node).
-            const auto scales = HandTraversalData::RunoutScales(source.utilities, n.row);
-            n.utility[0] = scales[0];
-            n.utility[2] = scales[1];
+            std::copy(source.utilities[p].begin(), source.utilities[p].end(), n.utility[p]);
+            if (source.kind == NodeKind::ForcedRunout)
+            {
+                const auto scales = HandTraversalData::RunoutScales(source.utilities[p], n.row);
+                n.utility[p][0] = scales[0];
+                n.utility[p][2] = scales[1];
+            }
         }
     }
     for (U32 i = 0; i < layout.size(); ++i)
@@ -281,7 +284,8 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         if (fold == kNoIndex || showdown == kNoIndex)
             continue;
         layout[showdown].fold = fold;
-        layout[showdown].foldUtility = layout[fold].utility[0];
+        for (U32 p = 0; p < 2; ++p)
+            layout[showdown].foldUtility[p] = layout[fold].utility[p][0];
         fused[fold] = 1;
         if (layout[i].count == 2)
             fused[i] = 1;
@@ -704,7 +708,7 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
                     const LayoutNode& chance = layout[parent];
                     std::copy(chance.reachSlot, chance.reachSlot + 2, n.reachSlot);
                     n.board = layout[root].board & ~chance.board;
-                    n.foldUtility = 1.0f / float(chance.count - 4);
+                    n.foldUtility[0] = 1.0f / float(chance.count - 4);
                 }
             }
             nodes.push_back(Pack(n));

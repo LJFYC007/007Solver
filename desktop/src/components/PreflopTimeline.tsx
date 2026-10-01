@@ -27,19 +27,23 @@ export default function PreflopTimeline({
                 <strong>{entry.node.actor}</strong>
                 <span>{formatNumber(entry.stack)}</span>
             </button>
-            {entry.node.actions
-                .slice()
-                .reverse()
-                .map((action) => (
-                    <TimelineChoice
-                        key={action.code}
-                        label={action.label}
-                        color={action.color}
-                        chosen={history[index]?.action === action.label}
-                        disabled={disabled}
-                        onClick={() => onAction(entry, action.label)}
-                    />
-                ))}
+            {entry.node.sourceWarning === "ZERO_RANGE" ? (
+                <span>zero_range</span>
+            ) : (
+                entry.node.actions
+                    .slice()
+                    .reverse()
+                    .map((action) => (
+                        <TimelineChoice
+                            key={action.code}
+                            label={action.locked ? `🔒 ${action.label}` : action.label}
+                            color={action.color}
+                            chosen={history[index]?.action === action.label}
+                            disabled={disabled || action.locked}
+                            onClick={() => onAction(entry, action.label)}
+                        />
+                    ))
+            )}
         </section>
     ));
 }

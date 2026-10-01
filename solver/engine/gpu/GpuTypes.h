@@ -51,7 +51,7 @@ enum class NodeKind : U32
     ForcedRunout,
 };
 
-// One work item's 64-byte record, 16-byte aligned so a thread loads it as four 16-byte vectors.
+// One work item's 80-byte record, 16-byte aligned.
 struct alignas(16) Node
 {
     U64 strategy;
@@ -75,20 +75,19 @@ struct alignas(16) Node
     U32 rankCounts; // Showdown: legal hands of player 0 | player 1 << 16 in its rank row
     U32 stamp;      // index of this node's update stamp
     // Showdown with a Fold sibling: that fold's slot, whose values this showdown's Terminal
-    // block writes, and its player-0 utility; kNoIndex without one. Such a showdown's strategy,
+    // block writes, and its per-player utilities; kNoIndex without one. Such a showdown's strategy,
     // count, actor and stamp are its parent's, fields a leaf does not use otherwise, its link
     // is the parent's slot, and the fold is action 0 when its slot precedes the showdown's;
     // when the two are the parent's only children, the block also backs the parent up. A region
     // root's boundary Reach record, and the Reach record of a child of a root whose boundary
     // pass a player skips (see Plan), instead holds the root's chance parent's reachSlot, the
-    // dealt card as board and the outcome probability 1 / (parent count - 4) as foldUtility;
-    // other decision records hold a zero foldUtility.
+    // dealt card as board and the outcome probability 1 / (parent count - 4) as foldUtility[0];
+    // other decision records hold zero fold utilities.
     U32 fold;
-    float foldUtility;
-    // Player 0's win, tie and loss payoffs. A forced runout's win and loss instead hold the
-    // payoffs' differences from the tie per runout, which scale its win and loss counts; as
-    // negation is exact, player 1's scales are the negated loss and win entries.
-    float utility[3];
+    float foldUtility[2];
+    // Each player's own win, tie and loss payoffs. A forced runout's win and loss hold
+    // differences from that player's tie payoff per runout, scaling its win/loss counts.
+    float utility[2][3];
 };
 // Node::info: kind in 3 bits, actor in 1, the root flag in 1, the child count in 6 (chance
 // nodes deal at most 49 cards) and the row above.
@@ -131,6 +130,15 @@ struct Hand
     float weight;
     U32 padding[3];
 };
+// A pass trains, or evaluates the average strategy for the updating player's values: its best
+// response, or its own average strategy too (the CPU's HandTraversal::Evaluation), which the
+// Averaging kernel instances compute in graphs of their own (see CudaExecutor).
+enum class Evaluation : U32
+{
+    None,
+    BestResponse,
+    StrategyValue,
+};
 // 16-byte aligned and padded so a block loads it as four 16-byte vectors.
 struct alignas(16) State
 {
@@ -138,7 +146,7 @@ struct alignas(16) State
     U32 hands[2];
     U32 stride;
     U32 player;
-    U32 evaluation;
+    Evaluation evaluation;
     U32 outcomeRows;
     U32 update;     // 1-based index of this update for the updating player
     U32 stampCount; // node stamps per half of the stamps buffer

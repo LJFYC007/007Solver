@@ -57,7 +57,9 @@ struct HandTraversalData
         std::uint64_t boardMask;
         core::Board board;
         int rankRow = -1;
-        std::array<float, 3> utilities{};
+        // Each player's own win/tie/loss payoffs; folds use entry 0.
+        std::array<std::array<float, 3>, 2> utilities{};
+        float rake = 0.0f; // what a leaf pays whatever its outcome (game::TerminalRake)
 
         bool IsLeaf() const { return kind != Kind::Decision && kind != Kind::Chance; }
     };

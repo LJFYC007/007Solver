@@ -3,6 +3,7 @@
 #include "engine/SolveResult.h"
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <vector>
 
@@ -20,14 +21,20 @@ struct HandBoardData;
 ExploitabilityMetrics EvaluateExploitability(const SolveProblem& problem, const StrategySnapshot& strategy);
 // Borrows quantized action-major cumulative strategies for the duration of this call. The traversal must start at the game root.
 ExploitabilityMetrics EvaluateAverageStrategy(const HandTraversal& traversal, const std::uint16_t* strategySums);
-// Weights each player's game-root best-response hand values by range weight and compatible opponent mass.
-ExploitabilityMetrics RootExploitability(const HandBoardData& tables, const std::array<std::vector<float>, 2>& bestResponseValues);
+// A player's game-root hand values under the best response, followed, when policy is set, by
+// its values under the policy.
+using RootValues = std::function<std::vector<float>(std::size_t player, bool policy)>;
+// NashConv / 2, weighting game-root hand values by joint range mass. Zero-rake games skip
+// policy values because the two policy utilities sum to zero.
+ExploitabilityMetrics RootExploitability(const HandBoardData& tables, const RootValues& rootValues);
 
 struct NodeStrategyValue
 {
     float ev = 0.0f;
     // When the player acts at the node: the EV of taking each action and then following the policy.
     std::vector<float> actionEvs;
+    // When the player acts at the node: the rake paid from it on in expectation, zero without rake.
+    float expectedRake = 0.0f;
 };
 
 // Fixed-policy net EV at the traversal's root node for board-compatible hands with positive

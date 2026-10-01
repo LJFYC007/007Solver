@@ -6,6 +6,7 @@ Run the relevant [README checks](README.md#checks) and follow the [fixture updat
 
 - Application and test ranges must come from [the captured catalog](resources/gtowizard-preflop/). Do not introduce custom ranges or infer missing branches.
 - Avoid speculative backend, model or storage frameworks. Let a second real implementation establish shared interfaces.
+- During GTO Wizard imports, recover the authenticated session and retry HTTP 401 in the assigned browser; a 401 alone must not end the daily run. Follow the [capture recovery workflow](resources/gtowizard-preflop/README.md#resume-and-validation).
 
 ## Changes and verification
 

@@ -7,6 +7,8 @@
     "heroStack": 4.0,
     "villainStack": 4.0,
     "iterations": 200,
+    "rakePercent": 5,
+    "rakeCap": 3,
     "bettingTree": {
         "oop": {
             "flop": {
@@ -65,30 +67,22 @@
     },
     "ranges": {
         "UTG": {
-            "AKs": 0.326,
-            "QQ": 0.042
+            "AKs": 0.3673,
+            "TT": 0.031
         },
         "BB": {
-            "KK": 0.4198,
-            "A5s": 0.19009599040095992
+            "KK": 0.3331,
+            "A5s": 0.10048967
         }
     },
     "rangeSource": {
-        "catalog": "resources/gtowizard-preflop",
-        "sha256": "5f41502181c1777114f9ac5a72df24486e6ee8d6b22b8768f6a0d502bc83b741",
-        "solution": "8max",
+        "catalog": "resources/gtowizard-preflop/cases/Cash6mSimple_6mGGrcR25_100",
+        "sha256": "23c6f89234f4ece5d551fae9bf20c0489b272527deb48298af73a751c0333f37",
+        "solution": "Cash6mSimple_6mGGrcR25_100",
         "history": [
             {
                 "actor": "UTG",
                 "action": "Raise 2.5"
-            },
-            {
-                "actor": "UTG1",
-                "action": "Fold"
-            },
-            {
-                "actor": "LJ",
-                "action": "Fold"
             },
             {
                 "actor": "HJ",
@@ -108,11 +102,11 @@
             },
             {
                 "actor": "BB",
-                "action": "Raise 13"
+                "action": "Raise 11"
             },
             {
                 "actor": "UTG",
-                "action": "Raise 23.5"
+                "action": "Raise 25.5"
             },
             {
                 "actor": "BB",
@@ -122,7 +116,7 @@
         "retainedClasses": {
             "UTG": [
                 "AKs",
-                "QQ"
+                "TT"
             ],
             "BB": [
                 "KK",

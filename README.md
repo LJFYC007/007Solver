@@ -6,7 +6,11 @@
 
 007 Solver is a Windows desktop app for heads-up postflop solving and strategy analysis that can also [serve its interface to browsers](#web-server). Its C++17 DCFR engine runs on the CPU and on NVIDIA GPUs through CUDA.
 
-The bundled [GTO Wizard catalog](resources/gtowizard-preflop/) contains chip-EV, 100bb, 6-max and 8-max ranges. Missing branches are not inferred. Solving is rake-free and does not model folded players' card-removal effects.
+The [GTO Wizard capture plan](resources/gtowizard-preflop/capture-plan.json) covers four Cash / Classic / Single Size solutions: 6-max, 100bb, opening 2.5bb, no cash drop, with/without cold calls, and cEV/GG R&C. The engine supports percentage rake with a cap, using each captured solution's verified metadata. Folded players' card-removal effects are not modeled.
+
+The [solution listing](resources/gtowizard-preflop/library.json) retains the captured library options, including configurations outside the download scope. It contains metadata only. The library table lists saved targets; filter options without one display a lock. Only the four targets can open after a root is saved; partial cases expose saved branches and lock missing continuations. An empty capture catalog shows no ranges or solve controls.
+
+Rebuild after each capture export to include the new files. See the [capture and resume workflow](resources/gtowizard-preflop/README.md) for storage and loading.
 
 ## Requirements
 
@@ -43,13 +47,15 @@ For a small CLI solve after building the service:
 
 `--stdin` accepts a scenario as the first JSON line, followed by queries. `iterations` limits player updates; `accuracyPercent` is exploitability as a percentage of the initial pot (`0.01` means `0.01%`). See the [fixture](tests/fixtures/weighted-flop.json) and [parser](solver/io/ScenarioLoader.cpp) for input fields and defaults.
 
+`rakePercent` and `rakeCap` add [capped percentage rake](solver/ARCHITECTURE.md#rake) and default to zero. For raked games, accuracy measures half the sum of both players' gains from deviating to a best response, relative to the current strategy.
+
 The service and desktop select an available GPU automatically. Append `--device=cpu`, `--device=gpu` or `--device=auto` to override; stderr reports the backend. An unavailable requested GPU or insufficient device memory is an error. The displayed memory estimate covers combined host/device allocations and does not impose a limit. GPU stopping and final metrics are [CPU-certified](solver/ARCHITECTURE.md#training-and-memory).
 
 ## Web server
 
 `007solver.exe --serve` serves the interface to browsers at `http://127.0.0.1:8007` instead of opening a window; `--serve=<address>` listens elsewhere. Only `npm --prefix desktop run build` embeds the page. The server has no authentication, so expose it only through an authenticating proxy, such as Cloudflare Tunnel with Access. Against DNS rebinding it answers only requests addressed to an IP address or `localhost`, so the proxy must send `Host: 127.0.0.1:8007` (the tunnel's HTTP Host Header setting).
 
-Each page has its own session with one solve, like the desktop app. Solves take the GPU one at a time in request order and show as waiting until then; desktop, CLI and benchmark solves do not wait for it, so stop the server before benchmarking. Closing a page releases its solution. The server also releases a session after 10 minutes without requests and keeps at most four ready solutions, dropping the least recently used. A ready solution holds about 4 bytes of host memory per strategy entry, plus about 80 bytes per node below the last decision it evaluated, and its service keeps a CUDA context of a few hundred MB.
+Each page has its own session with one solve, like the desktop app. Solves take the GPU one at a time in request order and show as waiting until then; desktop, CLI and benchmark solves do not wait for it, so stop the server before benchmarking. Closing a page releases its solution. The server also releases a session after 10 minutes without requests and keeps at most four ready solutions, dropping the least recently used. A ready solution holds about 4 bytes of host memory per strategy entry, plus about 96 bytes per node below the last decision it evaluated, and its service keeps a CUDA context of a few hundred MB.
 
 [deploy-server.ps1](scripts/deploy-server.ps1) deploys the committed tree from any shell: it builds, copies the release build to `%LOCALAPPDATA%\007 Solver Server\007solver-server.exe`, points the `007 Solver server` start-up entry (Task Manager → Startup apps) at it and restarts it, which drops all sessions. It appends results to `build/deploy-server.log`, keeps the previous server when the build fails (output in `build/deploy-build.log`) and deploys uncommitted changes only with `-Force`. Copy [post-commit](scripts/post-commit) to `.git/hooks/` to deploy every commit on `main` in the background. `Stop-Process -Name 007solver-server` stops the server until the next logon or deploy.
 

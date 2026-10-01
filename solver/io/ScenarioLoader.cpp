@@ -144,6 +144,8 @@ Scenario ReadScenario(std::istream& input)
             },
             outOfPositionPlayer,
             ParseBettingTree(json, outOfPositionPlayer),
+            json.value("rakePercent", 0.0f),
+            json.value("rakeCap", 0.0f),
         },
         core::RangeSet(LoadRange(ranges, heroPosition), LoadRange(ranges, villainPosition)),
         iterations,
