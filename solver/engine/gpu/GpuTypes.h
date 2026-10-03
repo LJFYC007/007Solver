@@ -15,11 +15,12 @@ enum BufferIndex : U32
 {
     NodesBuffer,
     HandsBuffer,
+    WeightsBuffer, // per hand of both players, as Hands: its range weight, the game root's reach
     RanksBuffer,
     RunoutsBuffer,
     OrderBuffer,
     CardsBuffer,
-    OutcomesBuffer, // runout win/loss counts per hand pair: player-0-major rows, then player-1-major copies
+    OutcomesBuffer, // runout win/loss counts per hand pair, each row player-0-major then player-1-major (see Outcomes)
     RegretsBuffer,  // int16 units in the HandTraversalData::StateUnits layout (see GpuQuantize.h)
     SumsBuffer,     // uint16 units in the same layout
     ScratchBuffer, // per slot one row of stride floats (a multiple of four): the opponent's reach entering its node, then the slot's values
@@ -29,15 +30,18 @@ enum BufferIndex : U32
     kBufferCount,
 };
 // Each player's card list starts with 52 card offsets and an end offset into the
-// cards buffer; hand indices follow both players' offsets.
+// cards buffer; hand indices follow both players' offsets, then each player's hands' cards
+// (see CardPairs).
 enum : U32
 {
     kCardListStride = 53,
     kCardListHeader = 2 * kCardListStride,
-    kLaneCount = 4,       // Pass::lane values: three leaf-batch lanes taken in turn, then the spine
+    kSpineLane = 3, // Pass::lane values: the leaf-batch lanes below it taken in turn, the spine, then lanes for its terminal passes
+    kLaneCount = 7,
     kMaxActions = 16,     // actions per decision the kernels' per-hand entry arrays hold
     kWarpSize = 32,       // threads per warp
-    kTerminalGroup = 128, // threads per Terminal group, which the kernel's launch bounds and warp roles assume
+    kTerminalGroup = 128, // threads per Terminal group of a showdown's warp roles, which wide ranges double
+    kRunoutGroup = 1024,  // most threads per Runout block, which its launch bounds assume
     kTileGroup = 256,     // most threads per Reach or Backup hand tile, which their launch bounds and Reach's compaction assume
     kNoIndex = 0xffffffffu,
 };
@@ -55,7 +59,7 @@ enum class NodeKind : U32
 struct alignas(16) Node
 {
     U64 strategy;
-    // The node's board mask, which Terminal tests against each hand. A decision's Backup record
+    // The node's board mask, which Terminal and Runout test against each hand. A decision's Backup record
     // instead holds in its low and high halves, and in fold, per action, the child there if the
     // decision's Backup inlines it (see Plan; only decisions with two or three children do): its
     // link | its count << 30, else kNoIndex.
@@ -120,16 +124,25 @@ GPU_TYPES_INLINE U32 Row(U32 info)
 {
     return info >> kInfoRowShift;
 }
-// Two 16-byte halves, so Terminal loads the first for every hand in one access; Reach reads
-// single fields.
-struct Hand
+// 8 bytes, so Terminal and Runout load a hand in one access and a warp's hands share sectors;
+// Outcomes reads the cards. Card masks follow from the cards (HandMask); range weights and the
+// card pairs Reach reads are buffers of their own (WeightsBuffer, CardPairs).
+struct alignas(8) Hand
 {
-    U64 mask;
     float scale; // ValueScale of the hand's compatible opponent mass (see HandEvaluation.h)
     U32 cards;   // card0 | card1 << 8 | (identical opponent hand + 1) << 16, zero without one
-    float weight;
-    U32 padding[3];
 };
+// The card mask of a hand's packed cards (see Hand).
+GPU_TYPES_INLINE U64 HandMask(U32 cards)
+{
+    return U64(1) << (cards & 0xffu) | U64(1) << ((cards >> 8) & 0xffu);
+}
+// Whether a card mask holds either of a hand's packed cards: HandMask(cards) & mask, with a
+// shift per card instead of building the hand's mask.
+GPU_TYPES_INLINE bool HandBlocked(U64 mask, U32 cards)
+{
+    return ((U32(mask >> (cards & 0xffu)) | U32(mask >> ((cards >> 8) & 0xffu))) & 1u) != 0;
+}
 // A pass trains, or evaluates the average strategy for the updating player's values: its best
 // response, or its own average strategy too (the CPU's HandTraversal::Evaluation), which the
 // Averaging kernel instances compute in graphs of their own (see CudaExecutor).
@@ -157,12 +170,22 @@ struct alignas(16) State
     U32 orderPitch;      // entries per rank row of the order buffer, a multiple of four so hand entries align
     U32 orderSection;    // offset of player 1's section in a rank row of the order buffer (see Plan::order)
 };
+// The cards buffer's last section, after both players' card lists, which list every hand
+// twice: each player's hands' cards, card0 | card1 << 8, two hands to a word, so the player's
+// hands h and h + 1, h even, share the word at CardPairs(shape, player) + h / 2.
+GPU_TYPES_INLINE U32 CardPairs(const State& shape, U32 player)
+{
+    return kCardListHeader + 2 * (shape.hands[0] + shape.hands[1]) + (player ? (shape.hands[0] + 1) / 2 : 0u);
+}
+// Terminal evaluates showdowns, with their fused folds and parents; Runout the other leaves, lone
+// folds and forced runouts, which need no rank order.
 enum class Kernel : U32
 {
     Reach,
     Terminal,
     Backup,
     Outcomes,
+    Runout,
 };
 enum class OutcomeStage : U32
 {
@@ -184,5 +207,9 @@ struct Pass
     // LaunchPass); initialization passes launch all count items.
     U32 begin[2];
     U32 end[2];
+    // In a launch, the node records of the next launch in its stream, which its blocks move into
+    // L2 (see CudaExecutor's Capture): the first one's index and their number, zero for none.
+    U32 next;
+    U32 nextCount;
 };
 } // namespace solver::engine::gpu

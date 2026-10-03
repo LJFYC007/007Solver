@@ -93,8 +93,8 @@ struct HandTraversalData
     std::vector<ChanceTask> chanceTasks_;
     // Runout rows of player-0 win | loss << 16 counts per (player-0 hand, player-1 hand)
     // pair, exact out of the legal runouts and independent of reach/payoffs: row 0 for
-    // flop all-ins (990 runouts) and row card + 1 for turn all-ins on that card (44), as
-    // the GPU's outcome rows. The player-0-major rows are followed by player-1-major
+    // flop all-ins (990 runouts) and row card + 1 for turn all-ins on that card (44),
+    // numbered as the GPU's outcome rows. The player-0-major rows are followed by player-1-major
     // copies so either player's accumulation sweeps its hands contiguously.
     std::vector<std::uint32_t> runoutOutcomes_;
     static std::size_t RunoutRow(const Node& node)

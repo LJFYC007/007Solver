@@ -2,9 +2,10 @@
 using namespace solver::engine::gpu;
 // Every kernel takes the buffers in BufferIndex order, the last holding the update's State, then
 // the pass by value.
-#define GPU_ARGUMENTS                                                                                                          \
-    const Node *nodes, const Hand *hands, const unsigned short *ranks, const int *runouts, const U32 *order, const U32 *cards, \
-        U32 *outcomes, short *regrets, unsigned short *sums, float *scratch, U32 *flags, U32 *stamps, const State *statePointer, Pass pass
+#define GPU_ARGUMENTS                                                                                                              \
+    const Node *nodes, const Hand *hands, const float *weights, const unsigned short *ranks, const int *runouts, const U32 *order, \
+        const U32 *cards, U32 *outcomes, short *regrets, unsigned short *sums, float *scratch, U32 *flags, U32 *stamps,            \
+        const State *statePointer, Pass pass
 // numerator / divisor for regret matching's operands: quantized integers, the divisor at most
 // kMaxActions * 65535 < 2^21. For such normal operands CUDA's division fast path, a refined
 // reciprocal and a residual correction, is the correctly rounded quotient, and zero numerators
@@ -25,12 +26,49 @@ __device__ __forceinline__ float MatchedProbability(float regret, float positive
     return positive > 0.0f ? RegretRatio(regret > 0.0f ? regret : 0.0f, positive) : 1.0f / float(actions);
 }
 
+// Training state streams through the L2 once per update while a batch's passes reuse its scratch
+// rows: state accesses are cache-streaming (evict-first), so the L2 replaces state lines before rows.
+template<typename T>
+__device__ __forceinline__ T LoadStreamed(const T* address)
+{
+    return __ldcs(address);
+}
+__device__ __forceinline__ U32 LoadStreamed(const unsigned char* address)
+{
+    return __ldcs(address);
+}
+template<typename T>
+__device__ __forceinline__ void StoreStreamed(T* address, T value)
+{
+    __stcs(address, value);
+}
+__device__ __forceinline__ void StoreStreamed(unsigned char* address, U32 value)
+{
+    __stcs(address, (unsigned char)value);
+}
+
+// A work item's record, which only its block, or the blocks of its hand tiles, read, once per
+// update: a cache-streaming load leaves its line the L2's first to replace (on wide ranges, normal
+// loads for tiled items measured no faster).
+__device__ __forceinline__ Node LoadRecord(const Node* record)
+{
+    union
+    {
+        uint4 words[sizeof(Node) / sizeof(uint4)];
+        Node node;
+    } loaded;
+#pragma unroll
+    for (U32 k = 0; k < sizeof(Node) / sizeof(uint4); ++k)
+        loaded.words[k] = LoadStreamed((const uint4*)record + k);
+    return loaded.node;
+}
+
 // A regret, or in Averaging instances (see Terminal) the cumulative strategy held in its place:
 // nonnegative integers, which regret matching normalizes into the average strategy.
 template<bool Averaging>
 __device__ __forceinline__ float MatchedEntry(const short* entry)
 {
-    return Averaging ? float(*(const unsigned short*)entry) : float(*entry);
+    return Averaging ? float(LoadStreamed((const unsigned short*)entry)) : float(LoadStreamed(entry));
 }
 
 // Hands h and h + 1 of a scratch row (State::stride keeps rows 16-byte aligned, so an even h
@@ -67,6 +105,21 @@ __device__ __forceinline__ bool AnyReach(float4 group)
 __device__ __forceinline__ void PrefetchL2(const void* address)
 {
     asm volatile("prefetch.global.L2 [%0];" ::"l"(address));
+}
+
+// Moves the node records of the next launch in the pass's stream (see Pass) into L2, where its
+// blocks find them instead of waiting for DRAM: the last blocks of the pass's first hand tile
+// issue one 128-byte line each, the last line clamped to the final byte, or, when the pass has
+// fewer blocks than lines, every block several.
+__device__ __forceinline__ void PrefetchNextNodes(const Node* nodes, const Pass& pass, U32 local)
+{
+    const U32 bytes = pass.nextCount * U32(sizeof(Node)), lines = bytes ? (bytes + 127) / 128 + 1 : 0;
+    const U32 skip = pass.count > lines ? pass.count - lines : 0;
+    if (blockIdx.y != 0 || blockIdx.x < skip)
+        return;
+    const unsigned char* first = (const unsigned char*)(nodes + pass.next);
+    for (U32 line = blockIdx.x - skip + local * pass.count; line < lines; line += blockDim.x * pass.count)
+        PrefetchL2(first + (128 * line < bytes ? 128 * line : bytes - 1));
 }
 
 // Quantize (see GpuQuantize.h) of a value that is not negative: one fused multiply-add rounded
@@ -124,10 +177,10 @@ __device__ __forceinline__ void ReachNode(
     for (U32 a = 0; a < actions; ++a)
     {
         const U64 entry = n.strategy + U64(a) * count + h;
-        const float s0 = value0 != 0.0f ? float(sums[entry]) : 0.0f;
-        const float s1 = value1 != 0.0f ? float(sums[entry + 1]) : 0.0f;
-        const float x0 = accumulate0 ? float(regrets[entry]) : s0;
-        const float x1 = accumulate1 ? float(regrets[entry + 1]) : s1;
+        const float s0 = value0 != 0.0f ? float(LoadStreamed(sums + entry)) : 0.0f;
+        const float s1 = value1 != 0.0f ? float(LoadStreamed(sums + entry + 1)) : 0.0f;
+        const float x0 = accumulate0 ? float(LoadStreamed(regrets + entry)) : s0;
+        const float x1 = accumulate1 ? float(LoadStreamed(regrets + entry + 1)) : s1;
         entries0[a] = x0;
         entries1[a] = x1;
         sums0[a] = s0;
@@ -136,7 +189,7 @@ __device__ __forceinline__ void ReachNode(
         positive1 += x1 > 0.0f ? x1 : 0.0f;
     }
     unsigned char* exponents = ExponentBytes(sums + n.strategy, actions, count);
-    const U32 exponent0 = accumulate0 ? exponents[h] : 0u, exponent1 = accumulate1 ? exponents[h + 1] : 0u;
+    const U32 exponent0 = accumulate0 ? LoadStreamed(exponents + h) : 0u, exponent1 = accumulate1 ? LoadStreamed(exponents + h + 1) : 0u;
     float magnitude0 = 0.0f, magnitude1 = 0.0f;
 #pragma unroll(ActionCount ? ActionCount : 1)
     for (U32 a = 0; a < actions; ++a)
@@ -161,8 +214,8 @@ __device__ __forceinline__ void ReachNode(
         const float dither = Dither(U32(n.strategy + h), state.update);
 #pragma unroll(ActionCount ? ActionCount : 1)
         for (U32 a = 0; a < actions; ++a)
-            sums[n.strategy + U64(a) * count + h] = (unsigned short)QuantizeNonnegative(sums0[a], next, dither);
-        exponents[h] = (unsigned char)next;
+            StoreStreamed(sums + n.strategy + U64(a) * count + h, (unsigned short)QuantizeNonnegative(sums0[a], next, dither));
+        StoreStreamed(exponents + h, next);
     }
     if (accumulate1)
     {
@@ -170,8 +223,8 @@ __device__ __forceinline__ void ReachNode(
         const float dither = Dither(U32(n.strategy + h + 1), state.update);
 #pragma unroll(ActionCount ? ActionCount : 1)
         for (U32 a = 0; a < actions; ++a)
-            sums[n.strategy + U64(a) * count + h + 1] = (unsigned short)QuantizeNonnegative(sums1[a], next, dither);
-        exponents[h + 1] = (unsigned char)next;
+            StoreStreamed(sums + n.strategy + U64(a) * count + h + 1, (unsigned short)QuantizeNonnegative(sums1[a], next, dither));
+        StoreStreamed(exponents + h + 1, next);
     }
 }
 
@@ -183,7 +236,8 @@ __global__ void __launch_bounds__(kTileGroup, 5) Reach(GPU_ARGUMENTS)
 {
     const State state = *statePointer;
     const U32 item = blockIdx.x, local = threadIdx.x, lane = blockIdx.y * blockDim.x + local;
-    const Node n = nodes[pass.offset + item];
+    const Node n = LoadRecord(nodes + pass.offset + item);
+    PrefetchNextNodes(nodes, pass, local);
     // Only the opponent's reach is propagated, one row of stride floats per slot: terminals
     // read it and the opponent's cumulative strategy accumulates it. The updating player's
     // own reach is never needed.
@@ -202,18 +256,20 @@ __global__ void __launch_bounds__(kTileGroup, 5) Reach(GPU_ARGUMENTS)
         if (IsRoot(n.info))
         {
             // The game root's reach is the hands' weights.
-            const float weight1 = hands[second].weight;
-            value0 = hands[base + h].weight;
+            const float weight1 = weights[second];
+            value0 = weights[base + h];
             value1 = pair ? weight1 : 0.0f;
         }
         else if (n.foldUtility[0] != 0.0f)
         {
             // Region roots and the children that derive their reach (see Node) apply the dealt
-            // card and the outcome probability to the chance parent's reach.
+            // card and the outcome probability to the chance parent's reach. The pair's cards
+            // share one word (see CardPairs); without a pair the second value is the zero
+            // LoadPair supplies.
             const float2 entering = LoadPair(source, pair);
-            const U64 mask0 = hands[base + h].mask, mask1 = hands[second].mask;
-            value0 = (mask0 & n.board) ? 0.0f : entering.x * n.foldUtility[0];
-            value1 = pair && !(mask1 & n.board) ? entering.y * n.foldUtility[0] : 0.0f;
+            const U32 held = cards[CardPairs(state, p) + h / 2];
+            value0 = HandBlocked(n.board, held) ? 0.0f : entering.x * n.foldUtility[0];
+            value1 = HandBlocked(n.board, held >> 16) ? 0.0f : entering.y * n.foldUtility[0];
         }
         else
         {
@@ -232,14 +288,15 @@ __global__ void __launch_bounds__(kTileGroup, 5) Reach(GPU_ARGUMENTS)
         return;
     }
     const U32 actions = Count(n.info);
-    // Pairs without reach clear their children's rows; the others move to the tile's first
-    // threads, in any order: each pair's arithmetic depends only on its hands.
-    __shared__ U32 liveCount;
+    // Pairs without reach clear their children's rows; the others move, in order, to the tile's
+    // first threads: each warp counts its live pairs, which follow those of the warps before it.
+    __shared__ U32 warpLive[kTileGroup / kWarpSize];
     __shared__ U32 livePairs[kTileGroup];
     __shared__ float2 liveValues[kTileGroup];
-    if (local == 0)
-        liveCount = 0;
     const bool live = inside && (value0 != 0.0f || value1 != 0.0f);
+    const U32 warp = local / kWarpSize, warpLane = local % kWarpSize, ballot = __ballot_sync(0xffffffffu, live);
+    if (warpLane == 0)
+        warpLive[warp] = __popc(ballot);
     if (inside && !live)
     {
 #pragma unroll 1
@@ -247,15 +304,14 @@ __global__ void __launch_bounds__(kTileGroup, 5) Reach(GPU_ARGUMENTS)
             StorePair(scratch + U64(n.link + a) * state.stride + h, pair, 0.0f, 0.0f);
     }
     __syncthreads();
-    const U32 ballot = __ballot_sync(0xffffffffu, live), before = ballot & ((1u << (local % kWarpSize)) - 1);
-    U32 first = 0;
-    if (before == 0 && live)
-        first = atomicAdd(&liveCount, __popc(ballot));
-    first = __shfl_sync(0xffffffffu, first, __ffs(ballot) - 1);
+    // Lane w holds warp w's count.
+    const U32 counted = warpLane < blockDim.x / kWarpSize ? warpLive[warpLane] : 0u;
+    const U32 liveCount = __reduce_add_sync(0xffffffffu, counted), first = __reduce_add_sync(0xffffffffu, warpLane < warp ? counted : 0u);
     if (live)
     {
-        livePairs[first + __popc(before)] = h;
-        liveValues[first + __popc(before)] = make_float2(value0, value1);
+        const U32 position = first + __popc(ballot & ((1u << warpLane) - 1));
+        livePairs[position] = h;
+        liveValues[position] = make_float2(value0, value1);
     }
     __syncthreads();
     if (local >= liveCount)
@@ -358,18 +414,35 @@ __device__ __forceinline__ void ScanSegments(U32 rankCount, const uint2* tokens,
     StoreRun<0, 4 * Groups>(U32(__cvta_generic_to_shared(sums + bounds.begin)), x, carried, length);
 }
 
-// ScanSegments for segments of any length: sums pass through shared memory.
+// ScanSegments for segments of any length: sums pass through shared memory. Each kChunk groups
+// load before any of their sums, so their latencies overlap; groups past the segment's end add +0, as
+// its last group's ranks past the end do.
 __device__ __forceinline__ void ScanSegmentsLong(U32 rankCount, const uint2* tokens, U32 lane, const unsigned char* staged, float* sums)
 {
+    constexpr U32 kChunk = 4;
     const Segment bounds = LaneSegment(rankCount, lane);
-    const U32 length = bounds.end - bounds.begin;
-    const unsigned short* column = (const unsigned short*)(tokens + lane);
+    const U32 length = bounds.end - bounds.begin, groups = (length + 3) / 4;
     float* out = sums + bounds.begin;
     float sum = 0.0f;
-    for (U32 j = 0; j < length; ++j)
+    for (U32 first = 0; first < groups; first += kChunk)
     {
-        sum += Staged(staged, column[(j / 4) * (4 * kWarpSize) + j % 4]);
-        out[j] = sum;
+        float x[4 * kChunk];
+#pragma unroll
+        for (U32 g = 0; g < kChunk; ++g)
+        {
+            U32 offsets[4];
+            Unpack(first + g < groups ? tokens[(first + g) * kWarpSize + lane] : make_uint2(0u, 0u), offsets);
+#pragma unroll
+            for (U32 c = 0; c < 4; ++c)
+                x[4 * g + c] = first + g < groups ? Staged(staged, offsets[c]) : 0.0f;
+        }
+#pragma unroll
+        for (U32 j = 0; j < 4 * kChunk; ++j)
+        {
+            sum += x[j];
+            if (4 * first + j < length)
+                out[4 * first + j] = sum;
+        }
     }
     const float carried = WarpBefore(sum, lane);
     for (U32 j = 0; j < length; ++j)
@@ -389,16 +462,16 @@ __device__ __forceinline__ void TerminalScan(U32 rankCount, const uint2* tokens,
         ScanSegmentsLong(rankCount, tokens, lane, staged, sums);
 }
 
-// Stages the opponent's reach row of slot row into reach, one float4 group per thread (rows
-// and their staged copies are padded to whole groups, see TerminalLayout), and returns whether
-// it carries reach. A terminal without opponent reach leaves its values stale, and Backup
-// substitutes zero from its flag.
-__device__ __forceinline__ bool StageReach(State state, U32 row, U32 local, const float* scratch, float* reach)
+// Stages the opponent's reach row of slot row into reach, one float4 group per thread of the
+// block's threads (rows and their staged copies are padded to whole groups, see TerminalLayout),
+// and returns whether it carries reach. A terminal without opponent reach leaves its values
+// stale, and Backup substitutes zero from its flag.
+__device__ __forceinline__ bool StageReach(State state, U32 row, U32 local, U32 threads, const float* scratch, float* reach)
 {
     const U32 opponentCount = state.player ? state.hands[0] : state.hands[1];
     const float4* source = (const float4*)(scratch + U64(row) * state.stride);
     bool nonzero = false;
-    for (U32 group = local; 4 * group <= opponentCount; group += kTerminalGroup)
+    for (U32 group = local; 4 * group <= opponentCount; group += threads)
     {
         const float4 r = StagedGroup(source, group, opponentCount - 4 * group);
         ((float4*)reach)[group] = r;
@@ -411,13 +484,13 @@ __device__ __forceinline__ bool StageReach(State state, U32 row, U32 local, cons
 // into reach, so their loads overlap; returns whether each carries reach: bit 0 the fold's,
 // bit 1 the showdown's.
 __device__ __forceinline__ U32
-StageRows(State state, U32 foldRow, U32 showdownRow, U32 local, const float* scratch, float* reach, float* foldReach)
+StageRows(State state, U32 foldRow, U32 showdownRow, U32 local, U32 threads, const float* scratch, float* reach, float* foldReach)
 {
     const U32 opponentCount = state.player ? state.hands[0] : state.hands[1];
     const float4* foldSource = (const float4*)(scratch + U64(foldRow) * state.stride);
     const float4* source = (const float4*)(scratch + U64(showdownRow) * state.stride);
     bool fold = false, showdown = false;
-    for (U32 group = local; 4 * group <= opponentCount; group += kTerminalGroup)
+    for (U32 group = local; 4 * group <= opponentCount; group += threads)
     {
         const float4 f = StagedGroup(foldSource, group, opponentCount - 4 * group);
         const float4 r = StagedGroup(source, group, opponentCount - 4 * group);
@@ -528,15 +601,15 @@ __device__ __forceinline__ void ListReached(U32 opponentCount, U32 lane, const f
 }
 
 // A fold's opponent masses from the staged reach: the total, then each card's holders' mass,
-// as the CPU evaluator's per-card masses. The first warp sums the total while the others take
-// the card masses.
-__device__ __forceinline__ void FoldMasses(State state, U32 local, const U32* cards, const float* reach, float* masses)
+// as the CPU evaluator's per-card masses. The first warp of the block's threads sums the total
+// while the others take the card masses.
+__device__ __forceinline__ void FoldMasses(State state, U32 local, U32 threads, const U32* cards, const float* reach, float* masses)
 {
     const U32 opponent = 1 - state.player, opponentCount = state.player ? state.hands[0] : state.hands[1];
     if (local < kWarpSize)
         FoldTotal(opponentCount, local, reach, masses);
     else
-        for (U32 card = local - kWarpSize; card < 52; card += kTerminalGroup - kWarpSize)
+        for (U32 card = local - kWarpSize; card < 52; card += threads - kWarpSize)
         {
             float mass = 0.0f;
             for (U32 entry = cards[opponent * kCardListStride + card]; entry < cards[opponent * kCardListStride + card + 1]; ++entry)
@@ -558,6 +631,7 @@ __device__ __forceinline__ void TerminalFold(
     Node n,
     State state,
     U32 local,
+    U32 threads,
     const Hand* hands,
     const U32* cards,
     float* values,
@@ -567,19 +641,19 @@ __device__ __forceinline__ void TerminalFold(
 {
     const U32 p = state.player;
     const U32 count = p ? state.hands[1] : state.hands[0], mineBase = p ? state.hands[0] : 0;
-    FoldMasses(state, local, cards, reach, masses);
+    FoldMasses(state, local, threads, cards, reach, masses);
     __syncthreads();
     float* output = values + U64(n.slot) * state.stride;
     const float payoff = p ? n.utility[1][0] : n.utility[0][0];
-    for (U32 h = local; h < count; h += kTerminalGroup)
+    for (U32 h = local; h < count; h += threads)
     {
-        // The hand's first half: mask, value scale and packed cards (see Hand).
-        const uint4 first = ((const uint4*)(hands + mineBase + h))[0];
-        const U64 mask = U64(first.x) | (U64(first.y) << 32);
-        const float scale = BitsFloat(first.z);
-        const U32 identical = first.w >> 16;
-        output[h] =
-            (mask & n.board) || scale <= 0.0f ? 0.0f : FoldValue(masses, first.w, identical ? reach[identical - 1] : 0.0f, scale, payoff);
+        // The hand: value scale and packed cards (see Hand).
+        const uint2 hand = ((const uint2*)(hands + mineBase + h))[0];
+        const float scale = BitsFloat(hand.x);
+        const U32 identical = hand.y >> 16;
+        output[h] = HandBlocked(n.board, hand.y) || scale <= 0.0f
+                        ? 0.0f
+                        : FoldValue(masses, hand.y, identical ? reach[identical - 1] : 0.0f, scale, payoff);
     }
 }
 
@@ -599,12 +673,12 @@ __device__ __forceinline__ float UpdatedRegret(float old, float increment, float
 __device__ __forceinline__ float AdvanceStamp(State state, U32 index, bool live, bool writer, U32* stamps)
 {
     const U32 read = (state.update & 1u) * state.stampCount, write = ((state.update + 1u) & 1u) * state.stampCount;
-    const U32 stamp = stamps[read + index];
+    const U32 stamp = LoadStreamed(stamps + read + index);
     // A live node's store does not wait for the load.
     if (writer && live)
-        stamps[write + index] = state.update;
+        StoreStreamed(stamps + write + index, state.update);
     else if (writer)
-        stamps[write + index] = stamp;
+        StoreStreamed(stamps + write + index, stamp);
     return Halving(state.update - 1u - stamp);
 }
 
@@ -639,7 +713,7 @@ __device__ __forceinline__ void BackupLeafPair(
     {
         short* entry1 = entry0 + count;
         const float r0 = MatchedEntry<Averaging>(entry0), r1 = MatchedEntry<Averaging>(entry1);
-        const U32 exponent = Averaging ? 0u : exponents[0];
+        const U32 exponent = Averaging ? 0u : LoadStreamed(exponents);
         const float positive = (r0 > 0.0f ? r0 : 0.0f) + (r1 > 0.0f ? r1 : 0.0f);
         value = child0 * MatchedProbability(r0, positive, 2) + child1 * MatchedProbability(r1, positive, 2);
         if (!Averaging)
@@ -648,37 +722,40 @@ __device__ __forceinline__ void BackupLeafPair(
             const float updated1 = UpdatedRegret(Dequantize(r1, exponent), child1 - value, halving, state);
             const U32 next = RegretExponent(fmaxf(fabsf(updated0), fabsf(updated1)));
             const float dither = Dither(ditherIndex, state.update);
-            entry0[0] = (short)Quantize(updated0, next, dither);
-            entry1[0] = (short)Quantize(updated1, next, dither);
-            exponents[0] = (unsigned char)next;
+            StoreStreamed(entry0, (short)Quantize(updated0, next, dither));
+            StoreStreamed(entry1, (short)Quantize(updated1, next, dither));
+            StoreStreamed(exponents, next);
         }
     }
     values[0] = value;
 }
 
-// Registers are capped so twelve 128-thread groups, 48 warps, stay resident per SM. The first
-// warp scans a showdown and the second sums a fold sibling's row while the last two build its
-// blocker runs, one card per lane of its section's 2 * kWarpSize-entry lane table (see
-// BuildSection in GpuPlan.cpp).
+// Showdowns (see Kernel), in blocks of Group threads, kTerminalGroup or, where shared memory
+// limits resident blocks, a multiple (see CudaExecutor's TerminalInstance). Registers are capped
+// so 48 warps stay resident per SM. The first warp scans a showdown and the second sums a fold
+// sibling's row while the next two build its blocker runs, one card per lane of its section's
+// 2 * kWarpSize-entry lane table (see BuildSection in GpuPlan.cpp); all take part in the staging
+// and the hand loop.
 static_assert(kTerminalGroup == 4 * kWarpSize);
 // Averaging instances serve strategy-value evaluation (see Evaluation): acting parents back up by
 // their average strategy. Separate instances keep that path out of the training kernels' code,
 // where it cost wide ranges 16%.
-template<bool Averaging>
-__global__ void __launch_bounds__(kTerminalGroup, 12) Terminal(GPU_ARGUMENTS)
+template<bool Averaging, U32 Group>
+__global__ void __launch_bounds__(Group, 12 * kTerminalGroup / Group) Terminal(GPU_ARGUMENTS)
 {
+    static_assert(Group % kTerminalGroup == 0);
     const State state = *statePointer;
     const U32 item = blockIdx.x, local = threadIdx.x;
     const U32 p = state.player, opponent = 1 - p;
     // Fixed indices keep the small State/Node arrays in registers.
     const U32 count = p ? state.hands[1] : state.hands[0], opponentCount = p ? state.hands[0] : state.hands[1];
     // The grid has exactly one block per item (see CudaExecutor's Dispatch).
-    const Node n = nodes[pass.offset + item];
+    const Node n = LoadRecord(nodes + pass.offset + item);
     // Thread 0 moves the record 1024 items ahead into L2 for its block: a fixed distance tuned on
     // an 84-SM GPU, where twelve resident blocks per SM make it about one wave.
     if (local == 0 && item + 1024 < pass.count)
         PrefetchL2(nodes + pass.offset + item + 1024);
-    const NodeKind kind = Kind(n.info);
+    PrefetchNextNodes(nodes, pass, local);
     const U32 row = Row(n.info);
     const U32 total = state.hands[0] + state.hands[1], mineBase = p ? state.hands[0] : 0;
     const U32 reachSlot = p ? n.reachSlot[0] : n.reachSlot[1];
@@ -693,16 +770,6 @@ __global__ void __launch_bounds__(kTerminalGroup, 12) Terminal(GPU_ARGUMENTS)
     // values have replaced it in scratch.
     float* foldMasses = blockers + 2 * opponentCount;
     float* foldReach = reach + TerminalLayout::Padded(U32(foldMasses - reach) + 53);
-    if (kind == NodeKind::Fold)
-    {
-        // A fold without a showdown sibling.
-        const bool live = StageReach(state, reachSlot, local, scratch, reach);
-        if (local == 0)
-            flags[n.slot] = live ? 1u : 0u;
-        if (live)
-            TerminalFold(n, state, local, hands, cards, scratch, reach, foldMasses);
-        return;
-    }
     // A showdown evaluates its fold sibling from the same opponent reach row when the
     // updating player folds there, otherwise from the masses of the fold's own row, and backs
     // the parent up when the two are its only children (see Node).
@@ -721,15 +788,15 @@ __global__ void __launch_bounds__(kTerminalGroup, 12) Terminal(GPU_ARGUMENTS)
         // The fold's own row, propagated by Reach, stages with the showdown's row; the hand
         // loop below takes the fold's values from its masses, which a live showdown's second
         // warp and blocker runs sum along.
-        const U32 any = StageRows(state, n.fold, reachSlot, local, scratch, reach, foldReach);
+        const U32 any = StageRows(state, n.fold, reachSlot, local, Group, scratch, reach, foldReach);
         liveFold = (any & 1u) != 0;
         live = (any & 2u) != 0;
         if (liveFold && !live)
-            FoldMasses(state, local, cards, foldReach, foldMasses);
+            FoldMasses(state, local, Group, cards, foldReach, foldMasses);
     }
     else
     {
-        live = StageReach(state, reachSlot, local, scratch, reach);
+        live = StageReach(state, reachSlot, local, Group, scratch, reach);
         liveFold = ownFold && live;
     }
     const bool liveParent = live || liveFold, foldFromRow = liveFold && !ownFold;
@@ -753,7 +820,7 @@ __global__ void __launch_bounds__(kTerminalGroup, 12) Terminal(GPU_ARGUMENTS)
     const U32 legal = (n.rankCounts >> (16 * opponent)) & 0xffffu;
     if (trainParent && 128 * local < 5 * count + 127)
         PrefetchL2((const unsigned char*)(regrets + n.strategy) + (128 * local < 5 * count ? 128 * local : 5 * count - 1));
-    if (live && kind == NodeKind::Showdown)
+    if (live)
     {
         // The shuffle tells the compiler that the warp index is uniform in the warp, so its
         // branches keep shared addresses in uniform registers.
@@ -769,12 +836,12 @@ __global__ void __launch_bounds__(kTerminalGroup, 12) Terminal(GPU_ARGUMENTS)
             if (foldFromRow)
                 FoldTotal(opponentCount, lane, foldReach, foldMasses);
         }
-        else
+        else if (Group == kTerminalGroup || warp < kTerminalGroup / kWarpSize)
         {
             // Showdowns accumulate each card's blocked reach in rank order once per node, as the
             // CPU evaluator's per-card masses do, instead of rescanning blockers per hand. The
-            // last two warps build them while the first scans, one card per lane, together with
-            // a fold sibling's card masses from its own row.
+            // third and fourth warps build them while the first scans, one card per lane, together
+            // with a fold sibling's card masses from its own row.
             const uint4 header = section[0];
             const U32 runLane = local - 2 * kWarpSize;
             const U32 laneRun = ((const U32*)(section + header.y))[runLane];
@@ -786,13 +853,6 @@ __global__ void __launch_bounds__(kTerminalGroup, 12) Terminal(GPU_ARGUMENTS)
                 BlockerRuns<false>(groups, laneRun, tokens, staged, staged, blockers, foldMasses);
         }
     }
-    // A forced runout's hand loop visits only opponent hands with reach, listed in the prefix
-    // space with their number in the run table's, both unused by runouts: a zero-reach hand's
-    // terms would add exact zeros.
-    U32* kept = (U32*)prefix;
-    U32* keptCount = (U32*)blockers;
-    if (live && kind == NodeKind::ForcedRunout && local < kWarpSize)
-        ListReached(opponentCount, local, reach, kept, keptCount);
     __syncthreads();
     const float win = p ? n.utility[1][0] : n.utility[0][0];
     const float tie = p ? n.utility[1][1] : n.utility[0][1];
@@ -803,111 +863,62 @@ __global__ void __launch_bounds__(kTerminalGroup, 12) Terminal(GPU_ARGUMENTS)
     const bool needMass = tie != 0.0f || ownFold;
     const float rankedMass = live && legal ? prefix[legal - 1] : 0.0f;
     const float winScale = win - tie, lossScale = loss - tie;
-    // Per-thread pointers advance with the hand.
-    const Hand* hand = hands + mineBase + local;
-    const uint4* handOffsets = (const uint4*)(order + U64(row) * state.orderPitch) + mineBase + local;
+    // The loop indexes block-uniform bases by the hand: per-thread pointers advancing with it
+    // would hold registers that its loads need.
+    const Hand* mine = hands + mineBase;
+    const uint4* rowOffsets = (const uint4*)(order + U64(row) * state.orderPitch) + mineBase;
     // Values replace reach rows in scratch once the block has staged the reach it reads, a
     // backed-up parent's replacing the showdown's.
-    float* handOutput = scratch + U64(backup ? n.link : n.slot) * state.stride + local;
-    float* handFoldOutput = scratch + U64(sibling ? n.fold : n.slot) * state.stride + local;
+    float* output = scratch + U64(backup ? n.link : n.slot) * state.stride;
+    float* foldOutput = scratch + U64(sibling ? n.fold : n.slot) * state.stride;
     // Averaging parents read their cumulative strategies in the regrets' place.
     short* parentRegrets = (Averaging ? (short*)sums : regrets) + n.strategy;
     unsigned char* parentExponents = ExponentBytes(parentRegrets, 2, count);
-    for (U32 h = local; h < count; h += kTerminalGroup,
-             hand += kTerminalGroup,
-             handOffsets += kTerminalGroup,
-             handOutput += kTerminalGroup,
-             handFoldOutput += kTerminalGroup)
+    for (U32 h = local; h < count; h += Group)
     {
-        // The hand's first half: mask, value scale and packed cards (see Hand).
-        const uint4 first = *(const uint4*)hand;
+        // The hand: value scale and packed cards (see Hand).
+        const uint2 first = *(const uint2*)(mine + h);
         // A live showdown's offsets load with the hand's record rather than after its board
         // test; a blocked hand's entry goes unused.
-        const uint4 offsets = live && kind != NodeKind::ForcedRunout ? *handOffsets : make_uint4(0u, 0u, 0u, 0u);
-        const U64 mask = U64(first.x) | (U64(first.y) << 32);
-        const float scale = BitsFloat(first.z);
-        const U32 identical = first.w >> 16;
+        const uint4 offsets = live ? rowOffsets[h] : make_uint4(0u, 0u, 0u, 0u);
+        const float scale = BitsFloat(first.x);
+        const U32 identical = first.y >> 16;
         float showdown = 0.0f, fold = 0.0f;
-        const bool open = !(mask & n.board) && scale > 0.0f;
+        const bool open = !HandBlocked(n.board, first.y) && scale > 0.0f;
         if (live && open)
         {
-            float mass = 0.0f, wins = 0.0f, losses = 0.0f;
-            if (kind == NodeKind::ForcedRunout)
+            float mass = 0.0f;
+            // Where the hand's masses are, which depends only on the board and ranges, as 16-bit
+            // byte offsets from the staged reach (see Plan::order): its win mass | the ranked
+            // mass not stronger than it in the forward prefix, per held card its blocked reach
+            // below | through its rank in the card's run, and both cards' run totals.
+            const float winMass = Staged(staged, offsets.x & 0xffffu);
+            const float lossMass = rankedMass - Staged(staged, offsets.x >> 16);
+            const float all0 = Staged(staged, offsets.w & 0xffffu), all1 = Staged(staged, offsets.w >> 16);
+            const float below0 = Staged(staged, offsets.y & 0xffffu), through0 = Staged(staged, offsets.y >> 16);
+            const float below1 = Staged(staged, offsets.z & 0xffffu), through1 = Staged(staged, offsets.z >> 16);
+            if (needMass)
             {
-                // This player's hands are contiguous per opponent hand in its layout of the row
-                // (see OutcomesBuffer), so a warp's loads coalesce; eight independent loads per
-                // step overlap the row's latency while the sums keep their opponent order over the
-                // opponent hands with reach.
-                const U64 pairs = U64(state.hands[0]) * state.hands[1];
-                const U32* table = outcomes + (p == 0 ? U64(state.outcomeRows) * pairs : 0) + U64(row) * pairs + h;
-#define GPU_RUNOUT_STEP(countsValue, index)                               \
-    {                                                                     \
-        const U32 counts = (countsValue);                                 \
-        /* Overlapping pairs hold the sentinel and contribute nothing. */ \
-        const float r = counts == 0xffffffffu ? 0.0f : reach[index];      \
-        mass += r;                                                        \
-        wins += r * float(p == 0 ? counts & 0xffffu : counts >> 16);      \
-        losses += r * float(p == 0 ? counts >> 16 : counts & 0xffffu);    \
-    }
-                const U32 reached = keptCount[0];
-                U32 k = 0;
-                for (; k + 8 <= reached; k += 8)
-                {
-                    const U32 o0 = kept[k], o1 = kept[k + 1], o2 = kept[k + 2], o3 = kept[k + 3];
-                    const U32 o4 = kept[k + 4], o5 = kept[k + 5], o6 = kept[k + 6], o7 = kept[k + 7];
-                    const U32 c0 = table[U64(o0) * count], c1 = table[U64(o1) * count];
-                    const U32 c2 = table[U64(o2) * count], c3 = table[U64(o3) * count];
-                    const U32 c4 = table[U64(o4) * count], c5 = table[U64(o5) * count];
-                    const U32 c6 = table[U64(o6) * count], c7 = table[U64(o7) * count];
-                    GPU_RUNOUT_STEP(c0, o0)
-                    GPU_RUNOUT_STEP(c1, o1)
-                    GPU_RUNOUT_STEP(c2, o2)
-                    GPU_RUNOUT_STEP(c3, o3)
-                    GPU_RUNOUT_STEP(c4, o4)
-                    GPU_RUNOUT_STEP(c5, o5)
-                    GPU_RUNOUT_STEP(c6, o6)
-                    GPU_RUNOUT_STEP(c7, o7)
-                }
-                for (; k < reached; ++k)
-                    GPU_RUNOUT_STEP(table[U64(kept[k]) * count], kept[k])
-#undef GPU_RUNOUT_STEP
-                // A runout record's win and loss are the scales of its counts (see Node).
-                showdown = (tie * mass + wins * win + losses * loss) * scale;
+                mass = rankedMass - (all0 + all1);
+                if (identical)
+                    mass += reach[identical - 1];
             }
-            else
-            {
-                // Where the hand's masses are, which depends only on the board and ranges, as 16-bit
-                // byte offsets from the staged reach (see Plan::order): its win mass | the ranked
-                // mass not stronger than it in the forward prefix, per held card its blocked reach
-                // below | through its rank in the card's run, and both cards' run totals.
-                const float winMass = Staged(staged, offsets.x & 0xffffu);
-                const float lossMass = rankedMass - Staged(staged, offsets.x >> 16);
-                const float all0 = Staged(staged, offsets.w & 0xffffu), all1 = Staged(staged, offsets.w >> 16);
-                const float below0 = Staged(staged, offsets.y & 0xffffu), through0 = Staged(staged, offsets.y >> 16);
-                const float below1 = Staged(staged, offsets.z & 0xffffu), through1 = Staged(staged, offsets.z >> 16);
-                if (needMass)
-                {
-                    mass = rankedMass - (all0 + all1);
-                    if (identical)
-                        mass += reach[identical - 1];
-                }
-                wins = winMass - (below0 + below1);
-                // A card's list has at most 51 entries, so all - through loses only ulps of that
-                // card's mass.
-                losses = lossMass - ((all0 - through0) + (all1 - through1));
-                showdown = (tie * mass + winScale * wins + lossScale * losses) * scale;
-                if (ownFold)
-                    fold = (mass * scale) * foldPayoff;
-            }
+            const float wins = winMass - (below0 + below1);
+            // A card's list has at most 51 entries, so all - through loses only ulps of that
+            // card's mass.
+            const float losses = lossMass - ((all0 - through0) + (all1 - through1));
+            showdown = (tie * mass + winScale * wins + lossScale * losses) * scale;
+            if (ownFold)
+                fold = (mass * scale) * foldPayoff;
         }
         if (foldFromRow && open)
-            fold = FoldValue(foldMasses, first.w, identical ? foldReach[identical - 1] : 0.0f, scale, foldPayoff);
+            fold = FoldValue(foldMasses, first.y, identical ? foldReach[identical - 1] : 0.0f, scale, foldPayoff);
         if (!backup)
         {
             if (live)
-                *handOutput = showdown;
+                output[h] = showdown;
             if (liveFold)
-                *handFoldOutput = fold;
+                foldOutput[h] = fold;
         }
         else
             BackupLeafPair<Averaging>(
@@ -921,8 +932,124 @@ __global__ void __launch_bounds__(kTerminalGroup, 12) Terminal(GPU_ARGUMENTS)
                 fold,
                 showdown,
                 halving,
-                handOutput
+                output + h
             );
+    }
+}
+
+// The 16-bit entries of runout row row > 0 in its player-0-major (major 0) or player-1-major
+// layout, after the flop row's two 32-bit layouts (see Outcomes); row 0 gives row 1's.
+__device__ __forceinline__ unsigned short* TurnOutcomes(U32* outcomes, U64 pairs, U32 row, U32 major)
+{
+    return (unsigned short*)(outcomes + 2 * pairs) + (2 * U64(row ? row - 1 : 0) + major) * pairs;
+}
+
+// A hand's runout value from its row of win/loss counts against the opponent hands (see
+// Outcomes) with the reach listed in kept: Entry is the row's entry type, whose low half holds
+// player 0's wins and high half its losses. This player's hands are contiguous per opponent hand
+// in its layout of the row, so a warp's loads coalesce; eight independent loads per step overlap
+// the row's latency while the sums keep their opponent order over the opponent hands with reach.
+// A runout record's win and loss are the scales of its counts (see Node).
+template<typename Entry>
+__device__ __forceinline__ float RunoutValue(
+    const Entry* table,
+    U32 count,
+    U32 p,
+    U32 reached,
+    const U32* kept,
+    const float* reach,
+    float win,
+    float tie,
+    float loss,
+    float scale
+)
+{
+    constexpr U32 kHalf = 4 * sizeof(Entry), kSentinel = Entry(~0u);
+    float mass = 0.0f, wins = 0.0f, losses = 0.0f;
+#define GPU_RUNOUT_STEP(countsValue, index)                                           \
+    {                                                                                 \
+        const U32 counts = (countsValue);                                             \
+        /* Overlapping pairs hold the sentinel and contribute nothing. */             \
+        const float r = counts == kSentinel ? 0.0f : reach[index];                    \
+        mass += r;                                                                    \
+        wins += r * float(p == 0 ? counts & ((1u << kHalf) - 1) : counts >> kHalf);   \
+        losses += r * float(p == 0 ? counts >> kHalf : counts & ((1u << kHalf) - 1)); \
+    }
+    U32 k = 0;
+    for (; k + 8 <= reached; k += 8)
+    {
+        const U32 o0 = kept[k], o1 = kept[k + 1], o2 = kept[k + 2], o3 = kept[k + 3];
+        const U32 o4 = kept[k + 4], o5 = kept[k + 5], o6 = kept[k + 6], o7 = kept[k + 7];
+        const U32 c0 = table[U64(o0) * count], c1 = table[U64(o1) * count];
+        const U32 c2 = table[U64(o2) * count], c3 = table[U64(o3) * count];
+        const U32 c4 = table[U64(o4) * count], c5 = table[U64(o5) * count];
+        const U32 c6 = table[U64(o6) * count], c7 = table[U64(o7) * count];
+        GPU_RUNOUT_STEP(c0, o0)
+        GPU_RUNOUT_STEP(c1, o1)
+        GPU_RUNOUT_STEP(c2, o2)
+        GPU_RUNOUT_STEP(c3, o3)
+        GPU_RUNOUT_STEP(c4, o4)
+        GPU_RUNOUT_STEP(c5, o5)
+        GPU_RUNOUT_STEP(c6, o6)
+        GPU_RUNOUT_STEP(c7, o7)
+    }
+    for (; k < reached; ++k)
+        GPU_RUNOUT_STEP(table[U64(kept[k]) * count], kept[k])
+#undef GPU_RUNOUT_STEP
+    return (tie * mass + wins * win + losses * loss) * scale;
+}
+
+// Lone folds and forced runouts (see Kernel): one block per item and one thread per hand, in as
+// few rounds as kRunoutGroup threads allow (see CudaExecutor's RunoutGroup), since a runout's hand
+// visits every opponent hand with reach and the block's rounds are its critical path. Shared
+// memory holds the staged opponent reach, then a fold's masses or a runout's reached opponent
+// hands (see RunoutShared).
+__global__ void __launch_bounds__(kRunoutGroup) Runout(GPU_ARGUMENTS)
+{
+    const State state = *statePointer;
+    const U32 local = threadIdx.x, threads = blockDim.x;
+    const U32 p = state.player;
+    const U32 count = p ? state.hands[1] : state.hands[0], opponentCount = p ? state.hands[0] : state.hands[1];
+    const Node n = LoadRecord(nodes + pass.offset + blockIdx.x);
+    PrefetchNextNodes(nodes, pass, local);
+    extern __shared__ __align__(16) float reach[];
+    float* masses = reach + TerminalLayout::Padded(opponentCount + 1);
+    const bool live = StageReach(state, p ? n.reachSlot[0] : n.reachSlot[1], local, threads, scratch, reach);
+    if (local == 0)
+        flags[n.slot] = live ? 1u : 0u;
+    if (!live)
+        return;
+    if (Kind(n.info) == NodeKind::Fold)
+    {
+        TerminalFold(n, state, local, threads, hands, cards, scratch, reach, masses);
+        return;
+    }
+    // A runout's hands visit only the opponent hands with reach, listed in place of a fold's
+    // masses: a zero-reach hand's terms would add exact zeros.
+    U32* kept = (U32*)masses;
+    __shared__ U32 keptCount;
+    if (local < kWarpSize)
+        ListReached(opponentCount, local, reach, kept, &keptCount);
+    __syncthreads();
+    const float win = p ? n.utility[1][0] : n.utility[0][0];
+    const float tie = p ? n.utility[1][1] : n.utility[0][1];
+    const float loss = p ? n.utility[1][2] : n.utility[0][2];
+    const U32 mineBase = p ? state.hands[0] : 0, reached = keptCount, row = Row(n.info);
+    // Player 0 reads the player-1-major layout of the row, where its hands are contiguous.
+    const U64 pairs = U64(state.hands[0]) * state.hands[1];
+    const U32* flopTable = outcomes + (p == 0 ? pairs : 0);
+    const unsigned short* turnTable = TurnOutcomes(outcomes, pairs, row, p == 0 ? 1 : 0);
+    float* output = scratch + U64(n.slot) * state.stride;
+    for (U32 h = local; h < count; h += threads)
+    {
+        // The hand: value scale and packed cards (see Hand).
+        const uint2 first = *(const uint2*)(hands + mineBase + h);
+        const float scale = BitsFloat(first.x);
+        float value = 0.0f;
+        if (!HandBlocked(n.board, first.y) && scale > 0.0f)
+            value = row == 0 ? RunoutValue(flopTable + h, count, p, reached, kept, reach, win, tie, loss, scale)
+                             : RunoutValue(turnTable + h, count, p, reached, kept, reach, win, tie, loss, scale);
+        output[h] = value;
     }
 }
 
@@ -1038,8 +1165,8 @@ __device__ __forceinline__ void BackupNode(Node n, State state, U32 h, U32 pair,
         }
         if (training)
         {
-            exponent0 = exponents[h];
-            exponent1 = pair ? exponents[h + 1] : 0u;
+            exponent0 = LoadStreamed(exponents + h);
+            exponent1 = pair ? LoadStreamed(exponents + h + 1) : 0u;
         }
     }
     float value0 = 0.0f, value1 = 0.0f;
@@ -1092,13 +1219,13 @@ __device__ __forceinline__ void BackupNode(Node n, State state, U32 h, U32 pair,
         for (U32 a = 0; a < actions; ++a)
         {
             short* entry = regrets + n.strategy + U64(a) * count + h;
-            entry[0] = (short)Quantize(entryRegrets0[a], next0, dither0);
+            StoreStreamed(entry, (short)Quantize(entryRegrets0[a], next0, dither0));
             if (pair)
-                entry[1] = (short)Quantize(entryRegrets1[a], next1, dither1);
+                StoreStreamed(entry + 1, (short)Quantize(entryRegrets1[a], next1, dither1));
         }
-        exponents[h] = (unsigned char)next0;
+        StoreStreamed(exponents + h, next0);
         if (pair)
-            exponents[h + 1] = (unsigned char)next1;
+            StoreStreamed(exponents + h + 1, next1);
     }
 }
 
@@ -1146,12 +1273,13 @@ __global__ void __launch_bounds__(kTileGroup, 5) Backup(GPU_ARGUMENTS)
     const State state = *statePointer;
     const U32 item = blockIdx.x, h = 2 * (blockIdx.y * blockDim.x + threadIdx.x);
     const U32 count = state.player ? state.hands[1] : state.hands[0];
+    PrefetchNextNodes(nodes, pass, threadIdx.x);
     // The grid has one block row per item (see CudaExecutor's Dispatch); a last hand tile can
     // run past the hands.
     if (h >= count)
         return;
     const U32 pair = h + 1 < count ? 1u : 0u;
-    const Node n = nodes[pass.offset + item];
+    const Node n = LoadRecord(nodes + pass.offset + item);
     const U32 actions = Count(n.info);
     short* entries = Averaging ? (short*)sums : regrets;
     if (Kind(n.info) == NodeKind::Chance)
@@ -1170,25 +1298,37 @@ __global__ void Outcomes(GPU_ARGUMENTS)
     const U64 index = blockIdx.x * blockDim.x + threadIdx.x, pairs = U64(state.hands[0]) * state.hands[1];
     if (index >= pass.count)
         return;
-    const U32 row = U32(index / pairs), h0 = U32(index % pairs / state.hands[1]), h1 = U32(index % state.hands[1]);
-    const U64 mask0 = hands[h0].mask, mask1 = hands[state.hands[0] + h1].mask;
+    const U64 pair = index % pairs;
+    const U32 row = U32(index / pairs), h0 = U32(pair / state.hands[1]), h1 = U32(index % state.hands[1]);
+    const U64 mask0 = HandMask(hands[h0].cards), mask1 = HandMask(hands[state.hands[0] + h1].cards);
     const U64 board = state.board;
-    // The player-1-major copy of every row follows the player-0-major rows.
-    const U64 transposed = (U64(state.outcomeRows) + row) * pairs + U64(h1) * state.hands[0] + h0;
+    // Each row's player-1-major copy follows its player-0-major entries: the flop row's 32-bit
+    // entries hold wins | losses << 16 of its 990 runouts, the turn rows' 16-bit entries that
+    // follow wins | losses << 8 of their 44.
+    const U64 transposed = pairs + U64(h1) * state.hands[0] + h0;
+    unsigned short* turns = TurnOutcomes(outcomes, pairs, row, 0);
+    const auto store = [&](U32 wins, U32 losses)
+    {
+        if (row == 0)
+            outcomes[pair] = outcomes[transposed] = wins | losses << 16;
+        else
+            turns[pair] = turns[transposed] = (unsigned short)(wins | losses << 8);
+    };
     U32 wins = 0, losses = 0;
-    // Overlapping private cards store a sentinel that Terminal's runout loop tests instead of masks.
+    // Overlapping private cards store a sentinel, all ones, that Runout's loop tests instead of
+    // masks.
     if (mask0 & mask1)
     {
-        outcomes[index] = outcomes[transposed] = 0xffffffffu;
+        store(0xffffu, 0xffffu);
         return;
     }
     if (pass.outcomeStage == OutcomeStage::SumTurns)
     {
         for (U32 r = 1; r < state.outcomeRows; ++r)
         {
-            const U32 result = outcomes[U64(r) * pairs + index];
-            wins += result & 0xffffu;
-            losses += result >> 16;
+            const U32 result = TurnOutcomes(outcomes, pairs, r, 0)[pair];
+            wins += result & 0xffu;
+            losses += result >> 8;
         }
         wins /= 2;
         losses /= 2;
@@ -1215,5 +1355,5 @@ __global__ void Outcomes(GPU_ARGUMENTS)
             }
         }
     }
-    outcomes[index] = outcomes[transposed] = wins | (losses << 16);
+    store(wins, losses);
 }

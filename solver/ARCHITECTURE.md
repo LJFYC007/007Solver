@@ -29,11 +29,11 @@ The [GPU plan](engine/gpu/GpuPlan.h) supports at most 16 actions per decision (`
 
 - A node's children occupy consecutive slots and its record holds only the first (`Node::link`); every kernel and Backup inlining rely on it.
 - Descendant scratch is reused only after backup, keeping live ancestor reaches and child-root values.
-- Slot intervals order passes but cannot detect overlap within one. A Terminal block stages every row it reads before writing, and writes only rows that no other block of its pass reads.
+- Slot intervals order passes but cannot detect overlap within one. A Terminal or Runout block stages every row it reads before writing, and writes only rows that no other block of its pass reads.
 - Children without opponent reach are unflagged and their values are stale: parents substitute zero, and acting decisions read the flag before touching regrets.
 - Node stamps live in two halves selected by update parity: a pass reads the half its player's previous update wrote and writes the other, so tiles of one node never race.
 - Cross-stream predecessors derive from the slot intervals each pass reads and writes (`Plan::predecessors`), and CUDA captures them as graph edges. `Executor::Update` may return before the device finishes; `Synchronize`, downloads and root values wait.
-- The batching target keeps leaf lanes' reach and values mostly in the GPU's L2; it is not a memory limit. Street regions and retained ancestors can exceed it, and the whole tree's regrets and cumulative strategies stay resident.
+- The batching target keeps leaf lanes' reach and values mostly in the GPU's L2; it is not a memory limit. Street regions and retained ancestors can exceed it, and the whole tree's regrets and cumulative strategies stay resident. The training state streams through L2 once per update, so kernels load and store it only through `LoadStreamed`/`StoreStreamed` (evict-first), and scratch rows hold a persisting L2 window.
 
 ## Memory
 

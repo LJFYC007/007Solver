@@ -146,19 +146,18 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             "The GPU supports at most " + std::to_string(kMaxActions) + " actions per decision; reduce bet or raise sizes or use CPU"
         );
     const auto& tables = data.tables;
-    static_assert(sizeof(Node) == 80 && sizeof(Hand) == 32 && sizeof(State) == 64 && sizeof(Pass) == 40);
+    static_assert(sizeof(Node) == 80 && sizeof(Hand) == 8 && sizeof(State) == 64 && sizeof(Pass) == 48);
     state.board = data.nodes.front().boardMask;
     for (U32 p = 0; p < 2; ++p)
     {
         state.hands[p] = static_cast<U32>(tables.hands[p].size());
         for (const auto& h : tables.hands[p])
+        {
             hands.push_back(
-                {h.mask,
-                 ValueScale(h.opponentMass),
-                 U32(h.cardIndices[0]) | U32(h.cardIndices[1]) << 8 | U32(h.matchingOpponent + 1) << 16,
-                 h.weight,
-                 {}}
+                {ValueScale(h.opponentMass), U32(h.cardIndices[0]) | U32(h.cardIndices[1]) << 8 | U32(h.matchingOpponent + 1) << 16}
             );
+            weights.push_back(h.weight);
+        }
     }
     // Rows are padded to whole float4 groups so the kernels move them as 8- and 16-byte vectors.
     state.stride = TerminalLayout::Padded(std::max(state.hands[0], state.hands[1]));
@@ -171,6 +170,15 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         for (U32 card = 0; card <= 52; ++card)
             cards[p * kCardListStride + card] = static_cast<U32>(cards.size() + holders.cardOffsets[card]);
         cards.insert(cards.end(), holders.cardLists.begin(), holders.cardLists.end());
+    }
+    for (U32 p = 0; p < 2; ++p)
+    {
+        if (cards.size() != CardPairs(state, p))
+            throw std::logic_error("GPU plan's card lists do not list every hand twice");
+        const U32 base = p ? state.hands[0] : 0;
+        const auto held = [&](U32 h) { return h < state.hands[p] ? hands[base + h].cards & 0xffffu : 0u; };
+        for (U32 h = 0; h < state.hands[p]; h += 2)
+            cards.push_back(held(h) | held(h + 1) << 16);
     }
     ranks.resize(tables.rankRows.size() * std::size_t(total), 0xffff);
     // Each rank row's section per opponent, then the rows at a pitch that fits the largest.
@@ -292,10 +300,11 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
     }
     state.stampCount = static_cast<U32>(layout.size());
     state.outcomeRows = static_cast<U32>(data.runoutRows);
-    // Both hand-major layouts of every runout row, so either player's Terminal loop reads
-    // its own hands contiguously.
+    // Both hand-major layouts of every runout row, so either player's Runout loop reads its own
+    // hands contiguously: the flop row's 32-bit entries, then the turn rows' 16-bit ones (see
+    // Outcomes).
     const auto outcomePairs = std::size_t(state.outcomeRows) * state.hands[0] * state.hands[1];
-    outcomeEntries = 2 * outcomePairs;
+    outcomeWords = state.outcomeRows ? outcomePairs + std::size_t(state.hands[0]) * state.hands[1] : 0;
     if (state.outcomeRows)
     {
         initialization.push_back({Kernel::Outcomes, 0, static_cast<U32>(outcomePairs), OutcomeStage::CountRunouts, 1});
@@ -366,7 +375,7 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             return;
         if (work.size() + list.size() > std::numeric_limits<U32>::max())
             throw std::runtime_error("GPU schedule exceeds the supported index range");
-        // Reach, Terminal and Backup lanes come from LaunchPass.
+        // Reach, Terminal, Runout and Backup lanes come from LaunchPass.
         passes.push_back(
             {kernel,
              static_cast<U32>(work.size()),
@@ -383,19 +392,22 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         work.insert(work.end(), list.begin(), list.end());
     };
     // A region's passes run in one stream: leaf batches (no chance node below) take the leaf
-    // lanes in turn with disjoint scratch, everything above them uses the last lane. Batches with
+    // lanes in turn with disjoint scratch, everything above them uses the spine lane. Batches with
     // chance nodes below alternate between two scratch copies and are emitted
     // software-pipelined, a batch's Reach passes before the previous batch's Backup passes,
     // so the graph overlaps both with the leaf batches (Plan::predecessors). A region's
-    // Terminal pass follows its first batch's Reach passes, so batches sharing its stream
-    // are not queued behind it.
-    constexpr U32 kLeafLanes = kLaneCount - 1, kSpineLane = kLeafLanes;
+    // terminal passes follow its first batch's Reach passes, so batches sharing its stream
+    // are not queued behind them. The spine's terminal passes, which hold the forced runouts of
+    // wide ranges for hundreds of microseconds, take lanes of their own in turn, so neither the
+    // spine's next batch nor the leaf batches below it queue behind them, and one runs beside
+    // the next.
+    constexpr U32 kLeafLanes = kSpineLane, kSpineTerminalLanes = kLaneCount - kSpineLane - 1;
     struct Region
     {
         std::vector<std::vector<U32>> levels;
         std::vector<U32> boundary, terminals;
         // Slots its passes touch, each list with the roots' slots in the parent region: inner, for
-        // Reach and Terminal, is its own slots less the chance children, which their own boundary
+        // Reach, Terminal and Runout, is its own slots less the chance children, which their own boundary
         // Reach passes write and only Backup reads; own, for Backup, is every own slot. parents
         // holds the parent region's reach slots the roots' derivation reads.
         Ranges inner, own, parents;
@@ -406,7 +418,7 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
     // Children of region roots whose boundary pass a player skips (see reach).
     std::vector<std::uint8_t> derived(layout.size());
     // Visits a region, allocating its nodes' children from base, and emits its Reach levels;
-    // the caller emits its Terminal pass, its batches and, later, its Backup passes.
+    // the caller emits its terminal passes, its batches and, later, its Backup passes.
     const auto reach = [&](const std::vector<U32>& roots, std::size_t base, std::size_t below, U32 lane) -> Region
     {
         Region region;
@@ -526,22 +538,32 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
     // write values over only their own rows, their fold siblings' and fused parents', so the
     // region's other reach rows, which later regions derive their reach from, stay readable
     // while the pass runs; roots are chance children and therefore decisions, never terminals
-    // or fused parents (see reach).
+    // or fused parents (see reach). A region's showdowns take a Terminal pass and its other
+    // terminals a Runout pass (see Kernel).
+    U32 spineTerminals = 0;
     const auto terminal = [&](const Region& region)
     {
-        std::vector<U32> written;
+        const U32 lane = region.lane == kSpineLane ? kSpineLane + 1 + spineTerminals++ % kSpineTerminalLanes : region.lane;
+        std::vector<U32> showdowns, others;
         for (U32 index : region.terminals)
+            (layout[index].kind == NodeKind::Showdown ? showdowns : others).push_back(index);
+        for (const Kernel kernel : {Kernel::Terminal, Kernel::Runout})
         {
-            written.push_back(layout[index].slot);
-            if (layout[index].fold != kNoIndex)
+            const auto& list = kernel == Kernel::Terminal ? showdowns : others;
+            std::vector<U32> written;
+            for (U32 index : list)
             {
-                written.push_back(layout[layout[index].fold].slot);
-                if (fused[layout[index].parent])
-                    written.push_back(layout[layout[index].parent].slot);
+                written.push_back(layout[index].slot);
+                if (layout[index].fold != kNoIndex)
+                {
+                    written.push_back(layout[layout[index].fold].slot);
+                    if (fused[layout[index].parent])
+                        written.push_back(layout[layout[index].parent].slot);
+                }
             }
+            const U32 count = static_cast<U32>(list.size());
+            emit(kernel, list, lane, {}, {count, count}, coalesce(written), region.inner);
         }
-        const U32 count = static_cast<U32>(region.terminals.size());
-        emit(Kernel::Terminal, region.terminals, region.lane, {}, {count, count}, coalesce(written), region.inner);
     };
     // A decision with at most three children below a decision of the other actor with two or
     // three is inlined into that parent: in the parent's actor's updates, where the child does
@@ -720,11 +742,12 @@ std::array<BufferData, kBufferCount> Plan::Buffers() const
     std::array<BufferData, kBufferCount> buffers{};
     buffers[NodesBuffer] = Table(nodes);
     buffers[HandsBuffer] = Table(hands);
+    buffers[WeightsBuffer] = Table(weights);
     buffers[RanksBuffer] = Table(ranks);
     buffers[RunoutsBuffer] = Table(runouts);
     buffers[OrderBuffer] = Table(order);
     buffers[CardsBuffer] = Table(cards);
-    buffers[OutcomesBuffer] = {nullptr, outcomeEntries * sizeof(U32)};
+    buffers[OutcomesBuffer] = {nullptr, outcomeWords * sizeof(U32)};
     buffers[RegretsBuffer] = {nullptr, entries * sizeof(std::uint16_t)};
     buffers[SumsBuffer] = buffers[RegretsBuffer];
     buffers[ScratchBuffer] = {nullptr, slots * state.stride * sizeof(float)};

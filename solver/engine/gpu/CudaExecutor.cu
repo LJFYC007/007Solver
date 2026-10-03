@@ -4,6 +4,7 @@
 #include <array>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include "engine/gpu/GpuKernels.inc"
 
 namespace solver::engine::gpu
@@ -14,6 +15,28 @@ void Check(cudaError_t status)
 {
     if (status != cudaSuccess)
         throw std::runtime_error(std::string("CUDA: ") + cudaGetErrorString(status));
+}
+// Threads of a Runout block for the given lanes, one per hand: the fewest rounds of at most
+// kRunoutGroup, balanced in whole warps, and at least the two warps FoldMasses splits.
+U32 RunoutGroup(U32 lanes)
+{
+    const U32 rounds = (lanes + kRunoutGroup - 1) / kRunoutGroup;
+    const U32 warps = ((lanes + rounds - 1) / rounds + kWarpSize - 1) / kWarpSize;
+    return std::max<U32>(warps, 2) * kWarpSize;
+}
+using KernelFunction = void (*)(GPU_ARGUMENTS);
+// Terminal's instance and threads per block for a launch with the given shared memory: blocks of
+// 2 * kTerminalGroup threads where shared memory, which grows with the opponent's hands, already
+// limits resident blocks to what the doubled block allows, so wide ranges' hand loops take half the
+// rounds at the same resident blocks.
+std::pair<KernelFunction, U32> TerminalInstance(bool averaging, std::size_t shared)
+{
+    const KernelFunction narrow = averaging ? Terminal<true, kTerminalGroup> : Terminal<false, kTerminalGroup>;
+    const KernelFunction wide = averaging ? Terminal<true, 2 * kTerminalGroup> : Terminal<false, 2 * kTerminalGroup>;
+    int narrowBlocks = 0, wideBlocks = 0;
+    Check(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&narrowBlocks, narrow, kTerminalGroup, shared));
+    Check(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&wideBlocks, wide, 2 * kTerminalGroup, shared));
+    return wideBlocks >= narrowBlocks ? std::pair{wide, 2u * kTerminalGroup} : std::pair{narrow, U32(kTerminalGroup)};
 }
 class CudaExecutor final : public Executor
 {
@@ -38,6 +61,7 @@ public:
             const auto sources = plan.Buffers();
             for (std::size_t i = 0; i < buffers_.size(); ++i)
                 Upload(i, sources[i]);
+            PersistScratch(sources[ScratchBuffer].bytes);
             for (const auto index : {RegretsBuffer, SumsBuffer, FlagsBuffer, StampsBuffer})
                 Check(cudaMemsetAsync(buffers_[index], 0, sources[index].bytes, stream_));
             for (const auto& pass : plan.initialization)
@@ -140,11 +164,35 @@ private:
     std::array<std::array<cudaGraph_t, 2>, 2> graphs_{};
     std::array<std::array<cudaGraphExec_t, 2>, 2> executables_{};
     int lowPriority_ = 0, highPriority_ = 0;
+    // The launches' L2 access policy over the scratch buffer (see PersistScratch); an empty window
+    // when the device has no persisting L2.
+    cudaAccessPolicyWindow scratchWindow_{};
     void Upload(std::size_t index, const BufferData& source)
     {
         Check(cudaMalloc(&buffers_[index], source.AllocationBytes()));
         if (source.data)
             Copy(buffers_[index], source.data, source.bytes, cudaMemcpyHostToDevice);
+    }
+    // Batches rewrite their lanes' scratch rows every few passes, yet with the training state
+    // streaming through L2 (see LoadStreamed in GpuKernels.inc) many dirty rows still leave it
+    // between passes: a persisting share of the buffer's lines, spread over all of it, stays
+    // resident instead of being written back and refetched. A set-aside of 5/16 of the L2 (20 of
+    // 64 MB) measured fastest; larger ones crowd out the rows and records that remain normal.
+    void PersistScratch(std::size_t bytes)
+    {
+        int l2 = 0, persisting = 0, windowLimit = 0;
+        Check(cudaDeviceGetAttribute(&l2, cudaDevAttrL2CacheSize, 0));
+        Check(cudaDeviceGetAttribute(&persisting, cudaDevAttrMaxPersistingL2CacheSize, 0));
+        Check(cudaDeviceGetAttribute(&windowLimit, cudaDevAttrMaxAccessPolicyWindowSize, 0));
+        const std::size_t setAside = std::min<std::size_t>(persisting, std::size_t(l2) / 16 * 5);
+        if (!setAside || !windowLimit || !bytes)
+            return;
+        Check(cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, setAside));
+        scratchWindow_.base_ptr = buffers_[ScratchBuffer];
+        scratchWindow_.num_bytes = std::min<std::size_t>(bytes, windowLimit);
+        scratchWindow_.hitRatio = std::min(1.0f, float(setAside) / float(scratchWindow_.num_bytes));
+        scratchWindow_.hitProp = cudaAccessPropertyPersisting;
+        scratchWindow_.missProp = cudaAccessPropertyNormal;
     }
     void Copy(void* target, const void* source, std::size_t bytes, cudaMemcpyKind kind)
     {
@@ -157,15 +205,30 @@ private:
     }
     // Captures one player's update, or with averaging its strategy-value evaluation: every stream
     // forks from the origin at its first pass, waits for the events of the pass's predecessors, and
-    // joins the origin at the end.
+    // joins the origin at the end. Each launch moves the node records of the next launch in its
+    // stream into L2, which every record would otherwise wait for in DRAM.
     void Capture(U32 player, bool averaging)
     {
+        std::vector<Pass> launches(passes_.size());
+        std::array<const Pass*, kLaneCount> following{};
+        for (std::size_t i = passes_.size(); i-- > 0;)
+        {
+            Pass& launch = launches[i] = LaunchPass(passes_[i], shape_, player);
+            if (launch.count == 0)
+                continue;
+            if (const Pass* next = following[launch.lane])
+            {
+                launch.next = next->offset;
+                launch.nextCount = next->count;
+            }
+            following[launch.lane] = &launch;
+        }
         Check(cudaStreamBeginCapture(stream_, cudaStreamCaptureModeThreadLocal));
         Check(cudaEventRecord(fork_, stream_));
         std::array<bool, kLaneCount> used{true};
         for (std::size_t i = 0; i < passes_.size(); ++i)
         {
-            const Pass pass = LaunchPass(passes_[i], shape_, player);
+            const Pass& pass = launches[i];
             cudaStream_t stream = streams_[pass.lane];
             if (!used[pass.lane])
             {
@@ -191,38 +254,60 @@ private:
     {
         if (pass.count == 0)
             return;
-        // Reach and Backup tile each item's pass.lanes, two hands per lane, and Terminal runs one group per item; other
-        // passes are linear over pass.lanes.
-        const bool handTiles = pass.operation == Kernel::Backup || pass.operation == Kernel::Reach;
-        const U32 group = pass.operation == Kernel::Terminal ? kTerminalGroup
-                          : handTiles ? (std::min<U32>(pass.lanes, kTileGroup) + kWarpSize - 1) / kWarpSize * kWarpSize
-                                      : 256u;
-        const auto threads = pass.count * pass.lanes;
-        const dim3 blocks = handTiles ? dim3(pass.count, (pass.lanes + group - 1) / group)
-                                      : dim3(pass.operation == Kernel::Terminal ? pass.count : (threads + group - 1) / group);
-        const auto shared = pass.operation == Kernel::Terminal ? TerminalLayout(pass.lanes).end * sizeof(float) : 0;
-        // Terminal blocks run at the lowest priority: freed SM slots go first to pending Reach and
-        // Backup blocks, which gate their streams' next passes, and long Terminal launches fill
-        // the rest instead of holding every SM while the other streams wait (7% faster).
-        cudaLaunchAttribute priority{};
-        priority.id = cudaLaunchAttributePriority;
-        priority.val.priority = pass.operation == Kernel::Terminal ? lowPriority_ : highPriority_;
+        // Reach and Backup tile each item's pass.lanes, two hands per lane, Terminal runs one group per item (see
+        // TerminalInstance) and Runout one block (see RunoutGroup); Outcomes is linear over pass.lanes.
+        KernelFunction kernel = Outcomes;
+        U32 group = 256;
+        std::size_t shared = 0;
+        dim3 blocks(pass.count);
+        switch (pass.operation)
+        {
+        case Kernel::Reach:
+        case Kernel::Backup:
+            kernel = pass.operation == Kernel::Reach ? Reach : averaging ? Backup<true> : Backup<false>;
+            group = (std::min<U32>(pass.lanes, kTileGroup) + kWarpSize - 1) / kWarpSize * kWarpSize;
+            blocks = dim3(pass.count, (pass.lanes + group - 1) / group);
+            break;
+        case Kernel::Terminal:
+        {
+            shared = TerminalLayout(pass.lanes).end * sizeof(float);
+            const auto instance = TerminalInstance(averaging, shared);
+            kernel = instance.first;
+            group = instance.second;
+            break;
+        }
+        case Kernel::Runout:
+            kernel = Runout;
+            group = RunoutGroup(pass.lanes);
+            shared = RunoutShared(shape_.stride) * sizeof(float);
+            break;
+        case Kernel::Outcomes:
+            blocks = dim3((pass.count * pass.lanes + group - 1) / group);
+            break;
+        }
+        const bool leaves = pass.operation == Kernel::Terminal || pass.operation == Kernel::Runout;
+        // Leaf batches' Terminal and Runout blocks run at the lowest priority: freed SM slots go first to pending Reach and
+        // Backup blocks, which gate their streams' next passes, and long Terminal launches fill the rest instead of holding
+        // every SM while the other streams wait (7% faster). The spine's terminal passes gate the spine's Backup instead
+        // and keep the highest priority.
+        cudaLaunchAttribute attributes[2]{};
+        attributes[0].id = cudaLaunchAttributePriority;
+        attributes[0].val.priority = leaves && pass.lane < kSpineLane ? lowPriority_ : highPriority_;
+        attributes[1].id = cudaLaunchAttributeAccessPolicyWindow;
+        attributes[1].val.accessPolicyWindow = scratchWindow_;
         cudaLaunchConfig_t config{};
         config.gridDim = blocks;
         config.blockDim = dim3(group);
         config.dynamicSmemBytes = shared;
         config.stream = stream;
-        config.attrs = &priority;
-        config.numAttrs = 1;
-        const auto kernel = pass.operation == Kernel::Reach      ? Reach
-                            : pass.operation == Kernel::Terminal ? (averaging ? Terminal<true> : Terminal<false>)
-                            : pass.operation == Kernel::Backup   ? (averaging ? Backup<true> : Backup<false>)
-                                                                 : Outcomes;
+        config.attrs = attributes;
+        config.numAttrs = scratchWindow_.num_bytes ? 2 : 1;
         Check(cudaLaunchKernelEx(
             &config,
             kernel,
             static_cast<const Node*>(buffers_[NodesBuffer]),
             static_cast<const Hand*>(buffers_[HandsBuffer]),
+            static_cast<const float*>(buffers_[WeightsBuffer]),
             static_cast<const unsigned short*>(buffers_[RanksBuffer]),
             static_cast<const int*>(buffers_[RunoutsBuffer]),
             static_cast<const U32*>(buffers_[OrderBuffer]),
@@ -263,6 +348,13 @@ private:
         DestroyGraph();
         for (std::size_t i = 0; i < buffers_.size(); ++i)
             Free(i);
+        if (scratchWindow_.num_bytes)
+        {
+            // Later work in the process gets the whole L2 back.
+            cudaCtxResetPersistingL2Cache();
+            cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, 0);
+            scratchWindow_ = {};
+        }
         for (auto& stream : streams_)
             if (stream)
                 cudaStreamDestroy(stream);

@@ -28,6 +28,13 @@ struct TerminalLayout
     {}
     U32 forward, runs, foldMasses, foldReach, end;
 };
+// Runout shared memory in floats for rows of the given stride (State::stride): the staged
+// opponent reach with its zero slot, padded as in TerminalLayout, then a fold's total and card
+// masses or a forced runout's opponent hands with reach.
+GPU_TYPES_INLINE constexpr U32 RunoutShared(U32 stride)
+{
+    return TerminalLayout::Padded(stride + 1) + (stride > 53 ? stride : 53);
+}
 // One of a warp's contiguous segments of count items in order, one per lane, each
 // ceil(count / kWarpSize) items but for trailing ones, which may be short or empty.
 struct Segment
@@ -41,9 +48,10 @@ GPU_TYPES_INLINE Segment LaneSegment(U32 count, U32 segment)
 }
 // One updating player's launch of a pass of Plan::passes: that player's items (Pass::begin
 // and end) and the lanes each takes. Backup launches one lane per two of the updating
-// player's hands. Terminal's lanes are the opponent's hands its shared memory holds. Only the
-// opponent's reach is propagated, so Reach launches one lane per two opponent hands. Reach and
-// Backup tile each item's lanes with whole warps (see CudaExecutor's Dispatch).
+// player's hands and Runout one per hand. Terminal's lanes are the opponent's hands its shared
+// memory holds. Only the opponent's reach is propagated, so Reach launches one lane per two
+// opponent hands. Reach and Backup tile each item's lanes with whole warps, and a Runout block
+// takes its item's in rounds (see CudaExecutor's Dispatch).
 inline Pass LaunchPass(Pass pass, const State& shape, U32 player)
 {
     pass.offset += pass.begin[player];
@@ -53,6 +61,8 @@ inline Pass LaunchPass(Pass pass, const State& shape, U32 player)
         pass.lanes = (shape.hands[player] + 1) / 2;
     else if (pass.operation == Kernel::Terminal)
         pass.lanes = shape.hands[opponent];
+    else if (pass.operation == Kernel::Runout)
+        pass.lanes = shape.hands[player];
     else if (pass.operation == Kernel::Reach)
         pass.lanes = (shape.hands[opponent] + 1) / 2;
     return pass;
@@ -83,6 +93,7 @@ struct Plan
     // shared with the CPU layout.
     std::vector<Node> nodes;
     std::vector<Hand> hands;
+    std::vector<float> weights;
     // Each rank row stores ranks by hand.
     std::vector<unsigned short> ranks;
     // Each rank row stores four entries per hand, the byte offsets from Terminal's staged reach
@@ -103,7 +114,7 @@ struct Plan
     State state{};
     std::size_t entries = 0; // 16-bit units of the regrets or sums buffer (HandTraversalData::strategySize)
     std::size_t slots = 0;
-    std::size_t outcomeEntries = 0;
+    std::size_t outcomeWords = 0; // 32-bit words of the outcomes buffer
     std::array<BufferData, kBufferCount> Buffers() const;
     std::uint64_t DeviceBytes() const;
     std::uint64_t HostBytes() const;
