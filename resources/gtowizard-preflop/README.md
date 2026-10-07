@@ -1,6 +1,6 @@
 # Captured preflop data
 
-Four GTO Wizard preflop solutions supply every application and test range. The raw source responses in [raw/](raw/) are the record; `cases/` is exported from them by the [scripts](../../scripts/).
+Four GTO Wizard preflop solutions supply every application and test range. [raw/](raw/) contains published source snapshots; the [scripts](../../scripts/) capture live responses under ignored `build/gtowizard-capture/raw/` and export them to `cases/`.
 
 ## Scope
 
@@ -19,7 +19,9 @@ Edge and Chrome use different accounts with independent quotas, as the user has 
 
 ## Files
 
-- `raw/<case-id>.raw.jsonl` is the checkpoint of source responses. Never edit, trim or rewrite it by hand: only the receiver writes it, appending acknowledged records and [recovering](#stopping) an unacknowledged tail. It is stored with Git LFS, which keeps every committed version in full, so commit checkpoints at milestones rather than after every batch. A push needs Git LFS's `pre-push` hook, which `git lfs update --manual` prints when another hook blocks `git lfs install`.
+- `build/gtowizard-capture/raw/<case-id>.raw.jsonl` is the live checkpoint. Only the receiver appends acknowledged records and [recovers](#stopping) an unacknowledged tail; never edit or trim it by hand. It is excluded from Git and LFS. Do not delete this directory as disposable build output: it can contain unpublished captures.
+- `raw/<case-id>.raw.jsonl` is the published, byte-for-byte Git LFS snapshot. The receiver seeds a missing live checkpoint from it once. The exporter prefers an existing live checkpoint and publishes a snapshot only after a successful export. After a checkout or pull, reconcile an existing live checkpoint deliberately; it is never silently replaced with the published version.
+- Keep live appends out of LFS paths: Git filters and background change previews can cache a complete copy of each intermediate file even without a commit. Export and commit only at daily/case milestones, not after short tool batches. A push needs Git LFS's `pre-push` hook, which `git lfs update --manual` prints when another hook blocks `git lfs install`.
 - `raw/<case-id>.metadata.json` holds the verified case metadata and the last stop.
 - `cases/<case-id>/` is the export the desktop loads: `manifest.json`, `index.json` (history to block), node blocks in `chunks/`, the checkpoint records in `source.jsonl.gz` and the unresolved entrances in `resume.json`.
 - `build/gtowizard-capture/daily-capture.json` (from the repository root) is the ignored daily ledger shared by all cases.
@@ -79,17 +81,17 @@ On a stop or error, POST `{case, requestCount, stopReason}` with the collector's
 
 Requests that cross midnight get HTTP 409 and stop the batch; restart on the next scheduled run. If midnight prevents saving a pending node, keep the page and its pending response, restart the receiver for the new date and save the node before cleanup, without another source request in that batch.
 
-After an interrupted write, start the receiver before exporting: it backs up an unterminated final JSONL record to a sibling `.incomplete-*` file and truncates only that unacknowledged tail.
+After an interrupted write, start the receiver before exporting: it backs up an unterminated final live JSONL record to a sibling `.incomplete-*` file and truncates only that unacknowledged tail. Published snapshots remain unchanged until export.
 
 ### Export
 
-Run the [exporter](../../scripts/export-gtowizard-case.py) after every stopped batch:
+Stop the receiver, then run the [exporter](../../scripts/export-gtowizard-case.py) when the daily run stops or a case completes. Short serial tool batches only save live checkpoints; they do not publish snapshots:
 
 ```sh
 python scripts/export-gtowizard-case.py --case Cash6mSimple_6mcEVR25_100 --status
 python scripts/export-gtowizard-case.py --case Cash6mSimple_6mcEVR25_100 --checkpoint
 ```
 
-It reads only the checkpoint, so rerunning it recovers an unfinished export. `--checkpoint` saves an incomplete export; without it, the export fails unless the tree is closed and can be marked complete.
+It reads only the checkpoint, so rerunning it recovers an unfinished export. `--status` is read-only. `--checkpoint` saves an incomplete export and atomically publishes the raw snapshot; without it, the export fails unless the tree is closed and can be marked complete. Do not run the receiver during export.
 
 Then run `npm --prefix desktop run check` and `npm --prefix desktop run build:ui` to include the new manifests and blocks. The packaged server serves them only after its usual rebuild and restart; do not restart a user's live solve without authorization. [Test fixtures](../../tests/README.md#updating-inputs-and-references) hash only the saved nodes they read, so a capture that leaves those nodes unchanged does not change them.

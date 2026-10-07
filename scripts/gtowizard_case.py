@@ -4,13 +4,15 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 import argparse
 import json
+import os
+import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
-# Raw capture checkpoints and verified case metadata. Checkpoints are only ever appended.
+# Published raw snapshots and verified case metadata.
 RAW = ROOT / "resources/gtowizard-preflop/raw"
 # Exported cases in catalog layout.
 CASES = ROOT / "resources/gtowizard-preflop/cases"
-# The receiver's daily ledger.
+# The receiver's live checkpoints and daily ledger, excluded from Git/LFS.
 WORK = ROOT / "build/gtowizard-capture"
 plan = json.loads((ROOT / "resources/gtowizard-preflop/capture-plan.json").read_text(encoding="utf-8"))
 
@@ -38,8 +40,24 @@ def metadata_path(case):
 
 
 def checkpoint_path(case):
-    """The receiver's durable JSONL of acknowledged source responses, which the exporter reads."""
-    return RAW / (case + ".raw.jsonl")
+    """Prefer the live checkpoint; a fresh checkout can read its published snapshot."""
+    live = WORK / "raw" / (case + ".raw.jsonl")
+    return live if live.exists() else RAW / live.name
+
+
+def prepare_checkpoint(case):
+    """Seed the ignored append-only checkpoint once, without replacing unfinished work."""
+    live = WORK / "raw" / (case + ".raw.jsonl")
+    live.parent.mkdir(parents=True, exist_ok=True)
+    snapshot = RAW / live.name
+    if not live.exists() and snapshot.exists():
+        temporary = live.with_suffix(".tmp")
+        with snapshot.open("rb") as source, temporary.open("wb") as output:
+            shutil.copyfileobj(source, output)
+            output.flush()
+            os.fsync(output.fileno())
+        temporary.replace(live)
+    return live
 
 
 def history_key(history):

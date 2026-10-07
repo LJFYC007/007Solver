@@ -5,8 +5,10 @@ import gzip
 import hashlib
 import json
 import math
+import os
+import shutil
 
-from gtowizard_case import (CASES, case_parser, check_source, checkpoint_path, child_jobs, history_key, label, load_case, plan,
+from gtowizard_case import (CASES, RAW, WORK, case_parser, check_source, checkpoint_path, child_jobs, history_key, label, load_case, plan,
                             terminal)
 
 parser = case_parser(__doc__)
@@ -18,7 +20,9 @@ listing, meta = load_case(CASE)
 order = meta["handOrder"]
 assert len(order) == len(set(order)) == 169
 records = {}
-source_stream = checkpoint_path(CASE).open("rb")
+source_path = checkpoint_path(CASE)
+source_stream = source_path.open("rb")
+source_stat = os.fstat(source_stream.fileno())
 while True:
     offset = source_stream.tell()
     line = source_stream.readline()
@@ -226,5 +230,21 @@ manifest = {
     "desktopIntegration": "Rebuild the app after exporting. Saved branches load on demand; missing branches are locked.",
 }
 (destination / "resume.json").write_text(json.dumps(resume_jobs, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+# Publish only at a stopped capture milestone, never for each appended response.
+# Stage outside Git/LFS so a file watcher cannot cache partially copied snapshots.
+snapshot = RAW / source_path.name
+current_stat = os.fstat(source_stream.fileno())
+assert (current_stat.st_size, current_stat.st_mtime_ns) == (source_stat.st_size, source_stat.st_mtime_ns), "Checkpoint changed during export; stop the receiver before exporting"
+if source_path != snapshot:
+    temporary = WORK / (source_path.name + ".publish-tmp")
+    source_stream.seek(0)
+    with temporary.open("wb") as output:
+        shutil.copyfileobj(source_stream, output)
+        output.flush()
+        os.fsync(output.fileno())
+    current_stat = os.fstat(source_stream.fileno())
+    assert (current_stat.st_size, current_stat.st_mtime_ns) == (source_stat.st_size, source_stat.st_mtime_ns), "Checkpoint changed during publication; stop the receiver before exporting"
+    temporary.replace(snapshot)
+source_stream.close()
 (destination / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8", newline="\n")
 print("Saved " + str(destination))

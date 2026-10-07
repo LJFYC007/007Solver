@@ -4,5 +4,5 @@
 *.cmd text eol=crlf
 *.ico binary
 *.png binary
-# Raw capture checkpoints, stored byte for byte.
+# Published raw snapshots only; live appends belong in ignored build/gtowizard-capture/raw/.
 resources/gtowizard-preflop/raw/*.raw.jsonl filter=lfs diff=lfs merge=lfs -text

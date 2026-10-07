@@ -6,11 +6,11 @@ import heapq
 import json
 import os
 
-from gtowizard_case import ROOT, WORK, case_parser, check_source, checkpoint_path, child_jobs, load_case, metadata_path, plan
+from gtowizard_case import ROOT, WORK, case_parser, check_source, child_jobs, load_case, metadata_path, plan, prepare_checkpoint
 
 CASE = case_parser(__doc__).parse_args().case
 listing, meta = load_case(CASE)
-DATA = checkpoint_path(CASE)
+DATA = prepare_checkpoint(CASE)
 WORK.mkdir(parents=True, exist_ok=True)
 LEDGER = WORK / "daily-capture.json"
 
