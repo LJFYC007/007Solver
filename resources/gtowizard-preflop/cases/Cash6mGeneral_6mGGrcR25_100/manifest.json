@@ -1,0 +1,635 @@
+{
+  "schemaVersion": 3,
+  "id": "Cash6mGeneral_6mGGrcR25_100",
+  "source": "GTO Wizard",
+  "complete": true,
+  "captureStopReason": null,
+  "listing": {
+    "id": "Cash6mGeneral_6mGGrcR25_100",
+    "players": "6max",
+    "tableType": "Classic",
+    "stack": 100,
+    "preflopSizing": "With cold calls",
+    "rake": "GG R&C",
+    "openingSize": "2.5x",
+    "threeBet": "GTO",
+    "cashDrop": "-",
+    "availability": "unlocked"
+  },
+  "scope": {
+    "format": "Cash",
+    "tableType": "Classic",
+    "postflopSizing": "single",
+    "players": "6max",
+    "stacks": [
+      100
+    ],
+    "openingSize": "2.5x",
+    "cashDrop": "-",
+    "preflopSizing": "With cold calls",
+    "rake": "GG R&C"
+  },
+  "requestedLibraryScope": {
+    "format": "Cash",
+    "tableType": "Classic",
+    "postflopSizing": "single",
+    "players": "6max",
+    "stacks": [
+      100
+    ],
+    "openingSize": "2.5x",
+    "cashDrop": "-",
+    "preflopSizing": [
+      "No cold calls",
+      "With cold calls"
+    ],
+    "rake": [
+      "cEV",
+      "GG R&C"
+    ]
+  },
+  "gameType": "Cash6mGeneral_6mGGrcR25",
+  "stack": 100,
+  "positions": [
+    "UTG",
+    "HJ",
+    "CO",
+    "BTN",
+    "SB",
+    "BB"
+  ],
+  "smallBlind": 0.5,
+  "bigBlind": 1,
+  "ante": 0,
+  "rake": "GG R&C",
+  "rakePercent": 5,
+  "rakeCap": 3,
+  "openingSize": 2.5,
+  "sourceMode": {
+    "id": 335,
+    "variant": "NLHOLDEM",
+    "format": "Cash",
+    "name": "Cash6mGeneral_6mGGrcR25",
+    "players": 6,
+    "public": true,
+    "type": "General",
+    "game_modes": [
+      {
+        "id": 7543,
+        "depth": "100.000",
+        "stacks": null,
+        "info": {
+          "postflop_players": 0
+        },
+        "is_subscribed": true,
+        "is_favorite": false,
+        "is_limited_postflop": false,
+        "subscription_tier": "STARTER"
+      }
+    ],
+    "info": {
+      "rake": "GG R&C",
+      "format": "6max",
+      "accuracy": "0.1-0.01%",
+      "rake_cap": 3,
+      "rake_pct": 5,
+      "3bet_size": "gto",
+      "cash_type": "regular",
+      "rake_text": "5% 3BB CAP",
+      "opening_size": "25x",
+      "postflop_players": 0,
+      "is_suitable_for_analyzer": false,
+      "preload_next_street_actions": false
+    }
+  },
+  "handOrder": [
+    "22",
+    "32o",
+    "32s",
+    "33",
+    "42o",
+    "42s",
+    "43o",
+    "43s",
+    "44",
+    "52o",
+    "52s",
+    "53o",
+    "53s",
+    "54o",
+    "54s",
+    "55",
+    "62o",
+    "62s",
+    "63o",
+    "63s",
+    "64o",
+    "64s",
+    "65o",
+    "65s",
+    "66",
+    "72o",
+    "72s",
+    "73o",
+    "73s",
+    "74o",
+    "74s",
+    "75o",
+    "75s",
+    "76o",
+    "76s",
+    "77",
+    "82o",
+    "82s",
+    "83o",
+    "83s",
+    "84o",
+    "84s",
+    "85o",
+    "85s",
+    "86o",
+    "86s",
+    "87o",
+    "87s",
+    "88",
+    "92o",
+    "92s",
+    "93o",
+    "93s",
+    "94o",
+    "94s",
+    "95o",
+    "95s",
+    "96o",
+    "96s",
+    "97o",
+    "97s",
+    "98o",
+    "98s",
+    "99",
+    "A2o",
+    "A2s",
+    "A3o",
+    "A3s",
+    "A4o",
+    "A4s",
+    "A5o",
+    "A5s",
+    "A6o",
+    "A6s",
+    "A7o",
+    "A7s",
+    "A8o",
+    "A8s",
+    "A9o",
+    "A9s",
+    "AA",
+    "AJo",
+    "AJs",
+    "AKo",
+    "AKs",
+    "AQo",
+    "AQs",
+    "ATo",
+    "ATs",
+    "J2o",
+    "J2s",
+    "J3o",
+    "J3s",
+    "J4o",
+    "J4s",
+    "J5o",
+    "J5s",
+    "J6o",
+    "J6s",
+    "J7o",
+    "J7s",
+    "J8o",
+    "J8s",
+    "J9o",
+    "J9s",
+    "JJ",
+    "JTo",
+    "JTs",
+    "K2o",
+    "K2s",
+    "K3o",
+    "K3s",
+    "K4o",
+    "K4s",
+    "K5o",
+    "K5s",
+    "K6o",
+    "K6s",
+    "K7o",
+    "K7s",
+    "K8o",
+    "K8s",
+    "K9o",
+    "K9s",
+    "KJo",
+    "KJs",
+    "KK",
+    "KQo",
+    "KQs",
+    "KTo",
+    "KTs",
+    "Q2o",
+    "Q2s",
+    "Q3o",
+    "Q3s",
+    "Q4o",
+    "Q4s",
+    "Q5o",
+    "Q5s",
+    "Q6o",
+    "Q6s",
+    "Q7o",
+    "Q7s",
+    "Q8o",
+    "Q8s",
+    "Q9o",
+    "Q9s",
+    "QJo",
+    "QJs",
+    "QQ",
+    "QTo",
+    "QTs",
+    "T2o",
+    "T2s",
+    "T3o",
+    "T3s",
+    "T4o",
+    "T4s",
+    "T5o",
+    "T5s",
+    "T6o",
+    "T6s",
+    "T7o",
+    "T7s",
+    "T8o",
+    "T8s",
+    "T9o",
+    "T9s",
+    "TT"
+  ],
+  "frequencyUnits": "0.01 percentage points; normalize each retained row by its sum when applying",
+  "handCoverage": "Strategy rows (hands) cover positive incoming hands; nodeEvs, actionEvs (per action) and incomingRanges are source 169-class arrays in handOrder. ZERO_RANGE nodes contain only markers.",
+  "zeroRangePolicy": "Store a ZERO_RANGE marker, omit strategy and EV, and do not traverse descendants. Complete means all other preflop branches are captured.",
+  "evUnits": "bb; source values for the acting player, unchanged; null denotes unavailable source values",
+  "evCoverage": "complete for captured normal nodes",
+  "nodeCount": 7898,
+  "strategyNodeCount": 7727,
+  "zeroRangeNodeCount": 171,
+  "nodesByActor": {
+    "UTG": 1137,
+    "HJ": 1237,
+    "CO": 1409,
+    "BTN": 1549,
+    "SB": 1299,
+    "BB": 1267
+  },
+  "normalizedHandRows": 215608,
+  "validation": {
+    "excludedDescendants": 0,
+    "terminalEdges": {
+      "hand-end": 1888,
+      "flop": 1537,
+      "showdown": 6106
+    },
+    "unresolvedEdges": 0,
+    "nextMissing": [],
+    "sourceWarnings": {
+      "ZERO_RANGE": 171
+    },
+    "unavailableEvValues": 0,
+    "minimumNodeCount": 7898,
+    "nonstandardJsonResponses": 0,
+    "maximumFrequencyRoundingError": "0",
+    "maximumRowSumDifference": 1
+  },
+  "sourceArchive": {
+    "file": "source.jsonl.gz",
+    "sha256": "d9dc597ad48be035b42304b6a00b24a9b4d84f669ee5f9590b55daeedf159996"
+  },
+  "nodeFiles": [
+    {
+      "file": "chunks/00000.json",
+      "nodeCount": 128,
+      "sha256": "6e096248e597c0a41b690c0c1858d8589ca70237932c20b2040d77d4f1645186"
+    },
+    {
+      "file": "chunks/00001.json",
+      "nodeCount": 128,
+      "sha256": "dbc699c05b90a6411921effe14d9602ebf347a4ee88549bd59fbf67bc0e07ac2"
+    },
+    {
+      "file": "chunks/00002.json",
+      "nodeCount": 128,
+      "sha256": "ca9836aadedd39a4bca8204a4a16b255e1fccb546cffe169e1ae802ba5018f91"
+    },
+    {
+      "file": "chunks/00003.json",
+      "nodeCount": 128,
+      "sha256": "0e26b9ac34a9fb460f7e7a4c3180d2cd321aa8003091947c212ac35790acc127"
+    },
+    {
+      "file": "chunks/00004.json",
+      "nodeCount": 128,
+      "sha256": "95fe1ad9c44efcc6452635d0cd622187237b4213f3a77fee36b149cb5587c780"
+    },
+    {
+      "file": "chunks/00005.json",
+      "nodeCount": 128,
+      "sha256": "a9625efe8a904ea083cba6086be8e5076a9d235aa3f6b8df2d851550db2d00ee"
+    },
+    {
+      "file": "chunks/00006.json",
+      "nodeCount": 128,
+      "sha256": "00992bf1e10fc164739e00d02ea93bcab610539ba672a2c785da5a8c47691aee"
+    },
+    {
+      "file": "chunks/00007.json",
+      "nodeCount": 128,
+      "sha256": "3617fc9b231e86661b4b0276026c63663968bd0717f98036afafc0e638c0c8d0"
+    },
+    {
+      "file": "chunks/00008.json",
+      "nodeCount": 128,
+      "sha256": "94af17f0042f8b6798b528a470a77fef5fa3001d8d140d73da7fd3040c023b73"
+    },
+    {
+      "file": "chunks/00009.json",
+      "nodeCount": 128,
+      "sha256": "32ad1a0347a6efb7626f43abb2099c084da13bed66e8afd7c22382938fc2f08c"
+    },
+    {
+      "file": "chunks/00010.json",
+      "nodeCount": 128,
+      "sha256": "beae4f1c900180eafec4a5b55bbc208e2cbb4fe43189eb02b30a5477417735d1"
+    },
+    {
+      "file": "chunks/00011.json",
+      "nodeCount": 128,
+      "sha256": "b973f300425a1f0b37700597ce1bdc7184ec0542cba0ec4521e9ec1315c85319"
+    },
+    {
+      "file": "chunks/00012.json",
+      "nodeCount": 128,
+      "sha256": "3acd7ff6193e381352ade925cd660e4508858e6eead52c06edd5c7ebef64f8cd"
+    },
+    {
+      "file": "chunks/00013.json",
+      "nodeCount": 128,
+      "sha256": "0aea362bbcb2105c58b9942b04d75bc52d3656533ae1fff8fb1bd37e1e51a0aa"
+    },
+    {
+      "file": "chunks/00014.json",
+      "nodeCount": 128,
+      "sha256": "30ea5674624ccccd19c17342903e0ddae5974354f7c163309b9ea35bc62b3c52"
+    },
+    {
+      "file": "chunks/00015.json",
+      "nodeCount": 128,
+      "sha256": "aaa8dc768c33a67ef1db2226010e762ef758cd17cc30118bad922c28caf2c653"
+    },
+    {
+      "file": "chunks/00016.json",
+      "nodeCount": 128,
+      "sha256": "fcd2cbe101208616dd9d36b0eb68f2de66c0100e6b6682c526dfd396c7e89a9a"
+    },
+    {
+      "file": "chunks/00017.json",
+      "nodeCount": 128,
+      "sha256": "ebc49091e47c70ad73d2895361df8efadb36917e5ab8596534f45dabba8e5f2a"
+    },
+    {
+      "file": "chunks/00018.json",
+      "nodeCount": 128,
+      "sha256": "6c67e18629332416cf468297fd7e636f2872c5f1db217e49bbfb6f04549c20aa"
+    },
+    {
+      "file": "chunks/00019.json",
+      "nodeCount": 128,
+      "sha256": "709c6c1730be2ca56dc5056ce48a134abe800e47ee937e6320801c95ede51b96"
+    },
+    {
+      "file": "chunks/00020.json",
+      "nodeCount": 128,
+      "sha256": "c633f7ae7fc1f7619727f046b52e766e69745215223ecb0169830ef10ae5ca83"
+    },
+    {
+      "file": "chunks/00021.json",
+      "nodeCount": 128,
+      "sha256": "b00a205df67831e74fa62d7c94f6b172fe620325d19df7cc5889ae0b99112cdf"
+    },
+    {
+      "file": "chunks/00022.json",
+      "nodeCount": 128,
+      "sha256": "731873868b5626591732613ecf29d7c4c138f81a238213829206ca69bc3a6861"
+    },
+    {
+      "file": "chunks/00023.json",
+      "nodeCount": 128,
+      "sha256": "2aa0fb4c3598d06a451eb73d46c3d79214c1856e802909f6022277accd2e4700"
+    },
+    {
+      "file": "chunks/00024.json",
+      "nodeCount": 128,
+      "sha256": "31ea30915c8657484cc065da78199046c4824611cd2753a07b6267bcce611405"
+    },
+    {
+      "file": "chunks/00025.json",
+      "nodeCount": 128,
+      "sha256": "c5f41d7774856470dcd8184ff48ec82865789f6c4e7cbb95d77517dcb08fbbef"
+    },
+    {
+      "file": "chunks/00026.json",
+      "nodeCount": 128,
+      "sha256": "f2c6c4a2ecebe00c5048b5ca7bcc9566e29ad4f74ecddd765a7c7d1053e1d6da"
+    },
+    {
+      "file": "chunks/00027.json",
+      "nodeCount": 128,
+      "sha256": "ff81842281ff9930f9378835b5e7619e82222fbd5eb5c43f33659a671078c2f4"
+    },
+    {
+      "file": "chunks/00028.json",
+      "nodeCount": 128,
+      "sha256": "fba2029544ed226ebd64e2e01e22316e1078a8dbd570b7534fabeb210e4b080f"
+    },
+    {
+      "file": "chunks/00029.json",
+      "nodeCount": 128,
+      "sha256": "146411b8913417bc1cfe8a323695ed9cca09c2efc276f913058b07d72ad0141b"
+    },
+    {
+      "file": "chunks/00030.json",
+      "nodeCount": 128,
+      "sha256": "6c8943d72c65cde83dd829381ac70b1ad8f4c0e96fc01246f47ce13c164393d0"
+    },
+    {
+      "file": "chunks/00031.json",
+      "nodeCount": 128,
+      "sha256": "5ac4f91e4da0922017dc328d684bbb2c1308c47e798bc8a219f9092e4940730b"
+    },
+    {
+      "file": "chunks/00032.json",
+      "nodeCount": 128,
+      "sha256": "ece4ba338703beb0ee00968765c6a6d73e68373dd76c7c571a567f7d532f5a58"
+    },
+    {
+      "file": "chunks/00033.json",
+      "nodeCount": 128,
+      "sha256": "23c03d6b99fd10eb050e34c6fea46c5f9c6f7d6f7299760217379d0d1c688356"
+    },
+    {
+      "file": "chunks/00034.json",
+      "nodeCount": 128,
+      "sha256": "ee077e93baadad01e2f13022867ae8b1d4647f78a59d3fc9742f27d608a849d3"
+    },
+    {
+      "file": "chunks/00035.json",
+      "nodeCount": 128,
+      "sha256": "cf64d3f06427212580f0f0aa46f4faa87a403ab713306cd033dc8001bc7dfcf4"
+    },
+    {
+      "file": "chunks/00036.json",
+      "nodeCount": 128,
+      "sha256": "48711ce529e79913fa23f7c035ba453bb440375e4e7fa25b6f7ef0c9365cbce2"
+    },
+    {
+      "file": "chunks/00037.json",
+      "nodeCount": 128,
+      "sha256": "1e9c7aa853990f84347d5d452dfdaa3ba289245ca6a1c782faf586786886fa91"
+    },
+    {
+      "file": "chunks/00038.json",
+      "nodeCount": 128,
+      "sha256": "2bc03ff04f091375470732f97187f532a3f0f93d515cad78f0c43dc9ce6c3189"
+    },
+    {
+      "file": "chunks/00039.json",
+      "nodeCount": 128,
+      "sha256": "1c63c413e006ac4a145f2610c2771dc711c0a64e3d873533e967865c947c3a1b"
+    },
+    {
+      "file": "chunks/00040.json",
+      "nodeCount": 128,
+      "sha256": "5ecefe9ed3af73cc22af342c8fa11936ba86f152701f90a76b883c646a72202f"
+    },
+    {
+      "file": "chunks/00041.json",
+      "nodeCount": 128,
+      "sha256": "f414c163a5a1cbf98bc38cc7cb49cc5b1364e80c67fba0ec462d0d5908aef994"
+    },
+    {
+      "file": "chunks/00042.json",
+      "nodeCount": 128,
+      "sha256": "a27c15b15567379d8fd651ca8f5647d05924f7819161530dbbf35479c5bfc4b9"
+    },
+    {
+      "file": "chunks/00043.json",
+      "nodeCount": 128,
+      "sha256": "8d7084277c56ffe24cac2d74525f29ef19e757bc0c1fc906a4c43e0e1d3f1c6e"
+    },
+    {
+      "file": "chunks/00044.json",
+      "nodeCount": 128,
+      "sha256": "a214fe54512d87f901fadd69c615b869d869b61ca790b220e29d3c351cd90a5c"
+    },
+    {
+      "file": "chunks/00045.json",
+      "nodeCount": 128,
+      "sha256": "28fa7d289fe236eba22ec7cdb926c7071f91b208bbf4cd07ecaf87bd8d8d5e7a"
+    },
+    {
+      "file": "chunks/00046.json",
+      "nodeCount": 128,
+      "sha256": "32499bc09e58f09d131bc9a1db69e381a1a1bec771bbe303764cfdf886bc14b8"
+    },
+    {
+      "file": "chunks/00047.json",
+      "nodeCount": 128,
+      "sha256": "877155b3bb82366752de8d332bac0868060b89f328554dc2378fed5fde6b81ff"
+    },
+    {
+      "file": "chunks/00048.json",
+      "nodeCount": 128,
+      "sha256": "f30f949e32363114de8824e84020c43983475bcd7277c3ee8a5ec48a396279bd"
+    },
+    {
+      "file": "chunks/00049.json",
+      "nodeCount": 128,
+      "sha256": "f98dce54ab61a52419471a71aa87a36810712c7d30321b0d85e697a6fc8c4a51"
+    },
+    {
+      "file": "chunks/00050.json",
+      "nodeCount": 128,
+      "sha256": "40834074aef397d5510b8391c74473431906a474a1c6fb74474c375df8710a55"
+    },
+    {
+      "file": "chunks/00051.json",
+      "nodeCount": 128,
+      "sha256": "d3ee926f9c5a687d31562531496fa5977787f6848ffab43a25eb83da438022bb"
+    },
+    {
+      "file": "chunks/00052.json",
+      "nodeCount": 128,
+      "sha256": "d3bc13bfed508d69cb446b70208c1b8f149fb478811ca0ad89635073b5fba07f"
+    },
+    {
+      "file": "chunks/00053.json",
+      "nodeCount": 128,
+      "sha256": "2b914c2d98bcd0c57271468bf460cac93f6e5b4e9e4ec8eaf9387ac89c60c4f1"
+    },
+    {
+      "file": "chunks/00054.json",
+      "nodeCount": 128,
+      "sha256": "4c6fe2e01802513947bf15810c3e09cb7038246f32bb507b399e26aff0684dc7"
+    },
+    {
+      "file": "chunks/00055.json",
+      "nodeCount": 128,
+      "sha256": "7ed611e426627e7a70a2635a7f8b7fe9b177325be510835e5e5089ca04eafa80"
+    },
+    {
+      "file": "chunks/00056.json",
+      "nodeCount": 128,
+      "sha256": "c1a00ce7ac58f943b8f427b468313109e6095fab0b29ba2be32b6f966bd2c188"
+    },
+    {
+      "file": "chunks/00057.json",
+      "nodeCount": 128,
+      "sha256": "21f6b9928b946c69404f751bd263ecfc446ca0e2eb73cbf7f47c81725f89b4ec"
+    },
+    {
+      "file": "chunks/00058.json",
+      "nodeCount": 128,
+      "sha256": "78975a65d46e956e2e8cca55312f398e003cea64699fbf3bded23951a8879352"
+    },
+    {
+      "file": "chunks/00059.json",
+      "nodeCount": 128,
+      "sha256": "60179a3d4fbc1d4c5af2eb3eb27ba908064cc2b65cf16b549f53ffd8019c0aba"
+    },
+    {
+      "file": "chunks/00060.json",
+      "nodeCount": 128,
+      "sha256": "29d2073a217a14031ce2b9a55d3971ad819a3063882f66a43e8985cc74d1d2e2"
+    },
+    {
+      "file": "chunks/00061.json",
+      "nodeCount": 90,
+      "sha256": "747157aca98969006568d5739a9f1baec7839e70ae3cccf2290218308fccafdb"
+    }
+  ],
+  "index": {
+    "file": "index.json",
+    "sha256": "8fdf75cf68aff129fc4824bd0dbe3ca9ac8c1aaea5e0282ecdcbaf4af7b02c21"
+  },
+  "resume": {
+    "file": "resume.json"
+  },
+  "desktopIntegration": "Rebuild the app after exporting. Saved branches load on demand; missing branches are locked."
+}
