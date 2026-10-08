@@ -15,6 +15,10 @@ namespace
 // smaller ones lose to launch overhead; tests/fixtures/backend-parity.json relies on this
 // target splitting its street regions.
 constexpr std::size_t kBatchScratchBytes = 12 * 1024 * 1024;
+// The same for spine batches, those with chance nodes below, which measured fastest at a third of
+// the leaf target on the benchmark and wide ranges; smaller ones multiply the spine's passes and
+// fragment the leaf batches below them.
+constexpr std::size_t kSpineBatchScratchBytes = 4 * 1024 * 1024;
 
 template<typename T>
 BufferData Table(const std::vector<T>& values)
@@ -63,26 +67,26 @@ Node Pack(const LayoutNode& layout)
 }
 
 // One rank row's Terminal section for opponent q's hands (see Plan::order), in U32 words: a
-// header uint4 (the run groups of warps 2 and 3 in x's two low bytes; y and z, the lane table's
-// and the run tokens' offsets in uint4 units), the scan tokens, the lane table and the run
-// tokens. Tokens are 16-bit byte offsets of opponent hands in the staged reach, four per uint2;
-// unused ones hold the zero slot's, just past the hands. Scan group g of warp segment s
-// (LaneSegment) is uint2 g * kWarpSize + s after the header. Warps 2 and 3 have a lane per card
-// that some hand of the updating player holds, longest ranked-holder run first, whose table
-// entry holds that run's byte offset from the runs' start | its length << 16 | the card << 24
-// (0xff << 24 without a card); its group g is run-token uint2 g * 2 * kWarpSize + lane.
+// header uint4 (the run groups of warps 2 and 3 in x's two low bytes), the scan tokens, the lane
+// table at uint4 SectionLaneTable(rankCount), where Terminal derives it from the row's rank count,
+// and the run tokens 16 uint4s later. Tokens are 16-bit byte offsets of
+// opponent hands in the staged reach, four per uint2; unused ones hold the zero slot's, just past
+// the hands. Scan group g of warp segment s (LaneSegment) is uint2 g * kWarpSize + s after the
+// header. Warps 2 and 3 have a lane per card that some hand of the updating player holds, longest
+// ranked-holder run first, whose table entry holds that run's byte offset from the runs' start
+// (each run follows a zero entry) | its length << 16 | the card << 24 (0xff << 24 without a card);
+// its group g is run-token uint2 g * 2 * kWarpSize + lane.
 struct Section
 {
     std::vector<U32> words;
-    std::array<U32, 52> runOffset{}, runLength{}; // in floats from the runs' start
+    std::array<U32, 52> runOffset{}, runLength{}; // in floats from the runs' start, past each run's zero entry
 };
 Section BuildSection(const HandBoardData& tables, std::size_t row, U32 q, U32 hands)
 {
     Section section;
     const auto& ranked = tables.rankRows[row][q];
     const U32 zero = U32(sizeof(float)) * hands;
-    const U32 rankCount = static_cast<U32>(ranked.hands.size()), span = (rankCount + kWarpSize - 1) / kWarpSize;
-    const U32 scanGroups = (span + 3) / 4;
+    const U32 rankCount = static_cast<U32>(ranked.hands.size());
     const auto& mine = tables.holders[1 - q];
     std::vector<U32> lanes;
     for (U32 card = 0; card < 52; ++card)
@@ -96,12 +100,12 @@ Section BuildSection(const HandBoardData& tables, std::size_t row, U32 q, U32 ha
     U32 offset = 0, longest[2] = {};
     for (std::size_t k = 0; k < lanes.size(); ++k)
     {
-        section.runOffset[lanes[k]] = offset;
-        offset += section.runLength[lanes[k]];
+        section.runOffset[lanes[k]] = offset + 1;
+        offset += section.runLength[lanes[k]] + 1;
         longest[k / kWarpSize] = std::max(longest[k / kWarpSize], section.runLength[lanes[k]]);
     }
     const U32 groups[2] = {(longest[0] + 3) / 4, (longest[1] + 3) / 4};
-    const U32 laneTable = 1 + 16 * scanGroups, tokens = laneTable + 16;
+    const U32 laneTable = SectionLaneTable(rankCount), tokens = laneTable + 16;
     section.words.assign(4 * (tokens + 32 * std::max(groups[0], groups[1])), zero | zero << 16);
     // Token k of a uint2 of words.
     const auto token = [&](std::size_t uint2, U32 k, U32 value)
@@ -110,9 +114,6 @@ Section BuildSection(const HandBoardData& tables, std::size_t row, U32 q, U32 ha
         word = k % 2 ? (word & 0xffffu) | value << 16 : (word & 0xffff0000u) | value;
     };
     section.words[0] = groups[0] | groups[1] << 8;
-    section.words[1] = laneTable;
-    section.words[2] = tokens;
-    section.words[3] = 0;
     for (U32 segment = 0; segment < kWarpSize; ++segment)
     {
         const auto [begin, end] = LaneSegment(rankCount, segment);
@@ -139,7 +140,7 @@ Section BuildSection(const HandBoardData& tables, std::size_t row, U32 q, U32 ha
 }
 } // namespace
 
-Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
+Plan::Plan(const HandTraversalData& data) : entries(data.stateSize)
 {
     if (data.maxActions > kMaxActions)
         throw std::runtime_error(
@@ -158,10 +159,14 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             );
             weights.push_back(h.weight);
         }
+        if (state.hands[p] % 2)
+        {
+            hands.push_back({0.0f, 0u});
+            weights.push_back(0.0f);
+        }
     }
     // Rows are padded to whole float4 groups so the kernels move them as 8- and 16-byte vectors.
     state.stride = TerminalLayout::Padded(std::max(state.hands[0], state.hands[1]));
-    const U32 total = state.hands[0] + state.hands[1];
     runouts.assign(tables.rowsByRunout.begin(), tables.rowsByRunout.end());
     cards.resize(kCardListHeader);
     for (U32 p = 0; p < 2; ++p)
@@ -175,12 +180,11 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
     {
         if (cards.size() != CardPairs(state, p))
             throw std::logic_error("GPU plan's card lists do not list every hand twice");
-        const U32 base = p ? state.hands[0] : 0;
-        const auto held = [&](U32 h) { return h < state.hands[p] ? hands[base + h].cards & 0xffffu : 0u; };
+        const U32 base = HandBase(state, p);
         for (U32 h = 0; h < state.hands[p]; h += 2)
-            cards.push_back(held(h) | held(h + 1) << 16);
+            cards.push_back((hands[base + h].cards & 0xffffu) | (hands[base + h + 1].cards & 0xffffu) << 16);
     }
-    ranks.resize(tables.rankRows.size() * std::size_t(total), 0xffff);
+    ranks.resize(tables.rankRows.size() * std::size_t(PaddedHands(state)), 0xffff);
     // Each rank row's section per opponent, then the rows at a pitch that fits the largest.
     std::vector<std::array<Section, 2>> sections(tables.rankRows.size());
     std::size_t sectionWords[2] = {};
@@ -190,62 +194,74 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             sections[row][q] = BuildSection(tables, row, q, state.hands[q]);
             sectionWords[q] = std::max(sectionWords[q], sections[row][q].words.size());
         }
-    state.orderSection = static_cast<U32>(4 * total + sectionWords[0]);
+    state.orderSection = static_cast<U32>(OrderEntryWords(state) + sectionWords[0]);
     state.orderPitch = static_cast<U32>(state.orderSection + sectionWords[1]);
     order.resize(tables.rankRows.size() * state.orderPitch, kNoIndex);
-    // Order entries pack two byte offsets from Terminal's staged reach (see TerminalLayout),
-    // which fit 16 bits up to the run tables' end.
+    // Section tokens and lane tables hold 16-bit byte offsets up to the run tables' end; order
+    // entries hold the prefix's byte offsets in 14 bits or float indices in 12 and the runs' float
+    // indices in 13 (see Plan::order).
     static_assert(sizeof(float) * TerminalLayout(HandBoardData::kMaxHands).foldMasses <= 0xffff);
-    const auto pack = [](U32 low, U32 high) { return U32(sizeof(float)) * low | U32(sizeof(float)) * high << 16; };
+    static_assert(TerminalLayout(HandBoardData::kMaxHands).runs <= 0x1000 && TerminalLayout(HandBoardData::kMaxHands).foldMasses <= 0x2000);
     for (std::size_t row = 0; row < tables.rankRows.size(); ++row)
     {
-        const auto rowBase = row * std::size_t(total), orderBase = row * std::size_t(state.orderPitch);
+        const auto rowBase = row * std::size_t(PaddedHands(state)), orderBase = row * std::size_t(state.orderPitch);
         for (U32 p = 0; p < 2; ++p)
         {
             const auto& source = tables.rankRows[row][p];
-            const auto base = p ? state.hands[0] : 0;
+            const U32 base = HandBase(state, p);
             const U32 zero = state.hands[1 - p];
             const TerminalLayout staged(state.hands[1 - p]);
             const Section& section = sections[row][1 - p];
-            // The summed reach of a card's first k ranked holders, the zero slot for none.
-            const auto run = [&](U32 card, U32 k) { return k ? staged.runs + section.runOffset[card] + k - 1 : zero; };
+            // The summed reach of a card's first k ranked holders, its run's zero entry for none.
+            const auto run = [&](U32 card, U32 k) { return staged.runs + section.runOffset[card] + k - 1; };
             for (std::size_t i = 0; i < source.hands.size(); ++i)
             {
-                const auto hand = base + source.hands[i];
-                ranks[rowBase + hand] = source.ranks[i];
+                const U32 mine = base + source.hands[i];
+                ranks[rowBase + mine] = source.ranks[i];
+                // Hands without a value scale keep kNoIndex entries, as the board's blocked hands
+                // do: Terminal values neither.
+                if (!(hands[mine].scale > 0.0f))
+                    continue;
                 // A hand's win mass and the ranked mass not stronger than it, which the kernel
                 // subtracts from the ranked total for the loss mass; the zero slot stands for none.
                 const U32 lower = source.lowerBounds[i], upper = source.upperBounds[i];
-                U32 entry[4] = {pack(lower ? staged.forward + lower - 1 : zero, upper ? staged.forward + upper - 1 : zero), 0, 0, 0};
+                U32 entry[2] = {
+                    U32(sizeof(float)) * (lower ? staged.forward + lower - 1 : zero) | (upper ? staged.forward + upper - 1 : zero) << 14, 0
+                };
                 // Per held card, the blocker positions (at most 51) count its ranked holders below
-                // and through the hand's rank, and the run's last entry holds its total.
-                U32 totals[2];
+                // and through the hand's rank.
                 for (U32 c = 0; c < 2; ++c)
                 {
                     const auto card = tables.hands[p][source.hands[i]].cardIndices[c];
-                    const U32 positions = source.blockers[i] >> (16 * c);
-                    entry[1 + c] = pack(run(card, positions & 0xffu), run(card, (positions >> 8) & 0xffu));
-                    totals[c] = run(card, section.runLength[card]);
+                    const U32 positions = source.blockers[i] >> (16 * c), below = positions & 0xffu, through = (positions >> 8) & 0xffu;
+                    if (below > through || through - below > 0x3fu)
+                        throw std::logic_error("GPU plan's blocker positions do not fit its order entries");
+                    entry[1] |= run(card, through) << (13 * c);
+                    entry[c] |= (through - below) << 26;
                 }
-                entry[3] = pack(totals[0], totals[1]);
-                std::copy(entry, entry + 4, order.begin() + (orderBase + 4 * hand));
+                std::copy(entry, entry + 2, order.begin() + (orderBase + 2 * std::size_t(mine)));
             }
         }
         for (U32 q = 0; q < 2; ++q)
             std::copy(
                 sections[row][q].words.begin(),
                 sections[row][q].words.end(),
-                order.begin() + (orderBase + (q ? state.orderSection : 4 * total))
+                order.begin() + (orderBase + (q ? state.orderSection : OrderEntryWords(state)))
             );
     }
     // Traversal-ordered layout; the uploaded array repeats each node at its work positions.
     std::vector<LayoutNode> layout(data.nodes.size());
     const auto& edges = data.children;
-    for (U32 i = 0; i < layout.size(); ++i)
+    const auto nodeCount = static_cast<std::int64_t>(layout.size());
+    // The per-node loops below write only their own node's fields, a child's parent or a
+    // showdown's fold, so they run in parallel.
+#pragma omp parallel for schedule(static, 4096)
+    for (std::int64_t k = 0; k < nodeCount; ++k)
     {
+        const U32 i = static_cast<U32>(k);
         const auto& source = data.nodes[i];
         auto& n = layout[i];
-        n.strategy = source.strategyOffset;
+        n.strategy = U64(source.stateOffset / kStateAlign) << 32 | U32(source.strategyOffset); // see StateOffset
         n.board = source.boardMask;
         n.edge = static_cast<U32>(source.childOffset);
         n.count = static_cast<U32>(source.childCount);
@@ -269,8 +285,9 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             }
         }
     }
-    for (U32 i = 0; i < layout.size(); ++i)
-        for (U32 a = 0; a < layout[i].count; ++a)
+#pragma omp parallel for schedule(static, 4096)
+    for (std::int64_t k = 0; k < nodeCount; ++k)
+        for (U32 i = static_cast<U32>(k), a = 0; a < layout[i].count; ++a)
             layout[edges[layout[i].edge + a]].parent = i;
     // A fold and a showdown under one decision share the showdown's Terminal block; when
     // they are the decision's only children, that block also backs the decision up, so
@@ -278,8 +295,10 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
     // decision's reach there too, instead of in Reach, measured 4% slower.) A showdown's fold
     // holds the fold's traversal index until slots are allocated.
     std::vector<std::uint8_t> fused(layout.size());
-    for (U32 i = 0; i < layout.size(); ++i)
+#pragma omp parallel for schedule(static, 4096)
+    for (std::int64_t k = 0; k < nodeCount; ++k)
     {
+        const U32 i = static_cast<U32>(k);
         U32 fold = kNoIndex, showdown = kNoIndex;
         for (U32 a = 0; a < layout[i].count; ++a)
         {
@@ -316,6 +335,7 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
     // player's values replace it.
     const auto bytesPerSlot = sizeof(float) * state.stride;
     const auto batchSlots = std::max<std::size_t>(1, kBatchScratchBytes / bytesPerSlot);
+    const auto spineSlots = std::max<std::size_t>(1, kSpineBatchScratchBytes / bytesPerSlot);
     // A leaf batch adds roots while its cost stays within the target, so only a single leaf
     // root (a chance child without chance nodes below) can exceed it: each leaf lane's
     // scratch starts this far past the previous lane's.
@@ -357,12 +377,36 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
                 merged.emplace_back(begin, end);
         return merged;
     };
+    // The same for single slots: the runs of marks over their span when it is short, as a
+    // region's terminals' is, instead of sorting.
+    std::vector<std::uint8_t> marks;
     const auto coalesce = [&](const std::vector<U32>& slots)
     {
         Ranges ranges;
+        if (slots.empty())
+            return ranges;
+        const auto [low, high] = std::minmax_element(slots.begin(), slots.end());
+        const std::size_t first = *low, span = *high - first + 1;
+        if (span > 4 * slots.size())
+        {
+            for (const U32 slot : slots)
+                ranges.emplace_back(slot, slot + 1);
+            return merge(std::move(ranges));
+        }
+        marks.assign(span, 0);
         for (const U32 slot : slots)
-            ranges.emplace_back(slot, slot + 1);
-        return merge(std::move(ranges));
+            marks[slot - first] = 1;
+        for (std::size_t k = 0; k < span;)
+        {
+            const std::size_t begin = k;
+            while (k < span && marks[k])
+                ++k;
+            if (k > begin)
+                ranges.emplace_back(static_cast<U32>(first + begin), static_cast<U32>(first + k));
+            else
+                ++k;
+        }
+        return ranges;
     };
     // Per pass, the slots it writes and those it reads or writes (each slot's scratch row and
     // flag), merged, from which cross-stream predecessors are derived once every pass exists.
@@ -603,6 +647,8 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         std::vector<std::pair<std::size_t, std::size_t>> ranges;
         // Slots of the largest batch's regions, one scratch copy of batches with chance nodes below.
         std::size_t copy = 0;
+        const bool leaves = std::none_of(region.boundary.begin(), region.boundary.end(), [&](U32 root) { return chanceBelow[root]; });
+        const std::size_t target = leaves ? batchSlots : spineSlots;
         for (std::size_t begin = 0; begin < region.boundary.size();)
         {
             auto end = begin;
@@ -610,7 +656,7 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             do
             {
                 cost += streetCost[region.boundary[end++]];
-            } while (end < region.boundary.size() && cost + streetCost[region.boundary[end]] <= batchSlots);
+            } while (end < region.boundary.size() && cost + streetCost[region.boundary[end]] <= target);
             ranges.emplace_back(begin, end);
             copy = std::max(copy, cost - (end - begin));
             begin = end;
@@ -619,7 +665,6 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
         { return std::vector<U32>(region.boundary.begin() + ranges[b].first, region.boundary.begin() + ranges[b].second); };
         if (ranges.empty())
             terminal(region);
-        const bool leaves = std::none_of(region.boundary.begin(), region.boundary.end(), [&](U32 root) { return chanceBelow[root]; });
         std::optional<Region> pending;
         for (std::size_t b = 0; b < ranges.size(); ++b)
         {
@@ -689,8 +734,9 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
     }
     // A showdown's Terminal block takes what it needs of its parent from its own record; the
     // fold's action follows from the siblings' consecutive slots (see Node).
-    for (auto& n : layout)
-        if (n.fold != kNoIndex)
+#pragma omp parallel for schedule(static, 4096)
+    for (std::int64_t k = 0; k < nodeCount; ++k)
+        if (LayoutNode& n = layout[k]; n.fold != kNoIndex)
         {
             const LayoutNode& parent = layout[n.parent];
             n.fold = layout[n.fold].slot;
@@ -700,9 +746,12 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
             n.actor = parent.actor;
             n.stamp = parent.stamp;
         }
-    // Kernels index nodes by work position, so each pass's items get records in order.
-    nodes.reserve(work.size());
-    for (const auto& pass : passes)
+    // Kernels index nodes by work position, so each pass's items get records at theirs, passes in parallel.
+    nodes.resize(work.size());
+#pragma omp parallel for schedule(dynamic, 1)
+    for (std::int64_t p = 0; p < static_cast<std::int64_t>(passes.size()); ++p)
+    {
+        const Pass& pass = passes[p];
         for (U32 i = pass.offset; i < pass.offset + pass.count; ++i)
         {
             LayoutNode n = layout[work[i]];
@@ -733,8 +782,9 @@ Plan::Plan(const HandTraversalData& data) : entries(data.strategySize)
                     n.foldUtility[0] = 1.0f / float(chance.count - 4);
                 }
             }
-            nodes.push_back(Pack(n));
+            nodes[i] = Pack(n);
         }
+    }
 }
 
 std::array<BufferData, kBufferCount> Plan::Buffers() const

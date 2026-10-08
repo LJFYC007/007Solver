@@ -5,6 +5,7 @@
 #include "engine/gpu/GpuTypes.h"
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <type_traits>
 #include <vector>
 
@@ -12,8 +13,10 @@ namespace solver::engine
 {
 // Resident DCFR state in the 16-bit layout both backends share (gpu/GpuQuantize.h): per
 // decision, action-major rows of the actor's hands, int16 regrets or uint16 cumulative
-// strategies, then one exponent byte per hand; and per traversal node the update index
-// of the actor's last unpruned update (zero before the first), which discounts regrets lazily.
+// strategies, then one exponent byte per hand, every row and the exponent bytes padded to
+// whole gpu::StateRow units (see HandTraversalData::StateUnits); and per traversal node the
+// update index of the actor's last unpruned update (zero before the first), which discounts
+// regrets lazily.
 struct QuantizedState
 {
     std::vector<std::int16_t> regrets;
@@ -21,8 +24,8 @@ struct QuantizedState
     std::vector<std::uint32_t> stamps;
 };
 
-// The decoded state for lockstep parity checks: one float per unit of the quantized
-// layout, with the exponent slots zero.
+// The decoded state for lockstep parity checks: one float per entry of the unpadded layout
+// (Node::strategyOffset), with the exponent slots zero.
 struct TrainingState
 {
     std::vector<float> regrets;
@@ -30,12 +33,12 @@ struct TrainingState
     std::vector<std::uint32_t> stamps;
 };
 
-// The exponent bytes of a decision's hands, following its action rows from units.
+// The exponent bytes of a decision's hands, following its action rows of row units from units.
 template<typename Unit>
-inline auto ExponentBytes(Unit* units, std::size_t actions, std::size_t hands)
+inline auto ExponentBytes(Unit* units, std::size_t actions, std::size_t row)
 {
     using Byte = std::conditional_t<std::is_const_v<Unit>, const std::uint8_t, std::uint8_t>;
-    return reinterpret_cast<Byte*>(units + actions * hands);
+    return reinterpret_cast<Byte*>(units + actions * row);
 }
 
 // Immutable, range-specific tables shared by recursive CPU and batched GPU execution.
@@ -53,23 +56,34 @@ struct HandTraversalData
         std::size_t actor;
         std::size_t childOffset;
         std::size_t childCount;
+        // A decision's first entry in the unpadded layout (rows of the actor's hands, then
+        // (hands + 1) / 2 exponent units), whose entry indices the dither hashes (see
+        // gpu/GpuQuantize.h) and decoded states use.
         std::size_t strategyOffset;
         std::uint64_t boardMask;
         core::Board board;
         int rankRow = -1;
         // Each player's own win/tie/loss payoffs; folds use entry 0.
         std::array<std::array<float, 3>, 2> utilities{};
-        float rake = 0.0f; // what a leaf pays whatever its outcome (game::TerminalRake)
+        float rake = 0.0f;           // what a leaf pays whatever its outcome (game::TerminalRake)
+        std::size_t stateOffset = 0; // a decision's first unit of the training state
 
         bool IsLeaf() const { return kind != Kind::Decision && kind != Kind::Chance; }
     };
     HandBoardData tables;
     std::vector<Node> nodes;
     // 16-bit units of one decision's regrets or strategy sums: its action rows, then its
-    // hands' exponent bytes in whole units.
-    static std::size_t ExponentUnits(std::size_t hands) { return (hands + 1) / 2; }
-    static std::size_t StateUnits(std::size_t actions, std::size_t hands) { return actions * hands + ExponentUnits(hands); }
-    std::size_t strategySize = 0; // units of the whole tree
+    // hands' exponent bytes, each padded to gpu::StateRow units so the GPU's hand pairs share
+    // words and its warps whole cache lines.
+    static std::size_t RowUnits(std::size_t hands) { return gpu::StateRow(static_cast<gpu::U32>(hands)); }
+    static std::size_t ExponentUnits(std::size_t hands) { return RowUnits((hands + 1) / 2); }
+    // Units of decisions with these actions in total.
+    static std::size_t StateUnits(std::size_t actions, std::size_t hands, std::size_t decisions = 1)
+    {
+        return actions * RowUnits(hands) + decisions * ExponentUnits(hands);
+    }
+    std::size_t strategySize = 0; // unpadded entries of the whole tree (Node::strategyOffset)
+    std::size_t stateSize = 0;    // units of the whole tree
     std::size_t maxActions = 1;
     float rootHalfPot = 0.0f;
 
@@ -115,6 +129,12 @@ struct HandTraversalData
     // Normalizes this layout's quantized strategy sums; an actor's decisions on one board share
     // its list of board-compatible hands.
     StrategySnapshot ExportStrategy(std::vector<std::uint16_t> sums) const;
+    // Passes consume the sums of consecutive unit ranges ending at ends, each from its start.
+    using SumsStream = std::function<void(const std::vector<std::size_t>& ends, const std::function<void(const std::uint16_t*)>& consume)>;
+    // The same from streamed sums, in ranges of whole decisions of at most chunkUnits units
+    // unless a single decision exceeds it, plus any decisions after them that have no
+    // board-compatible hands.
+    StrategySnapshot ExportStrategy(std::size_t chunkUnits, const SumsStream& stream) const;
     // Compare states by these values: re-encoding can store equal values differently.
     TrainingState Decode(const QuantizedState& state) const;
 
@@ -131,6 +151,6 @@ struct UpdateWeights
     std::uint32_t update;  // 1-based index of this update for the updating player
     float positiveScale;   // product of earlier positive discounts
     float positiveInverse; // 1 / positiveScale
-    float averageWeight;   // t^2, the weight of this update's reach * policy in the sums
+    float averageWeight;   // t^3, the weight of this update's reach * policy in the sums
 };
 } // namespace solver::engine

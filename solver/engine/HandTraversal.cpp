@@ -97,11 +97,12 @@ inline __m256 Abs(__m256 values)
 {
     return _mm256_andnot_ps(_mm256_set1_ps(-0.0f), values);
 }
-// Re-encodes eight hands of per-action rows of count units from the float rows at the
-// same positions, at the scales of the hands' magnitudes.
+// Re-encodes eight hands of per-action rows of row units from the float rows of count
+// floats at the same hands, at the scales of the hands' magnitudes.
 template<typename Unit>
 inline void Encode(
     Unit* units,
+    std::size_t row,
     std::uint8_t* exponents,
     const float* rows,
     std::size_t actions,
@@ -117,18 +118,19 @@ inline void Encode(
     for (std::size_t action = 0; action < actions; ++action)
     {
         const __m128i packed = Pack(Quantize(_mm256_loadu_ps(rows + action * count), inverse, dither), !isSigned);
-        _mm_storeu_si128(reinterpret_cast<__m128i*>(units + action * count), packed);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(units + action * row), packed);
     }
     StoreExponents(exponents, next);
 }
 } // namespace vector
 #endif
 
-// Re-encodes one hand of per-action rows of count units from the float rows at the same
-// positions, at the scale of its magnitude.
+// Re-encodes one hand of per-action rows of row units from the float rows of count floats
+// at the same hand, at the scale of its magnitude.
 template<typename Unit>
 void Encode(
     Unit* units,
+    std::size_t row,
     std::uint8_t* exponent,
     const float* rows,
     std::size_t actions,
@@ -141,16 +143,17 @@ void Encode(
     const auto next = gpu::ExponentByte(magnitude, std::is_signed_v<Unit> ? gpu::kRegretBits : gpu::kSumBits);
     const float dither = gpu::Dither(static_cast<std::uint32_t>(index), update);
     for (std::size_t action = 0; action < actions; ++action)
-        units[action * count] = static_cast<Unit>(gpu::Quantize(rows[action * count], next, dither));
+        units[action * row] = static_cast<Unit>(gpu::Quantize(rows[action * count], next, dither));
     *exponent = static_cast<std::uint8_t>(next);
 }
 
-// Adds weight * reach * policy to the cumulative strategy of one decision at layout
-// offset (action-major rows of count hands), as the GPU's Reach does, re-encoding every
-// hand with reach (see GpuQuantize.h) through rows (actions * count floats of scratch).
-// Hands without reach keep their entries, so the skipped update is exact; AVX2 builds
-// skip eight-hand chunks without reach and re-encode a whole chunk otherwise, which
-// keeps the values of its hands without reach exactly.
+// Adds weight * reach * policy to the cumulative strategy of one decision whose state
+// (action-major rows of count hands in row units) starts at sums and whose first entry has
+// the dither index offset, as the GPU's Reach does, re-encoding every hand with reach (see
+// GpuQuantize.h) through rows (actions * count floats of scratch). Hands without reach keep
+// their entries, so the skipped update is exact; AVX2 builds skip eight-hand chunks without
+// reach and re-encode a whole chunk otherwise, which keeps the values of its hands without
+// reach exactly.
 void AccumulateNodeStrategy(
     std::uint16_t* sums,
     std::size_t offset,
@@ -163,7 +166,8 @@ void AccumulateNodeStrategy(
     std::uint32_t update
 )
 {
-    std::uint8_t* exponents = ExponentBytes(sums, actions, count);
+    const std::size_t row = HandTraversalData::RowUnits(count);
+    std::uint8_t* exponents = ExponentBytes(sums, actions, row);
     std::size_t hand = 0;
 #if defined(__AVX2__)
     const __m256 weights = _mm256_set1_ps(weight);
@@ -178,11 +182,11 @@ void AccumulateNodeStrategy(
         {
             const std::size_t i = action * count + hand;
             const __m256 increment = _mm256_mul_ps(weights, _mm256_mul_ps(reaches, _mm256_loadu_ps(policy + i)));
-            const __m256 updated = _mm256_add_ps(_mm256_mul_ps(vector::Load(sums + i), scale), increment);
+            const __m256 updated = _mm256_add_ps(_mm256_mul_ps(vector::Load(sums + action * row + hand), scale), increment);
             _mm256_storeu_ps(rows + i, updated);
             magnitude = _mm256_max_ps(magnitude, updated);
         }
-        vector::Encode(sums + hand, exponents + hand, rows + hand, actions, count, magnitude, offset + hand, update);
+        vector::Encode(sums + hand, row, exponents + hand, rows + hand, actions, count, magnitude, offset + hand, update);
     }
 #endif
     for (; hand < count; ++hand)
@@ -196,14 +200,15 @@ void AccumulateNodeStrategy(
         for (std::size_t action = 0; action < actions; ++action)
         {
             const std::size_t i = action * count + hand;
-            rows[i] = gpu::Dequantize(static_cast<float>(sums[i]), exponent) + weight * (handReach * policy[i]);
+            rows[i] = gpu::Dequantize(static_cast<float>(sums[action * row + hand]), exponent) + weight * (handReach * policy[i]);
             magnitude = std::max(magnitude, rows[i]);
         }
-        Encode(sums + hand, exponents + hand, rows + hand, actions, count, magnitude, offset + hand, update);
+        Encode(sums + hand, row, exponents + hand, rows + hand, actions, count, magnitude, offset + hand, update);
     }
 }
 
-// The regret update of one acting decision at layout offset from its child value rows
+// The regret update of one acting decision whose state starts at regrets and whose first
+// entry has the dither index offset (see AccumulateNodeStrategy), from its child value rows
 // (actions * count floats, overwritten with the stored regrets) and its values. Positive
 // regrets are stored divided by positiveScale, so the discounts of the updates the node
 // skipped are already in place; negative regrets halve once per skipped update. Each
@@ -221,7 +226,8 @@ void UpdateNodeRegrets(
     std::uint32_t update
 )
 {
-    std::uint8_t* exponents = ExponentBytes(regrets, actions, count);
+    const std::size_t row = HandTraversalData::RowUnits(count);
+    std::uint8_t* exponents = ExponentBytes(regrets, actions, row);
     std::size_t hand = 0;
 #if defined(__AVX2__)
     const __m256 zero = _mm256_setzero_ps(), half = _mm256_set1_ps(0.5f);
@@ -234,7 +240,7 @@ void UpdateNodeRegrets(
         for (std::size_t action = 0; action < actions; ++action)
         {
             const std::size_t i = action * count + hand;
-            const __m256 old = _mm256_mul_ps(vector::Load(regrets + i), decode);
+            const __m256 old = _mm256_mul_ps(vector::Load(regrets + action * row + hand), decode);
             const __m256 discounted =
                 _mm256_blendv_ps(_mm256_mul_ps(old, halvings), _mm256_mul_ps(old, scales), _mm256_cmp_ps(old, zero, _CMP_GT_OQ));
             const __m256 regret = _mm256_add_ps(discounted, _mm256_sub_ps(_mm256_loadu_ps(rows + i), value));
@@ -243,7 +249,7 @@ void UpdateNodeRegrets(
             _mm256_storeu_ps(rows + i, stored);
             magnitude = _mm256_max_ps(magnitude, vector::Abs(stored));
         }
-        vector::Encode(regrets + hand, exponents + hand, rows + hand, actions, count, magnitude, offset + hand, update);
+        vector::Encode(regrets + hand, row, exponents + hand, rows + hand, actions, count, magnitude, offset + hand, update);
     }
 #endif
     for (; hand < count; ++hand)
@@ -255,19 +261,20 @@ void UpdateNodeRegrets(
         for (std::size_t action = 0; action < actions; ++action)
         {
             const std::size_t i = action * count + hand;
-            const float old = gpu::Dequantize(static_cast<float>(regrets[i]), exponent);
+            const float old = gpu::Dequantize(static_cast<float>(regrets[action * row + hand]), exponent);
             const float regret = (old > 0.0f ? old * scale : old * halving) + (rows[i] - value);
             rows[i] = regret > 0.0f ? regret * inverse : regret * 0.5f;
             magnitude = std::max(magnitude, std::fabs(rows[i]));
         }
-        Encode(regrets + hand, exponents + hand, rows + hand, actions, count, magnitude, offset + hand, update);
+        Encode(regrets + hand, row, exponents + hand, rows + hand, actions, count, magnitude, offset + hand, update);
     }
 }
 
 // Regret matching for hands [begin, end) of per-action rows of count hands, on the
-// quantized regrets (see GpuQuantize.h).
+// quantized regrets (see GpuQuantize.h) in rows of regretUnits.
 void MatchHands(
     const std::int16_t* regrets,
+    std::size_t regretUnits,
     float* current,
     std::size_t actions,
     std::size_t count,
@@ -281,7 +288,7 @@ void MatchHands(
     for (std::size_t action = 0; action < actions; ++action)
     {
         float* row = current + action * count;
-        const std::int16_t* regretRow = regrets + action * count;
+        const std::int16_t* regretRow = regrets + action * regretUnits;
         for (std::size_t hand = begin; hand < end; ++hand)
         {
             const float regret = static_cast<float>(regretRow[hand]);
@@ -307,7 +314,7 @@ HandTraversal::HandTraversal(std::shared_ptr<const HandTraversalData> data)
     : data_(std::move(data))
     , hands(data_->tables.hands)
     , nodes(data_->nodes)
-    , strategySize(data_->strategySize)
+    , stateSize(data_->stateSize)
     , maxActions(data_->maxActions)
     , rootHalfPot(data_->rootHalfPot)
     , children(data_->children)
@@ -559,9 +566,9 @@ std::vector<HandTraversal::Workspace> HandTraversal::MakeWorkers(int team, std::
 
 void HandTraversal::MatchRegrets(const Node& node, const TrainState& train, float* current, const float* actorReach) const
 {
-    const auto count = hands[node.actor].size();
+    const auto count = hands[node.actor].size(), row = HandTraversalData::RowUnits(count);
     const auto actions = node.childCount;
-    const std::int16_t* regrets = train.regrets + node.strategyOffset;
+    const std::int16_t* regrets = train.regrets + node.stateOffset;
     const float uniform = 1.0f / actions;
     // Eight-hand chunks without reach skip their regret loads, most of them once play prunes
     // lines; the zero policy leaves the propagated reach exactly as any policy would.
@@ -579,7 +586,7 @@ void HandTraversal::MatchRegrets(const Node& node, const TrainState& train, floa
         __m256 positive = _mm256_setzero_ps();
         for (std::size_t action = 0; action < actions; ++action)
         {
-            const __m256 clipped = _mm256_max_ps(vector::Load(regrets + action * count + chunk), _mm256_setzero_ps());
+            const __m256 clipped = _mm256_max_ps(vector::Load(regrets + action * row + chunk), _mm256_setzero_ps());
             _mm256_storeu_ps(current + action * count + chunk, clipped);
             positive = _mm256_add_ps(positive, clipped);
         }
@@ -594,13 +601,13 @@ void HandTraversal::MatchRegrets(const Node& node, const TrainState& train, floa
         for (int i = 0; i < 8; ++i)
             any |= actorReach[chunk + i] != 0.0f;
         if (any)
-            MatchHands(regrets, current, actions, count, uniform, chunk, chunk + 8);
+            MatchHands(regrets, row, current, actions, count, uniform, chunk, chunk + 8);
         else
             for (std::size_t action = 0; action < actions; ++action)
                 std::fill_n(current + action * count + chunk, 8, 0.0f);
 #endif
     }
-    MatchHands(regrets, current, actions, count, uniform, aligned, count);
+    MatchHands(regrets, row, current, actions, count, uniform, aligned, count);
 }
 
 void HandTraversal::WalkTraining(
@@ -679,9 +686,9 @@ void HandTraversal::LoadPolicy(const Node& node, const WalkContext& context, flo
     }
     if (context.strategySums)
     {
-        const std::uint16_t* sums = context.strategySums + node.strategyOffset;
+        const std::uint16_t* sums = context.strategySums + node.stateOffset;
         for (std::size_t hand = 0; hand < actorCount; ++hand)
-            NormalizeAverageStrategy(sums + hand, actorCount, node.childCount, current + hand, actorCount);
+            NormalizeAverageStrategy(sums + hand, HandTraversalData::RowUnits(actorCount), node.childCount, current + hand, actorCount);
         return;
     }
     const auto source = context.strategy->FindNodeStrategy(node.id);
@@ -871,7 +878,7 @@ bool HandTraversal::Walk(
     // propagate, reusing the finished child value rows as scratch.
     if (train && node.kind == Kind::Decision && !acting)
         AccumulateNodeStrategy(
-            train->strategySums + node.strategyOffset,
+            train->strategySums + node.stateOffset,
             node.strategyOffset,
             node.childCount,
             opponentCount,
@@ -886,7 +893,7 @@ bool HandTraversal::Walk(
         const auto& weights = train->weights;
         const float halving = gpu::Halving(weights.update - 1 - train->stamps[nodeIndex]);
         UpdateNodeRegrets(
-            train->regrets + node.strategyOffset,
+            train->regrets + node.stateOffset,
             node.strategyOffset,
             node.childCount,
             count,

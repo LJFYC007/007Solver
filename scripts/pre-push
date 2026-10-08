@@ -1,0 +1,19 @@
+#!/bin/sh
+# Copy to .git/hooks/pre-push (README "Checks"), replacing Git LFS's hook, which this one runs.
+# When the pushed commits change solver/, tests/ or CMake files, it also builds and runs the solver
+# tests and GPU benchmark (scripts/run-checks.py) on the working tree. It stashes nothing, unlike
+# pre-commit's push hooks, so edits made while it runs, such as another agent's, survive.
+command -v git-lfs >/dev/null 2>&1 || { printf >&2 '\n%s\n\n' "This repository uses Git LFS, but 'git-lfs' is not on your path."; exit 2; }
+refs=$(cat)
+printf '%s\n' "$refs" | git lfs pre-push "$@" || exit 1
+changed=$(printf '%s\n' "$refs" | while read -r localRef localSha remoteRef remoteSha; do
+    # A deleted ref has an all-zero local id; a new ref, an all-zero or unknown remote id.
+    case $localSha in *[!0]*) ;; *) continue ;; esac
+    if git cat-file -e "$remoteSha^{commit}" 2>/dev/null; then
+        git diff --name-only "$remoteSha" "$localSha"
+    else
+        git log --format= --name-only "$localSha" --not --remotes
+    fi
+done | grep -E '^(solver/|tests/|CMakeLists\.txt$|CMakePresets\.json$)')
+[ -n "$changed" ] || exit 0
+python scripts/run-checks.py

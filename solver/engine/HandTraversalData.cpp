@@ -15,10 +15,36 @@ HandTraversalData::HandTraversalData(const SolveProblem& problem, game::NodeId r
     const auto& rootState = rootNode.State();
     const auto& hands = tables.hands;
     rootHalfPot = core::ToChipUnits(rootState.pot) / 2.0f;
-    nodes.reserve(rootNode.TraversalNodeCount());
-    children.reserve(rootNode.TraversalNodeCount() - 1);
-    dealtCards.reserve(rootNode.TraversalNodeCount() - 1);
-    const auto visit = [&](const auto& self, const game::GameNode& source, std::size_t depth) -> std::uint32_t
+    // The subtrees below each betting path's first non-all-in chance node (ChanceGroups.h) are
+    // visited in parallel, each into the preorder ranges that the sequential visit of the nodes
+    // above them reserves from the subtrees' node, decision and action counts.
+    // The unpadded entries (Node::strategyOffset) and state units of an actor's decisions with
+    // these actions in total.
+    const auto decisionUnits = [&](std::size_t actions, std::size_t decisions, std::size_t actor)
+    {
+        const auto count = hands[actor].size();
+        return std::array<std::size_t, 2>{actions * count + decisions * ((count + 1) / 2), StateUnits(actions, count, decisions)};
+    };
+    // Where a visit writes its next node, child edge, unpadded entry and state unit, and the
+    // extremes it saw.
+    struct Cursor
+    {
+        std::uint32_t node = 0;
+        std::size_t child = 0, strategy = 0, state = 0, maxActions = 1, maxDepth = 1, runoutRows = 0;
+    };
+    // A subtree the visit of the nodes above defers: its cursor, depth and root.
+    struct Start
+    {
+        Cursor at;
+        std::size_t depth;
+        game::GameNode root;
+    };
+    std::vector<Start> starts;
+    // Placeholders, each overwritten by the visit of its node.
+    nodes.assign(rootNode.TraversalNodeCount(), Node{rootNode.Id(), Kind::Fold, 0, 0, 0, 0, 0, rootState.board});
+    children.resize(nodes.size() - 1);
+    dealtCards.resize(nodes.size() - 1);
+    const auto visit = [&](const auto& self, const game::GameNode& source, std::size_t depth, Cursor& at, bool above) -> std::uint32_t
     {
         const auto& state = source.State();
         std::uint64_t boardMask = 0;
@@ -29,12 +55,15 @@ HandTraversalData::HandTraversalData(const SolveProblem& problem, game::NodeId r
                           : source.Kind() == game::NodeKind::Chance            ? Kind::Chance
                           : source.Terminal().kind == game::TerminalKind::Fold ? Kind::Fold
                                                                                : Kind::Showdown;
-        Node node{source.Id(), kind, state.playerToAct.Index(), children.size(), 0, strategySize, boardMask, state.board};
+        Node node{source.Id(), kind, state.playerToAct.Index(), at.child, 0, at.strategy, boardMask, state.board};
         if (kind == Kind::Decision)
         {
             node.childCount = source.BettingEdgeCount();
-            strategySize += StateUnits(node.childCount, hands[node.actor].size());
-            maxActions = std::max(maxActions, node.childCount);
+            node.stateOffset = at.state;
+            const auto units = decisionUnits(node.childCount, 1, node.actor);
+            at.strategy += units[0];
+            at.state += units[1];
+            at.maxActions = std::max(at.maxActions, node.childCount);
         }
         else if (kind == Kind::Chance)
             node.childCount = source.ChanceOutcomeCount();
@@ -64,18 +93,32 @@ HandTraversalData::HandTraversalData(const SolveProblem& problem, game::NodeId r
                 if (kind == Kind::Showdown)
                     node.rankRow = tables.RankRow(state.board);
                 else
-                    runoutRows = std::max(runoutRows, RunoutRow(node) + 1);
+                    at.runoutRows = std::max(at.runoutRows, RunoutRow(node) + 1);
             }
         }
-        const auto index = static_cast<std::uint32_t>(nodes.size());
-        nodes.push_back(node);
-        children.resize(children.size() + node.childCount);
-        dealtCards.resize(dealtCards.size() + node.childCount);
-        maxDepth = std::max(maxDepth, depth + 1);
+        const auto index = at.node++;
+        nodes[index] = node;
+        at.child += node.childCount;
+        at.maxDepth = std::max(at.maxDepth, depth + 1);
         for (std::size_t action = 0; action < node.childCount; ++action)
         {
             const auto child = source.Child(action);
-            const auto childIndex = self(self, child, depth + 1);
+            auto childIndex = at.node;
+            if (above && kind == Kind::Chance)
+            {
+                starts.push_back({at, depth + 1, child});
+                at.node += static_cast<std::uint32_t>(child.TraversalNodeCount());
+                at.child += child.TraversalNodeCount() - 1;
+                // The subtree's decisions of each player with their actions.
+                for (std::size_t player = 0; player < 2; ++player)
+                {
+                    const auto units = decisionUnits(child.ActionEntryCounts()[player], child.DecisionNodeCounts()[player], player);
+                    at.strategy += units[0];
+                    at.state += units[1];
+                }
+            }
+            else
+                childIndex = self(self, child, depth + 1, at, above);
             children[node.childOffset + action] = childIndex;
             if (node.kind == Kind::Chance)
                 dealtCards[node.childOffset + action] =
@@ -83,7 +126,24 @@ HandTraversalData::HandTraversalData(const SolveProblem& problem, game::NodeId r
         }
         return index;
     };
-    visit(visit, rootNode, 0);
+    Cursor top;
+    visit(visit, rootNode, 0, top, true);
+    std::vector<Cursor> ends(starts.size());
+#pragma omp parallel for schedule(dynamic, 1)
+    for (std::int64_t subtree = 0; subtree < static_cast<std::int64_t>(starts.size()); ++subtree)
+    {
+        ends[subtree] = starts[subtree].at;
+        visit(visit, starts[subtree].root, starts[subtree].depth, ends[subtree], false);
+    }
+    strategySize = top.strategy;
+    stateSize = top.state;
+    ends.push_back(top);
+    for (const auto& end : ends)
+    {
+        maxActions = std::max(maxActions, end.maxActions);
+        maxDepth = std::max(maxDepth, end.maxDepth);
+        runoutRows = std::max(runoutRows, end.runoutRows);
+    }
     PrepareChanceTasks();
     if (prepareTraining)
         PrepareRunoutOutcomes();
@@ -146,6 +206,11 @@ void HandTraversalData::PrepareRunoutOutcomes()
 
 StrategySnapshot HandTraversalData::ExportStrategy(std::vector<std::uint16_t> sums) const
 {
+    return ExportStrategy(sums.size(), [&](const std::vector<std::size_t>&, const auto& consume) { consume(sums.data()); });
+}
+
+StrategySnapshot HandTraversalData::ExportStrategy(std::size_t chunkUnits, const SumsStream& stream) const
+{
     // Blocks follow preorder, whose node IDs increase; each owns its probability range, so
     // decisions normalize independently below.
     std::vector<StrategySnapshot::NodeBlock> blocks;
@@ -174,46 +239,70 @@ StrategySnapshot HandTraversalData::ExportStrategy(std::vector<std::uint16_t> su
         decisions.push_back(index);
         probabilityCount += handCount * node.childCount;
     }
-    // Workers write every probability, touching fresh pages in parallel.
-    std::unique_ptr<float[]> probabilities(new float[probabilityCount]);
-#pragma omp parallel for schedule(dynamic, 256)
-    for (std::int64_t block = 0; block < static_cast<std::int64_t>(blocks.size()); ++block)
+    // Each range starts at its first block's decision, which ends[range - 1] holds.
+    std::vector<std::size_t> ends, firstBlocks{0};
+    for (std::size_t block = 0, begin = 0; block < blocks.size(); ++block)
     {
         const Node& node = nodes[decisions[block]];
-        const auto& hands = tables.hands[node.actor];
-        float* output = probabilities.get() + blocks[block].probabilityOffset;
-        // Action-major sums normalize into the compact hand-major output.
-        for (std::size_t hand = 0; hand < hands.size(); ++hand)
+        if (node.stateOffset + StateUnits(node.childCount, tables.hands[node.actor].size()) - begin > chunkUnits &&
+            block > firstBlocks.back())
         {
-            if (hands[hand].mask & node.boardMask)
-                continue;
-            NormalizeAverageStrategy(sums.data() + node.strategyOffset + hand, hands.size(), node.childCount, output, 1);
-            output += node.childCount;
+            begin = node.stateOffset;
+            ends.push_back(begin);
+            firstBlocks.push_back(block);
         }
     }
+    ends.push_back(stateSize);
+    firstBlocks.push_back(blocks.size());
+    std::unique_ptr<float[]> probabilities(new float[probabilityCount]);
+    std::size_t range = 0;
+    stream(
+        ends,
+        [&](const std::uint16_t* units)
+        {
+            const std::size_t begin = range ? ends[range - 1] : 0;
+        // Workers write every probability, touching fresh pages in parallel.
+#pragma omp parallel for schedule(dynamic, 256)
+            for (std::int64_t block = firstBlocks[range]; block < static_cast<std::int64_t>(firstBlocks[range + 1]); ++block)
+            {
+                const Node& node = nodes[decisions[block]];
+                const auto& hands = tables.hands[node.actor];
+                float* output = probabilities.get() + blocks[block].probabilityOffset;
+                // Action-major sums normalize into the compact hand-major output.
+                for (std::size_t hand = 0; hand < hands.size(); ++hand)
+                {
+                    if (hands[hand].mask & node.boardMask)
+                        continue;
+                    NormalizeAverageStrategy(units + (node.stateOffset - begin) + hand, RowUnits(hands.size()), node.childCount, output, 1);
+                    output += node.childCount;
+                }
+            }
+            ++range;
+        }
+    );
     return StrategySnapshot(tables.game, std::move(blocks), std::move(handLists), std::move(probabilities));
 }
 
 namespace
 {
-// One buffer of the quantized layout as floats, its exponent slots zero.
+// One buffer of the quantized layout as floats in the unpadded layout, its exponent slots zero.
 template<typename Unit>
 std::vector<float> DecodeUnits(const HandTraversalData& data, const std::vector<Unit>& units)
 {
     std::vector<float> values(data.strategySize);
-    for (const auto& node : data.nodes)
+#pragma omp parallel for schedule(dynamic, 256)
+    for (std::int64_t index = 0; index < static_cast<std::int64_t>(data.nodes.size()); ++index)
     {
+        const auto& node = data.nodes[index];
         if (node.kind != HandTraversalData::Kind::Decision)
             continue;
-        const auto hands = data.tables.hands[node.actor].size();
-        const Unit* nodeUnits = units.data() + node.strategyOffset;
-        const auto* exponents = ExponentBytes(nodeUnits, node.childCount, hands);
+        const auto hands = data.tables.hands[node.actor].size(), row = HandTraversalData::RowUnits(hands);
+        const Unit* nodeUnits = units.data() + node.stateOffset;
+        const auto* exponents = ExponentBytes(nodeUnits, node.childCount, row);
         for (std::size_t action = 0; action < node.childCount; ++action)
             for (std::size_t hand = 0; hand < hands; ++hand)
-            {
-                const auto i = action * hands + hand;
-                values[node.strategyOffset + i] = gpu::Dequantize(static_cast<float>(nodeUnits[i]), exponents[hand]);
-            }
+                values[node.strategyOffset + action * hands + hand] =
+                    gpu::Dequantize(static_cast<float>(nodeUnits[action * row + hand]), exponents[hand]);
     }
     return values;
 }

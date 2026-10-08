@@ -39,23 +39,34 @@ def metadata_path(case):
     return RAW / (case + ".metadata.json")
 
 
+def live_checkpoint(case):
+    """The receiver's append-only checkpoint, excluded from Git/LFS."""
+    return WORK / "raw" / (case + ".raw.jsonl")
+
+
 def checkpoint_path(case):
     """Prefer the live checkpoint; a fresh checkout can read its published snapshot."""
-    live = WORK / "raw" / (case + ".raw.jsonl")
+    live = live_checkpoint(case)
     return live if live.exists() else RAW / live.name
+
+
+def copy_synced(source, path):
+    """Write the rest of the binary stream source to path and sync it to disk."""
+    with path.open("wb") as output:
+        shutil.copyfileobj(source, output)
+        output.flush()
+        os.fsync(output.fileno())
 
 
 def prepare_checkpoint(case):
     """Seed the ignored append-only checkpoint once, without replacing unfinished work."""
-    live = WORK / "raw" / (case + ".raw.jsonl")
+    live = live_checkpoint(case)
     live.parent.mkdir(parents=True, exist_ok=True)
     snapshot = RAW / live.name
     if not live.exists() and snapshot.exists():
         temporary = live.with_suffix(".tmp")
-        with snapshot.open("rb") as source, temporary.open("wb") as output:
-            shutil.copyfileobj(source, output)
-            output.flush()
-            os.fsync(output.fileno())
+        with snapshot.open("rb") as source:
+            copy_synced(source, temporary)
         temporary.replace(live)
     return live
 

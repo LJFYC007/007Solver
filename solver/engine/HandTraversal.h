@@ -77,7 +77,7 @@ public:
 
     const std::array<std::vector<Hand>, 2>& hands;
     const std::vector<Node>& nodes;
-    const std::size_t& strategySize;
+    const std::size_t& stateSize;
     const std::size_t& maxActions;
     const float& rootHalfPot;
     // prepareTraining adds the runout outcome rows, which only training walks read.

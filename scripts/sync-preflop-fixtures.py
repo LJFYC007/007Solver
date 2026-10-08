@@ -32,18 +32,19 @@ class Case:
 
 
 def derive(case, history):
-    """Mirror the desktop's replayPreflop: each saved node's incoming ranges, then the actor's action frequencies."""
-    ranges = {}
+    """Mirror the desktop's replayPreflop: full ranges, each saved node's incoming ranges, then the actor's action
+    frequencies, and finally the incoming ranges of the node the history reaches, if saved."""
+    ranges = {position: dict.fromkeys(case.manifest["handOrder"], 1) for position in case.manifest["positions"]}
     used = []
 
     def source_ranges(node):
+        used.append(node)
         for position, weights in node["incomingRanges"].items():
             ranges[position] = dict(zip(case.manifest["handOrder"], weights, strict=True))
 
     for step, choice in enumerate(history):
         node = case.node(history[:step])
         assert node and node["actor"] == choice["actor"] and not node["sourceWarning"], history[:step + 1]
-        used.append(node)
         source_ranges(node)
         action = next(i for i, candidate in enumerate(node["actions"]) if candidate["label"] == choice["action"])
         ranges[choice["actor"]] = {
@@ -51,7 +52,9 @@ def derive(case, history):
             for hand, weight in ranges[choice["actor"]].items()
             if hand in node["hands"] and weight > 0 and node["hands"][hand][action] > 0
         }
-    assert node["actions"][action]["next"]["kind"] == "flop", history
+    assert not history or node["actions"][action]["next"]["kind"] == "flop", history
+    if reached := case.node(history):
+        source_ranges(reached)
     digest = hashlib.sha256(json.dumps(used, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return {position: {hand: weight for hand, weight in weights.items() if weight > 0}
             for position, weights in ranges.items()}, digest
@@ -77,8 +80,9 @@ def line(case, bet_level):
 
 
 def scenario(case_id, bet_level, selected, stack, board="Ks 9s 2d", pot=2.0, iterations=200):
+    """bet_level None takes the root's ranges."""
     case = Case(case_id)
-    history = line(case, bet_level)
+    history = line(case, bet_level) if bet_level else []
     ranges, digest = derive(case, history)
     retained = {position: {hand: ranges[position][hand] for hand in hands}
                 for position, hands in selected.items()} if selected else {position: ranges[position] for position in ("UTG", "BB")}
@@ -121,6 +125,14 @@ parity["rangeSource"]["reduction"] = (
     "the 22.5bb pot includes the folded SB's 0.5bb. No range subsets or weight rescaling. "
     "The CPU backend is the reference; there is no independent answer."
 )
-for name, value in [("weighted-flop", weighted), ("raise-flop", raised), ("utg-bb-wide", wide), ("backend-parity", parity)]:
+# The same lockstep comparison over full ranges, which take the GPU's wide-range kernel paths.
+wide_parity = scenario(RAKED, None, None, 4.0, iterations=6)
+wide_parity["rangeSource"]["reduction"] = (
+    "Both players' full ranges at the preflop root, which no postflop line of the source reaches: UTG's captured incoming "
+    "range and BB's full starting range, as the desktop replays the root, which records only its actor's range. Pot and "
+    "stacks are reduced to a shallow tree for runtime. The CPU backend is the reference; there is no independent answer."
+)
+for name, value in [("weighted-flop", weighted), ("raise-flop", raised), ("utg-bb-wide", wide), ("backend-parity", parity),
+                    ("wide-parity", wide_parity)]:
     (fixtures / f"{name}.json").write_bytes((json.dumps(value, indent=4) + "\n").encode())
-print("Updated four input fixtures from GTO Wizard; regenerate independent references for changed referenced inputs next.")
+print("Updated five input fixtures from GTO Wizard; regenerate independent references for changed referenced inputs next.")

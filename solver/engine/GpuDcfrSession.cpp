@@ -13,7 +13,7 @@ GpuDcfrSession::GpuDcfrSession(const SolveProblem& problem)
     const auto budget = gpu::DeviceMemoryBudget();
     if (TrainingStateBytes(counts) > budget)
         throw std::runtime_error("Regret and cumulative strategy alone exceed GPU memory; reduce the tree or use CPU");
-    data_ = std::make_shared<const HandTraversalData>(problem, problem.game->Root());
+    data_ = std::make_unique<const HandTraversalData>(problem, problem.game->Root());
     const gpu::Plan plan(*data_);
     const auto device = plan.DeviceBytes();
     if (device > budget)
@@ -24,15 +24,11 @@ GpuDcfrSession::GpuDcfrSession(const SolveProblem& problem)
     const auto host = size.storageBytes + fixed.fixedBytes;
     const auto sumsBytes = plan.Buffers()[gpu::SumsBuffer].bytes;
     const auto initialization = device + plan.HostBytes();
-    // CPU certification evaluates a host copy of the sums while training stays resident; raked
-    // games walk policy values beside the best response.
-    const auto certification = device + sumsBytes + fixed.WalkBytes(CpuWorkerCount(), problem.game->Spec().HasRake() ? 2 : 1);
     const auto snapshot = StrategySnapshot::EstimateStorageBytes(size.decisionNodes[0] + size.decisionNodes[1], counts.strategyEntries);
-    // Download releases other device buffers first; the snapshot's probabilities are
-    // normalized from the downloaded sums.
-    const auto exportDownload = 2 * sumsBytes;
+    // Export releases other device buffers first; the snapshot's probabilities are normalized
+    // from the sums as they stream to the host.
     const auto exportSnapshot = sumsBytes + snapshot;
-    const auto peak = host + std::max<std::uint64_t>({initialization, certification, exportDownload, exportSnapshot});
+    const auto peak = host + std::max<std::uint64_t>({initialization, exportSnapshot});
     memory_ = MakeMemoryEstimate(counts, peak, 0);
     executor_ = gpu::MakeExecutor(plan);
 }
@@ -74,15 +70,9 @@ ExploitabilityMetrics GpuDcfrSession::EvaluateExploitability() const
     );
 }
 
-ExploitabilityMetrics GpuDcfrSession::EvaluateExploitabilityOnCpu() const
-{
-    const auto sums = executor_->DownloadSums(false);
-    return EvaluateAverageStrategy(HandTraversal(data_), sums.data());
-}
-
 void GpuDcfrSession::WriteTrainingState(const QuantizedState& state)
 {
-    if (state.regrets.size() != data_->strategySize || state.strategySums.size() != data_->strategySize ||
+    if (state.regrets.size() != data_->stateSize || state.strategySums.size() != data_->stateSize ||
         state.stamps.size() != data_->nodes.size())
         throw std::invalid_argument("Training state does not match the GPU strategy layout");
     executor_->UploadTraining(state);
@@ -90,6 +80,11 @@ void GpuDcfrSession::WriteTrainingState(const QuantizedState& state)
 
 StrategySnapshot GpuDcfrSession::ExportStrategy() &&
 {
-    return data_->ExportStrategy(executor_->DownloadSums(true));
+    // 16 MB ranges: each normalizes while the next downloads.
+    return data_->ExportStrategy(
+        std::size_t{8} << 20,
+        [&](const std::vector<std::size_t>& ends, const std::function<void(const std::uint16_t*)>& consume)
+        { executor_->StreamSums(ends, consume); }
+    );
 }
 } // namespace solver::engine

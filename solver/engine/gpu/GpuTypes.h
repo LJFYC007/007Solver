@@ -93,6 +93,25 @@ struct alignas(16) Node
     // differences from that player's tie payoff per runout, scaling its win/loss counts.
     float utility[2][3];
 };
+// Training-state rows (HandTraversalData::StateUnits): each decision's action rows and exponent
+// bytes start at multiples of kStateAlign 16-bit units, 128 bytes, so a thread's two adjacent
+// hands (an even first hand) share one 32-bit word and a warp's hands one cache line.
+enum : U32
+{
+    kStateAlign = 64,
+};
+// Units of n hands' row, or of the exponent bytes of 2n hands.
+GPU_TYPES_INLINE U32 StateRow(U32 n)
+{
+    return (n + kStateAlign - 1) & ~(kStateAlign - 1);
+}
+// Node::strategy: a decision's first state unit (HandTraversalData::Node::stateOffset) over
+// kStateAlign in its high half, and its first unpadded entry (Node::strategyOffset), which the
+// dither hashes, in its low half.
+GPU_TYPES_INLINE U64 StateOffset(U64 strategy)
+{
+    return (strategy >> 32) * kStateAlign;
+}
 // Node::info: kind in 3 bits, actor in 1, the root flag in 1, the child count in 6 (chance
 // nodes deal at most 49 cards) and the row above.
 enum : U32
@@ -166,16 +185,29 @@ struct alignas(16) State
     // UpdateWeights: positive regrets are stored divided by positiveScale.
     float positiveScale;
     float positiveInverse;
-    float averageWeight; // t^2 weight of this update's reach * policy in the strategy sums
+    float averageWeight; // t^3 weight of this update's reach * policy in the strategy sums
     U32 orderPitch;      // entries per rank row of the order buffer, a multiple of four so hand entries align
     U32 orderSection;    // offset of player 1's section in a rank row of the order buffer (see Plan::order)
 };
+// Player p's first entry in the per-hand tables (Plan::hands, weights and a rank row's ranks)
+// and, halved, its first hand pair in the per-pair ones (a rank row's order entries, CardPairs):
+// each player's hands are padded to an even count, so a thread's hand pair (an even first hand)
+// loads as one access.
+GPU_TYPES_INLINE U32 HandBase(const State& state, U32 p)
+{
+    return p ? (state.hands[0] + 1) & ~1u : 0u;
+}
+// Entries of a per-hand table: both players' padded hands.
+GPU_TYPES_INLINE U32 PaddedHands(const State& state)
+{
+    return HandBase(state, 1) + ((state.hands[1] + 1) & ~1u);
+}
 // The cards buffer's last section, after both players' card lists, which list every hand
 // twice: each player's hands' cards, card0 | card1 << 8, two hands to a word, so the player's
 // hands h and h + 1, h even, share the word at CardPairs(shape, player) + h / 2.
 GPU_TYPES_INLINE U32 CardPairs(const State& shape, U32 player)
 {
-    return kCardListHeader + 2 * (shape.hands[0] + shape.hands[1]) + (player ? (shape.hands[0] + 1) / 2 : 0u);
+    return kCardListHeader + 2 * (shape.hands[0] + shape.hands[1]) + HandBase(shape, player) / 2;
 }
 // Terminal evaluates showdowns, with their fused folds and parents; Runout the other leaves, lone
 // folds and forced runouts, which need no rank order.

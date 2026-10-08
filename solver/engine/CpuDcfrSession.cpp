@@ -13,8 +13,8 @@ CpuDcfrSession::CpuDcfrSession(const SolveProblem& problem, int workers)
 {
     if (workerCount_ <= 0)
         throw std::invalid_argument("CPU DCFR worker count must be positive");
-    state_.regrets.resize(traversal_.strategySize, 0);
-    state_.strategySums.resize(traversal_.strategySize, 0);
+    state_.regrets.resize(traversal_.stateSize, 0);
+    state_.strategySums.resize(traversal_.stateSize, 0);
     state_.stamps.resize(traversal_.nodes.size(), 0);
     for (std::size_t player = 0; player < 2; ++player)
         for (const auto& hand : traversal_.hands[player])
@@ -41,7 +41,7 @@ ExploitabilityMetrics CpuDcfrSession::EvaluateExploitability() const
 
 void CpuDcfrSession::WriteTrainingState(const QuantizedState& state)
 {
-    if (state.regrets.size() != traversal_.strategySize || state.strategySums.size() != traversal_.strategySize ||
+    if (state.regrets.size() != traversal_.stateSize || state.strategySums.size() != traversal_.stateSize ||
         state.stamps.size() != traversal_.nodes.size())
         throw std::invalid_argument("Training state does not match the CPU strategy layout");
     state_ = state;

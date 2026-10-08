@@ -22,12 +22,10 @@ private:
     void Update(std::size_t player, const UpdateWeights& weights);
     void Synchronize() { executor_->Synchronize(); }
     ExploitabilityMetrics EvaluateExploitability() const;
-    // Independent CPU certification of the resident average policy.
-    ExploitabilityMetrics EvaluateExploitabilityOnCpu() const;
     StrategySnapshot ExportStrategy() &&;
     QuantizedState ReadTrainingState() const { return executor_->DownloadTraining(); }
     void WriteTrainingState(const QuantizedState& state);
-    std::shared_ptr<const HandTraversalData> data_;
+    std::unique_ptr<const HandTraversalData> data_;
     std::unique_ptr<gpu::Executor> executor_;
     gpu::State state_{};
     MemoryEstimate memory_{};

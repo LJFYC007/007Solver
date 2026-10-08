@@ -1,3 +1,4 @@
+#include "BackendParity.h"
 #include "analysis/AnalysisSession.h"
 #include "engine/DcfrSession.h"
 #include "engine/StrategyEvaluator.h"
@@ -15,7 +16,6 @@
 #include <iostream>
 #include <memory>
 #include <numeric>
-#include <optional>
 #include <string>
 #include <utility>
 #include <gtest/gtest.h>
@@ -27,8 +27,6 @@ using namespace solver;
 using Json = nlohmann::json;
 using Clock = std::chrono::steady_clock;
 constexpr double kTolerance = 1e-5;
-// Compare independent float evaluators in initial-pot units.
-constexpr double kReferenceToleranceInPots = 5e-6;
 Json report;
 std::filesystem::path reportPath;
 Clock::time_point stageStart;
@@ -112,6 +110,16 @@ class Diagnostics : public testing::EmptyTestEventListener
 
 TEST(WideRangeBenchmark, UtgBbSingleRaisedFixedWork)
 {
+    if (computeDevice == engine::ComputeDevice::Gpu && !engine::GpuDcfrSession::Available())
+        GTEST_SKIP() << "No supported CUDA GPU is available";
+    if (computeDevice != engine::ComputeDevice::Cpu && engine::GpuDcfrSession::Available())
+    {
+        StartStage("wide_parity");
+        // Full ranges take the GPU's wide-range kernel paths, which the workload's ranges miss.
+        test::CheckBackendParity("wide-parity");
+        FinishStage("wide_parity");
+        ASSERT_FALSE(HasFailure());
+    }
     StartStage("preparation");
     const std::string fixturePath = std::string(TEST_FIXTURE_DIR) + "utg-bb-wide.json";
     const Json input = Json::parse(std::ifstream(fixturePath));
@@ -165,102 +173,104 @@ TEST(WideRangeBenchmark, UtgBbSingleRaisedFixedWork)
     report["legal_hand_pairs"] = pairs;
     FinishStage("preparation");
 
+    StartStage("session_initialization");
+    auto session = std::make_unique<engine::DcfrSession>(problem, computeDevice, workers);
+    report["workers"] = session->WorkerCount();
+    report["device"] = session->DeviceName();
+    std::cout << "Device: " << session->DeviceName() << std::endl;
+    report["tree_estimate"]["peak_bytes"] = session->Memory().peakBytes;
+    report["tree_estimate"]["workers"] = session->WorkerCount();
+    FinishStage("session_initialization");
+
     StartStage("uniform_evaluation");
-    const auto uniform = engine::EvaluateExploitability(*problem, engine::StrategySnapshot(problem->game, {}));
+    // Before any update, the zero cumulative strategies normalize to uniform play.
+    const auto uniform = session->EvaluateCheckpoint();
     report["uniform"] = Metrics(uniform);
     FinishStage("uniform_evaluation");
     CheckMetrics(uniform);
     EXPECT_NEAR(
         uniform.player0BestResponseEv / initialPot,
         expected.at("uniform").at("heroBestResponseEv").get<double>() / initialPot,
-        kReferenceToleranceInPots
+        test::kEvaluatorToleranceInPots
     );
     EXPECT_NEAR(
         uniform.player1BestResponseEv / initialPot,
         expected.at("uniform").at("villainBestResponseEv").get<double>() / initialPot,
-        kReferenceToleranceInPots
+        test::kEvaluatorToleranceInPots
     );
     EXPECT_NEAR(
         uniform.exploitability / initialPot,
         expected.at("uniform").at("exploitability").get<double>() / initialPot,
-        kReferenceToleranceInPots
+        test::kEvaluatorToleranceInPots
     );
     ASSERT_FALSE(HasFailure());
 
-    StartStage("session_initialization");
-    auto strategy = [&]
+    StartStage("training");
+    int lastProgress = 0;
+    const auto trainingStart = Clock::now();
+    while (session->CompletedIterations() < iterations)
     {
-        auto session = std::make_unique<engine::DcfrSession>(problem, computeDevice, workers);
-        report["workers"] = session->WorkerCount();
-        report["device"] = session->DeviceName();
-        std::cout << "Device: " << session->DeviceName() << std::endl;
-        report["tree_estimate"]["peak_bytes"] = session->Memory().peakBytes;
-        report["tree_estimate"]["workers"] = session->WorkerCount();
-        FinishStage("session_initialization");
-        StartStage("training");
-        int lastProgress = 0;
-        const auto trainingStart = Clock::now();
-        while (session->CompletedIterations() < iterations)
-        {
-            const int remaining = iterations - session->CompletedIterations();
-            session->Run(
-                checkConvergence ? (std::min)(200, remaining) : remaining,
-                [&](int completed)
-                {
-                    if (completed - lastProgress >= 100 || completed == iterations)
-                    {
-                        std::cout << "Training: " << completed << " / " << iterations << " updates" << std::endl;
-                        lastProgress = completed;
-                    }
-                }
-            );
-            if (checkConvergence)
+        const int remaining = iterations - session->CompletedIterations();
+        session->Run(
+            checkConvergence ? (std::min)(200, remaining) : remaining,
+            [&](int completed)
             {
-                const auto metrics = session->EvaluateCheckpoint(
-                    session->CompletedIterations() == iterations,
-                    stopAtAccuracy ? std::optional<double>(targetExploitability) : std::nullopt
-                );
-                CheckMetrics(metrics);
-                report["checkpoint"] = Metrics(metrics);
-                report["convergence"].push_back({
-                    {"iterations", session->CompletedIterations()},
-                    {"elapsed_seconds", std::chrono::duration<double>(Clock::now() - trainingStart).count()},
-                    {"training_seconds", session->TrainingTimeSeconds()},
-                    {"exploitability", metrics.exploitability},
-                });
-                SaveReport();
-                if (stopAtAccuracy && metrics.exploitability <= targetExploitability)
-                    break;
+                if (completed - lastProgress >= 100 || completed == iterations)
+                {
+                    std::cout << "Training: " << completed << " / " << iterations << " updates" << std::endl;
+                    lastProgress = completed;
+                }
             }
+        );
+        if (checkConvergence)
+        {
+            const auto metrics = session->EvaluateCheckpoint();
+            CheckMetrics(metrics);
+            report["convergence"].push_back({
+                {"iterations", session->CompletedIterations()},
+                {"elapsed_seconds", std::chrono::duration<double>(Clock::now() - trainingStart).count()},
+                {"training_seconds", session->TrainingTimeSeconds()},
+                {"exploitability", metrics.exploitability},
+            });
+            SaveReport();
+            if (stopAtAccuracy && metrics.exploitability <= targetExploitability)
+                break;
         }
-        report["training_loop_seconds"] = session->TrainingTimeSeconds();
-        report["updates_per_second"] = session->CompletedIterations() / session->TrainingTimeSeconds();
-        report["completed_iterations"] = session->CompletedIterations();
-        FinishStage("training");
-        if (stopAtAccuracy)
-            EXPECT_LE(session->CompletedIterations(), iterations);
-        else
-            EXPECT_EQ(session->CompletedIterations(), iterations);
-        StartStage("snapshot_export");
-        auto snapshot = std::move(*session).ExportStrategy();
-        FinishStage("snapshot_export");
-        StartStage("training_release");
-        session.reset();
-        FinishStage("training_release");
-        return snapshot;
-    }();
+    }
+    report["training_loop_seconds"] = session->TrainingTimeSeconds();
+    report["updates_per_second"] = session->CompletedIterations() / session->TrainingTimeSeconds();
+    report["completed_iterations"] = session->CompletedIterations();
+    FinishStage("training");
+    if (stopAtAccuracy)
+        EXPECT_LE(session->CompletedIterations(), iterations);
+    else
+        EXPECT_EQ(session->CompletedIterations(), iterations);
 
     StartStage("trained_evaluation");
-    const auto actual = engine::EvaluateExploitability(*problem, strategy);
-    report["trained"] = Metrics(actual);
-    report["trained"]["accuracyPercent"] = 100.0 * actual.exploitability / initialPot;
-    report["target_reached"] = actual.exploitability <= targetExploitability;
+    const auto trained = session->EvaluateCheckpoint();
+    report["trained"] = Metrics(trained);
+    report["trained"]["accuracyPercent"] = 100.0 * trained.exploitability / initialPot;
+    report["target_reached"] = trained.exploitability <= targetExploitability;
     FinishStage("trained_evaluation");
-    CheckMetrics(actual);
-    if (checkConvergence)
-        EXPECT_NEAR(actual.exploitability, report.at("checkpoint").at("exploitability").get<double>(), 1e-6);
+    CheckMetrics(trained);
     // Low iteration budgets measure throughput; convergence precision belongs to the correctness suite.
-    EXPECT_LT(actual.exploitability, uniform.exploitability - kTolerance);
+    EXPECT_LT(trained.exploitability, uniform.exploitability - kTolerance);
+
+    StartStage("snapshot_export");
+    auto strategy = std::move(*session).ExportStrategy();
+    FinishStage("snapshot_export");
+    StartStage("training_release");
+    session.reset();
+    FinishStage("training_release");
+
+    StartStage("export_evaluation");
+    // CPU evaluation of the export cross-checks the training device's on these wide ranges.
+    const auto exported = engine::EvaluateExploitability(*problem, strategy);
+    report["exported"] = Metrics(exported);
+    FinishStage("export_evaluation");
+    EXPECT_NEAR(exported.player0BestResponseEv / initialPot, trained.player0BestResponseEv / initialPot, test::kEvaluatorToleranceInPots);
+    EXPECT_NEAR(exported.player1BestResponseEv / initialPot, trained.player1BestResponseEv / initialPot, test::kEvaluatorToleranceInPots);
+    EXPECT_NEAR(exported.exploitability / initialPot, trained.exploitability / initialPot, test::kEvaluatorToleranceInPots);
     ASSERT_FALSE(HasFailure());
 
     StartStage("analysis_initialization");
@@ -367,9 +377,10 @@ int main(int argc, char** argv)
         testing::InitGoogleTest(&argc, argv);
         testing::UnitTest::GetInstance()->listeners().Append(new Diagnostics);
         int result = RUN_ALL_TESTS();
-        if (testing::UnitTest::GetInstance()->successful_test_count() != 1)
+        const auto& unit = *testing::UnitTest::GetInstance();
+        if (unit.successful_test_count() + unit.skipped_test_count() != 1)
             result = 1;
-        report["status"] = result == 0 ? "passed" : "failed";
+        report["status"] = result != 0 ? "failed" : unit.skipped_test_count() ? "skipped" : "passed";
         report["total_seconds"] = std::chrono::duration<double>(Clock::now() - start).count();
         report["final_memory"] = Memory();
         SaveReport();

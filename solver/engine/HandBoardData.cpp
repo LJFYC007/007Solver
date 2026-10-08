@@ -84,14 +84,19 @@ HandBoardData::HandBoardData(const SolveProblem& problem, game::NodeId root)
         throw std::runtime_error("No valid private hand pairs after applying range weights and blockers");
 
     rowsByRunout.fill(-1);
-    // Rank rows are shared by all betting histories and reversed turn/river runouts.
-    const auto addRanks = [&](const core::Board& board)
+    // Rank rows are shared by all betting histories and reversed turn/river runouts; each row,
+    // numbered by its first river, fills independently.
+    std::vector<core::Board> rivers;
+    const auto addRiver = [&](const core::Board& board)
     {
         const auto key = core::CardPairIndex(board.CardAt(3), board.CardAt(4));
         if (rowsByRunout[key] >= 0)
             return;
-        rowsByRunout[key] = static_cast<int>(rankRows.size());
-        rankRows.emplace_back();
+        rowsByRunout[key] = static_cast<int>(rivers.size());
+        rivers.push_back(board);
+    };
+    const auto addRanks = [&](const core::Board& board, std::array<RankOrder, 2>& row)
+    {
         for (std::size_t player = 0; player < 2; ++player)
         {
             std::vector<std::pair<std::uint16_t, std::uint16_t>> ranked;
@@ -102,7 +107,7 @@ HandBoardData::HandBoardData(const SolveProblem& problem, game::NodeId root)
                         static_cast<std::uint16_t>(game.ShowdownRank(board, hands[player][hand].cards)), static_cast<std::uint16_t>(hand)
                     );
             std::sort(ranked.begin(), ranked.end());
-            auto& order = rankRows.back()[player];
+            auto& order = row[player];
             order.ranks.reserve(ranked.size());
             order.hands.reserve(ranked.size());
             for (const auto& [rank, hand] : ranked)
@@ -113,8 +118,8 @@ HandBoardData::HandBoardData(const SolveProblem& problem, game::NodeId root)
         }
         for (std::size_t player = 0; player < 2; ++player)
         {
-            auto& order = rankRows.back()[player];
-            const auto& opponent = rankRows.back()[1 - player].ranks;
+            auto& order = row[player];
+            const auto& opponent = row[1 - player].ranks;
             order.lowerBounds.reserve(order.ranks.size());
             order.upperBounds.reserve(order.ranks.size());
             for (const auto rank : order.ranks)
@@ -131,8 +136,8 @@ HandBoardData::HandBoardData(const SolveProblem& problem, game::NodeId root)
         }
         for (std::size_t player = 0; player < 2; ++player)
         {
-            auto& order = rankRows.back()[player];
-            const auto& opponent = rankRows.back()[1 - player];
+            auto& order = row[player];
+            const auto& opponent = row[1 - player];
             std::vector<std::uint16_t> rankByHand(hands[1 - player].size());
             for (std::size_t ranked = 0; ranked < opponent.hands.size(); ++ranked)
                 rankByHand[opponent.hands[ranked]] = opponent.ranks[ranked];
@@ -163,7 +168,7 @@ HandBoardData::HandBoardData(const SolveProblem& problem, game::NodeId root)
         }
     };
     if (this->board.CardCount() == 5)
-        addRanks(this->board);
+        addRiver(this->board);
     else
         for (int first = 0; first < 52; ++first)
         {
@@ -171,11 +176,15 @@ HandBoardData::HandBoardData(const SolveProblem& problem, game::NodeId root)
                 continue;
             const auto board = this->board.Append(core::Card(first));
             if (board.CardCount() == 5)
-                addRanks(board);
+                addRiver(board);
             else
                 for (int second = 0; second < first; ++second)
                     if (!core::Contains(board, core::Card(second)))
-                        addRanks(board.Append(core::Card(second)));
+                        addRiver(board.Append(core::Card(second)));
         }
+    rankRows.resize(rivers.size());
+#pragma omp parallel for schedule(dynamic, 4)
+    for (std::int64_t row = 0; row < static_cast<std::int64_t>(rivers.size()); ++row)
+        addRanks(rivers[row], rankRows[row]);
 }
 } // namespace solver::engine

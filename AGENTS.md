@@ -11,7 +11,7 @@ Run the relevant [README checks](README.md#checks) and follow the [fixture updat
 ## Changes and verification
 
 - Use an independent subagent review for architectural changes and check documentation against the final code.
-- Do not add tests unless explicitly requested. Adapt existing tests when interfaces change, preserving independent expected values and precision.
+- Do not add tests unless explicitly requested. Adapt existing tests when interfaces change, preserving independent expected values and precision. Keep tests end-to-end, checking CPU and GPU against each other as well as against references, within the [CTest](README.md#checks) and [benchmark](tests/README.md#benchmark) time budgets.
 - Reuse existing build and output directories. Create additional directories under `build/` only when necessary.
 - Repeat or broaden passed checks only for relevant changes, failures or unresolved concerns.
 - Time performance changes back to back against a rebuilt baseline, and GPU changes also beyond the benchmark's hand counts (see [Benchmark](tests/README.md#benchmark)).

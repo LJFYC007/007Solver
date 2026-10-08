@@ -6,10 +6,9 @@ import hashlib
 import json
 import math
 import os
-import shutil
 
-from gtowizard_case import (CASES, RAW, WORK, case_parser, check_source, checkpoint_path, child_jobs, history_key, label, load_case, plan,
-                            terminal)
+from gtowizard_case import (CASES, RAW, WORK, case_parser, check_source, checkpoint_path, child_jobs, copy_synced, history_key, label, load_case,
+                            plan, terminal)
 
 parser = case_parser(__doc__)
 parser.add_argument("--status", action="store_true")
@@ -37,6 +36,11 @@ while True:
 def read_line(path):
     source_stream.seek(records[path])
     return source_stream.readline()
+
+
+def check_unchanged(stage):
+    stat = os.fstat(source_stream.fileno())
+    assert (stat.st_size, stat.st_mtime_ns) == (source_stat.st_size, source_stat.st_mtime_ns), f"Checkpoint changed during {stage}; stop the receiver before exporting"
 
 
 def read_record(path):
@@ -233,17 +237,13 @@ manifest = {
 # Publish only at a stopped capture milestone, never for each appended response.
 # Stage outside Git/LFS so a file watcher cannot cache partially copied snapshots.
 snapshot = RAW / source_path.name
-current_stat = os.fstat(source_stream.fileno())
-assert (current_stat.st_size, current_stat.st_mtime_ns) == (source_stat.st_size, source_stat.st_mtime_ns), "Checkpoint changed during export; stop the receiver before exporting"
-if source_path != snapshot:
+check_unchanged("export")
+# The checkpoint only grows from the snapshot it was seeded with, so an equal size means equal bytes.
+if source_path != snapshot and not (snapshot.exists() and snapshot.stat().st_size == source_stat.st_size):
     temporary = WORK / (source_path.name + ".publish-tmp")
     source_stream.seek(0)
-    with temporary.open("wb") as output:
-        shutil.copyfileobj(source_stream, output)
-        output.flush()
-        os.fsync(output.fileno())
-    current_stat = os.fstat(source_stream.fileno())
-    assert (current_stat.st_size, current_stat.st_mtime_ns) == (source_stat.st_size, source_stat.st_mtime_ns), "Checkpoint changed during publication; stop the receiver before exporting"
+    copy_synced(source_stream, temporary)
+    check_unchanged("publication")
     temporary.replace(snapshot)
 source_stream.close()
 (destination / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8", newline="\n")

@@ -86,6 +86,9 @@ public:
     const TerminalOutcome& Terminal() const;
     bool IsForcedRunout() const;
     std::size_t TraversalNodeCount() const { return Shape().traversalNodes; }
+    // Per player, the decisions among those traversal nodes and their actions.
+    const std::array<std::uint64_t, 2>& DecisionNodeCounts() const { return Shape().decisionNodes; }
+    const std::array<std::uint64_t, 2>& ActionEntryCounts() const { return Shape().actionEntries; }
     std::size_t BettingEdgeCount() const { return Shape().actions.size(); }
     BettingEdge GetBettingEdge(std::size_t index) const;
     std::size_t ChanceOutcomeCount() const;

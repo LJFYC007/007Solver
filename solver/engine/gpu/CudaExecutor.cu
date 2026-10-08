@@ -16,13 +16,12 @@ void Check(cudaError_t status)
     if (status != cudaSuccess)
         throw std::runtime_error(std::string("CUDA: ") + cudaGetErrorString(status));
 }
-// Threads of a Runout block for the given lanes, one per hand: the fewest rounds of at most
-// kRunoutGroup, balanced in whole warps, and at least the two warps FoldMasses splits.
+// Threads of a Runout block for the given lanes, one per two hands: whole warps, at least the two
+// FoldMasses splits, and all lanes in one round.
+static_assert((HandBoardData::kMaxHands + 1) / 2 <= kRunoutGroup);
 U32 RunoutGroup(U32 lanes)
 {
-    const U32 rounds = (lanes + kRunoutGroup - 1) / kRunoutGroup;
-    const U32 warps = ((lanes + rounds - 1) / rounds + kWarpSize - 1) / kWarpSize;
-    return std::max<U32>(warps, 2) * kWarpSize;
+    return std::max<U32>((lanes + kWarpSize - 1) / kWarpSize, 2) * kWarpSize;
 }
 using KernelFunction = void (*)(GPU_ARGUMENTS);
 // Terminal's instance and threads per block for a launch with the given shared memory: blocks of
@@ -48,6 +47,11 @@ public:
         {
             Check(cudaSetDevice(0));
             Check(cudaDeviceGetStreamPriorityRange(&lowPriority_, &highPriority_));
+            // The kernels wait for their predecessors only when built for compute capability 9 or
+            // later; a device without such code JIT-compiles older PTX.
+            cudaFuncAttributes attributes{};
+            Check(cudaFuncGetAttributes(&attributes, Reach));
+            programmatic_ = attributes.ptxVersion >= 90;
             for (auto& stream : streams_)
                 Check(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
             Check(cudaEventCreateWithFlags(&fork_, cudaEventDisableTiming));
@@ -104,21 +108,43 @@ public:
         Copy(values.data(), buffers_[ScratchBuffer], values.size() * sizeof(float), cudaMemcpyDeviceToHost);
         return values;
     }
-    std::vector<std::uint16_t> DownloadSums(bool releaseTraining) override
+    void StreamSums(const std::vector<std::size_t>& ends, const std::function<void(const std::uint16_t*)>& consume) override
     {
-        if (releaseTraining)
+        Synchronize();
+        DestroyGraph();
+        for (std::size_t i = 0; i < buffers_.size(); ++i)
+            if (i != SumsBuffer)
+                Free(i);
+        // Ranges alternate between two pinned halves (one for a single range), each copy marked by
+        // an update event, idle now.
+        std::size_t half = 0;
+        for (std::size_t k = 0, begin = 0; k < ends.size(); begin = ends[k++])
+            half = std::max(half, ends[k] - begin);
+        const std::size_t halves = ends.size() > 1 ? 2 : 1;
+        Check(cudaHostAlloc(reinterpret_cast<void**>(&download_), halves * half * sizeof(std::uint16_t), cudaHostAllocDefault));
+        const auto copy = [&](std::size_t k)
         {
-            Synchronize();
-            DestroyGraph();
-            for (std::size_t i = 0; i < buffers_.size(); ++i)
-                if (i != SumsBuffer)
-                    Free(i);
+            const std::size_t begin = k ? ends[k - 1] : 0;
+            Check(cudaMemcpyAsync(
+                download_ + k % 2 * half,
+                static_cast<const std::uint16_t*>(buffers_[SumsBuffer]) + begin,
+                (ends[k] - begin) * sizeof(std::uint16_t),
+                cudaMemcpyDeviceToHost,
+                stream_
+            ));
+            Check(cudaEventRecord(done_[k % 2], stream_));
+        };
+        copy(0);
+        for (std::size_t k = 0; k < ends.size(); ++k)
+        {
+            if (k + 1 < ends.size())
+                copy(k + 1);
+            Check(cudaEventSynchronize(done_[k % 2]));
+            consume(download_ + k % 2 * half);
         }
-        std::vector<std::uint16_t> result(entries_);
-        Copy(result.data(), buffers_[SumsBuffer], result.size() * sizeof(std::uint16_t), cudaMemcpyDeviceToHost);
-        if (releaseTraining)
-            Free(SumsBuffer);
-        return result;
+        Check(cudaFreeHost(download_));
+        download_ = nullptr;
+        Free(SumsBuffer);
     }
     QuantizedState DownloadTraining() override
     {
@@ -158,12 +184,15 @@ private:
     std::vector<cudaEvent_t> events_;
     // Pinned State copies of the updates in flight and the events ending them.
     State* staging_ = nullptr;
+    std::uint16_t* download_ = nullptr; // StreamSums's pinned ranges
     std::array<cudaEvent_t, 2> done_{};
     std::size_t slot_ = 0;
     // Per mode, training and best response or else Averaging, and per player.
     std::array<std::array<cudaGraph_t, 2>, 2> graphs_{};
     std::array<std::array<cudaGraphExec_t, 2>, 2> executables_{};
     int lowPriority_ = 0, highPriority_ = 0;
+    // Whether captured passes launch programmatically (see Dispatch): kernels built for compute capability 9 and later.
+    bool programmatic_ = false;
     // The launches' L2 access policy over the scratch buffer (see PersistScratch); an empty window
     // when the device has no persisting L2.
     cudaAccessPolicyWindow scratchWindow_{};
@@ -237,7 +266,7 @@ private:
             }
             for (const U32 predecessor : predecessors_[i])
                 Check(cudaStreamWaitEvent(stream, events_[predecessor], 0));
-            Dispatch(pass, stream, averaging);
+            Dispatch(pass, stream, averaging, programmatic_);
             Check(cudaEventRecord(events_[i], stream));
         }
         for (std::size_t lane = 1; lane < streams_.size(); ++lane)
@@ -250,7 +279,7 @@ private:
         Check(cudaStreamEndCapture(stream_, &graph));
         Check(cudaGraphInstantiateWithFlags(&executables_[averaging][player], graph, cudaGraphInstantiateFlagUseNodePriority));
     }
-    void Dispatch(const Pass& pass, cudaStream_t stream, bool averaging = false)
+    void Dispatch(const Pass& pass, cudaStream_t stream, bool averaging = false, bool programmatic = false)
     {
         if (pass.count == 0)
             return;
@@ -290,18 +319,29 @@ private:
         // Backup blocks, which gate their streams' next passes, and long Terminal launches fill the rest instead of holding
         // every SM while the other streams wait (7% faster). The spine's terminal passes gate the spine's Backup instead
         // and keep the highest priority.
-        cudaLaunchAttribute attributes[2]{};
-        attributes[0].id = cudaLaunchAttributePriority;
-        attributes[0].val.priority = leaves && pass.lane < kSpineLane ? lowPriority_ : highPriority_;
-        attributes[1].id = cudaLaunchAttributeAccessPolicyWindow;
-        attributes[1].val.accessPolicyWindow = scratchWindow_;
+        cudaLaunchAttribute attributes[3]{};
+        unsigned int count = 0;
+        attributes[count].id = cudaLaunchAttributePriority;
+        attributes[count++].val.priority = leaves && pass.lane < kSpineLane ? lowPriority_ : highPriority_;
+        if (scratchWindow_.num_bytes)
+        {
+            attributes[count].id = cudaLaunchAttributeAccessPolicyWindow;
+            attributes[count++].val.accessPolicyWindow = scratchWindow_;
+        }
+        // A programmatic launch's blocks may start before its predecessors finish; each kernel waits
+        // for them (WaitForPredecessors in GpuKernels.inc) after loading its State and node record.
+        if (programmatic)
+        {
+            attributes[count].id = cudaLaunchAttributeProgrammaticStreamSerialization;
+            attributes[count++].val.programmaticStreamSerializationAllowed = 1;
+        }
         cudaLaunchConfig_t config{};
         config.gridDim = blocks;
         config.blockDim = dim3(group);
         config.dynamicSmemBytes = shared;
         config.stream = stream;
         config.attrs = attributes;
-        config.numAttrs = scratchWindow_.num_bytes ? 2 : 1;
+        config.numAttrs = count;
         Check(cudaLaunchKernelEx(
             &config,
             kernel,
@@ -370,11 +410,14 @@ private:
                 cudaEventDestroy(event);
         if (staging_)
             cudaFreeHost(staging_);
+        if (download_)
+            cudaFreeHost(download_);
         streams_ = {};
         fork_ = join_ = nullptr;
         events_.clear();
         done_ = {};
         staging_ = nullptr;
+        download_ = nullptr;
     }
 };
 } // namespace

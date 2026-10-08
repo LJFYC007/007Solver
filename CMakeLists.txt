@@ -48,9 +48,12 @@ if(MSVC)
     target_compile_options(007SolverBenchmark PRIVATE /utf-8)
 endif()
 
+# The GPU benchmark trains beyond the fixture's update budget, within two minutes.
+set(SOLVER_BENCHMARK_cpu_ARGS --device=cpu)
+set(SOLVER_BENCHMARK_gpu_ARGS --device=gpu --iterations=2000)
 foreach(SOLVER_BENCHMARK_DEVICE IN ITEMS cpu gpu)
     add_custom_target(benchmark_${SOLVER_BENCHMARK_DEVICE}
-        COMMAND $<TARGET_FILE:007SolverBenchmark> --device=${SOLVER_BENCHMARK_DEVICE}
+        COMMAND $<TARGET_FILE:007SolverBenchmark> ${SOLVER_BENCHMARK_${SOLVER_BENCHMARK_DEVICE}_ARGS}
         WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
         DEPENDS 007SolverBenchmark
         USES_TERMINAL

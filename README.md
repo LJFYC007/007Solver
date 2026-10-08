@@ -54,14 +54,14 @@ cmake --build --preset Release --target 007SolverTests
 ctest --test-dir build/release --output-on-failure
 ```
 
-Release tests target roughly 10 seconds, excluding builds. For desktop changes, after staging the service:
+CI runs these tests, which must finish within 15 seconds excluding builds. For desktop changes, after staging the service:
 
 ```sh
 npm --prefix desktop run check
 cargo check --manifest-path desktop/src-tauri/Cargo.toml --locked
 ```
 
-Run the repository hooks on the changed paths; `pre-commit run --all-files` skips untracked files.
+`pre-commit install` installs the commit hooks, which format and lint, once per clone. Copy [pre-push](scripts/pre-push) to `.git/hooks/` (it replaces and runs Git LFS's hook): before pushes that change `solver/`, `tests/` or CMake files, it builds and runs these tests and, on machines with a supported NVIDIA GPU, `benchmark_gpu`, failing beyond its [time budget](tests/README.md#benchmark). It checks the working tree, including uncommitted changes, and waits for a running server deploy. Run the commit hooks on the changed paths; `pre-commit run --all-files` skips untracked files.
 
 ```sh
 pre-commit run --files <changed-paths>

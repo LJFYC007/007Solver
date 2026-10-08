@@ -24,9 +24,9 @@ SolveSize MeasureSolveSize(const SolveProblem& problem)
         for (const auto& [hand, weight] : problem.ranges.For(core::PlayerId(player)).Entries())
             if (weight > 0.0f && !core::Overlaps(hand, board))
                 ++size.hands[player];
-        const auto entries = size.tree.actionEntries[player] * size.hands[player];
-        size.strategyEntries += entries;
-        size.stateUnits += entries + size.tree.decisionNodes[player] * HandTraversalData::ExponentUnits(size.hands[player]);
+        size.strategyEntries += size.tree.actionEntries[player] * size.hands[player];
+        size.stateUnits +=
+            HandTraversalData::StateUnits(size.tree.actionEntries[player], size.hands[player], size.tree.decisionNodes[player]);
     }
     return size;
 }

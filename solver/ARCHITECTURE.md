@@ -15,13 +15,13 @@ CPU and GPU run the same algorithm and may differ only in summation order and FM
 - **Reach.** An update propagates only the opponent's reach (range weight, the opponent's action probabilities and chance), using the policy at entry to each decision node.
 - **Pruning.** Subtrees without opponent reach are skipped exactly: their values and increments are zero, and an acting decision keeps its stamp, the index of its actor's last unpruned update.
 - **State.** Both devices share the 16-bit layout of [HandTraversalData.h](engine/HandTraversalData.h) and the stochastic rounding of [GpuQuantize.h](engine/gpu/GpuQuantize.h); a hand an update does not touch keeps its values exactly.
-- **Discounts.** Both DCFR discounts apply lazily ([UpdateWeights](engine/HandTraversalData.h)). Cumulative strategies sum t² · reach · policy during the opponent's updates (Burch et al.'s alternating average), so only per-hand normalization gives the average policy; a hand without reach at a decision is left untouched there.
+- **Discounts.** Both DCFR discounts apply lazily ([UpdateWeights](engine/HandTraversalData.h)). Cumulative strategies sum t³ · reach · policy during the opponent's updates (Burch et al.'s alternating average), so only per-hand normalization gives the average policy; a hand without reach at a decision is left untouched there.
 - **Terminals.** Both devices use one formulation ([HandEvaluation.h](engine/HandEvaluation.h)). Training and GPU checkpoint evaluation take all-in runouts from precomputed win/loss rows; CPU evaluation walks them exactly.
 - **CPU parallelism.** CPU walks run chance subtrees in parallel but must retain ancestor entry policies, use separate scratch and preserve backup order, so results do not depend on the worker count; training must also keep the alternating-player boundary.
 
 Near-tied regrets flip regret matching under rounding differences, so independently trained CPU and GPU trajectories diverge within a few updates. Compare devices one update at a time from a state shared through `DcfrSession::ReadTrainingState` and `WriteTrainingState`, between sessions with equal completed iterations, by decoded values (`HandTraversalData::Decode`): equal values can have different encodings.
 
-`DcfrSession::EvaluateCheckpoint` uses CPU evaluation for final metrics and for GPU checkpoints that reach the supplied stopping target, which callers must supply whenever a checkpoint can end training. Final metrics must describe the exported strategy with the same cumulative-strategy normalization.
+`DcfrSession::EvaluateCheckpoint` evaluates on the training device, so GPU solves stop on and report GPU evaluation. Its metrics must describe the exported strategy with the same cumulative-strategy normalization and agree with CPU evaluation of the export ([EvaluateExploitability](engine/StrategyEvaluator.h)).
 
 ## GPU plan
 
@@ -33,11 +33,13 @@ The [GPU plan](engine/gpu/GpuPlan.h) supports at most 16 actions per decision (`
 - Children without opponent reach are unflagged and their values are stale: parents substitute zero, and acting decisions read the flag before touching regrets.
 - Node stamps live in two halves selected by update parity: a pass reads the half its player's previous update wrote and writes the other, so tiles of one node never race.
 - Cross-stream predecessors derive from the slot intervals each pass reads and writes (`Plan::predecessors`), and CUDA captures them as graph edges. `Executor::Update` may return before the device finishes; `Synchronize`, downloads and root values wait.
+- When the kernels run code built for compute capability 9 or later, captured passes launch programmatically: a kernel's blocks may start before the previous pass in their stream finishes, so before `WaitForPredecessors` a kernel may read only the State and node records.
+- Threads move two adjacent hands at once. Scratch rows hold a lane past an odd hand count, which pair stores fill and every reader ignores; the padding units of the training state's rows stay zero.
 - The batching target keeps leaf lanes' reach and values mostly in the GPU's L2; it is not a memory limit. Street regions and retained ancestors can exceed it, and the whole tree's regrets and cumulative strategies stay resident. The training state streams through L2 once per update, so kernels load and store it only through `LoadStreamed`/`StoreStreamed` (evict-first), and scratch rows hold a persisting L2 window.
 
 ## Memory
 
-Allocation estimates combine host and device memory and impose no limit. They include checkpoint scratch and GPU readback while training remains resident; later queries are excluded. After training, the [analysis session](analysis/AnalysisSession.h) keeps the traversal tables of the last decision whose EVs it evaluated, about 96 bytes per node of its subtree, for later queries of that decision. See [CPU sizing](engine/MemoryEstimate.cpp) and [GPU sizing](engine/GpuDcfrSession.cpp).
+Allocation estimates combine host and device memory and impose no limit. They include checkpoint scratch while training remains resident; later queries are excluded. After training, the [analysis session](analysis/AnalysisSession.h) keeps the traversal tables of the last decision whose EVs it evaluated, about 100 bytes per node of its subtree, for later queries of that decision. See [CPU sizing](engine/MemoryEstimate.cpp) and [GPU sizing](engine/GpuDcfrSession.cpp).
 
 ## Service and desktop lifecycle
 

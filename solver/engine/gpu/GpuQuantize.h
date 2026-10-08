@@ -6,8 +6,9 @@
 // HandTraversalData::StateUnits). Ratios within a hand, which regret matching and
 // average-strategy normalization use, read the integers directly. An update decodes a
 // hand, applies float arithmetic and re-encodes every entry at the scale of the hand's
-// largest magnitude, rounding stochastically with a dither derived from the index of the
-// hand's first entry and the update, so the expected stored value is exact and
+// largest magnitude, rounding stochastically with a dither derived from the unpadded index
+// of the hand's first entry (HandTraversalData::Node::strategyOffset) and the update, so the
+// expected stored value is exact and
 // increments below one quantum still accumulate. Every device computes the same dither
 // and rounding, so equal float inputs quantize identically, and encoding a decoded state
 // reproduces its values.

@@ -1,8 +1,7 @@
+#include "BackendParity.h"
 #include "analysis/AnalysisSession.h"
 #include "engine/DcfrSession.h"
-#include "engine/HandTraversalData.h"
 #include "engine/StrategyEvaluator.h"
-#include "game/GameCompiler.h"
 #include "io/ScenarioLoader.h"
 #include <algorithm>
 #include <cmath>
@@ -33,47 +32,52 @@ const Json& References()
     return references;
 }
 
-std::shared_ptr<const engine::SolveProblem> LoadProblem(const std::string& name)
-{
-    auto scenario = solver::io::LoadScenario(std::string(TEST_FIXTURE_DIR) + name + ".json");
-    return std::make_shared<const engine::SolveProblem>(engine::SolveProblem{game::CompileGame(scenario.game), std::move(scenario.ranges)});
-}
-
 std::shared_ptr<const engine::SolveProblem> Problem(const std::string& name)
 {
     // Changing the input requires regenerating its independent reference.
     EXPECT_EQ(Fixture(name), References().at(name).at("scenario"));
-    return LoadProblem(name);
+    return solver::test::MakeProblem(solver::io::LoadScenario(std::string(TEST_FIXTURE_DIR) + name + ".json"));
 }
 
-void CheckSolve(const std::string& name, engine::ComputeDevice requestedDevice, int workers)
+void CheckSolve(const std::string& name, engine::ComputeDevice requestedDevice)
 {
     const auto problem = Problem(name);
     const int iterations = Fixture(name).at("iterations").get<int>();
-    SCOPED_TRACE("dcfr workers=" + std::to_string(workers));
+    const auto& reference = References().at(name);
     engine::ExploitabilityMetrics checkpoint;
     // The service checks accuracy before consuming the training state.
     const auto strategy = [&]
     {
-        engine::DcfrSession session(problem, requestedDevice, workers);
+        // Several CPU workers split chance subtrees; the GPU ignores the count.
+        engine::DcfrSession session(problem, requestedDevice, 4);
         if (requestedDevice == engine::ComputeDevice::Auto)
             EXPECT_EQ(session.Device(), engine::ComputeDevice::Gpu);
         testing::Test::RecordProperty("device", session.DeviceName());
         testing::Test::RecordProperty("cpuWorkers", std::to_string(session.WorkerCount()));
         std::cout << name << ": Device: " << session.DeviceName() << "; CPU workers: " << session.WorkerCount() << std::endl;
+        if (reference.contains("uniform"))
+        {
+            // Before any update, the zero cumulative strategies normalize to uniform play.
+            const auto uniform = session.EvaluateCheckpoint();
+            const auto& expected = reference.at("uniform");
+            EXPECT_NEAR(uniform.player0BestResponseEv, expected.at("heroBestResponseEv").get<float>(), 1e-5f);
+            EXPECT_NEAR(uniform.player1BestResponseEv, expected.at("villainBestResponseEv").get<float>(), 1e-5f);
+            EXPECT_NEAR(uniform.exploitability, expected.at("exploitability").get<float>(), 1e-5f);
+        }
         // An odd split exercises player alternation across continued runs.
         session.Run(101);
         session.Run(iterations - 101);
         EXPECT_EQ(session.CompletedIterations(), iterations);
-        checkpoint = session.EvaluateCheckpoint(false);
+        checkpoint = session.EvaluateCheckpoint();
         return std::move(session).ExportStrategy();
     }();
+    // CPU evaluation of the export cross-checks the training device's evaluation.
     const auto actual = engine::EvaluateExploitability(*problem, strategy);
     EXPECT_NEAR(checkpoint.player0BestResponseEv, actual.player0BestResponseEv, 1e-6f);
     EXPECT_NEAR(checkpoint.player1BestResponseEv, actual.player1BestResponseEv, 1e-6f);
     // Raked checkpoints also depend on each player's average-strategy value.
     EXPECT_NEAR(checkpoint.exploitability, actual.exploitability, 1e-6f);
-    const auto& expected = References().at(name).at("solved");
+    const auto& expected = reference.at("solved");
     ASSERT_TRUE(std::isfinite(actual.player0BestResponseEv));
     ASSERT_TRUE(std::isfinite(actual.player1BestResponseEv));
     ASSERT_TRUE(std::isfinite(actual.exploitability));
@@ -108,106 +112,37 @@ engine::StrategySnapshot FixedStrategy(const engine::SolveProblem& problem, cons
     }
     return engine::StrategySnapshot(problem.game, std::move(entries));
 }
-
-void ExpectNodesNear(
-    const engine::HandTraversalData& layout,
-    const std::vector<float>& expected,
-    const std::vector<float>& actual,
-    const char* label
-)
-{
-    ASSERT_EQ(expected.size(), layout.strategySize);
-    ASSERT_EQ(actual.size(), expected.size());
-    std::size_t mismatches = 0;
-    for (const auto& node : layout.nodes)
-    {
-        if (node.kind != engine::HandTraversalData::Kind::Decision)
-            continue;
-        // Low-reach nodes hold tiny entries, so scale by each node's largest CPU entry.
-        // Rounding stays below 1e-4 of that scale; update bugs move entries far more.
-        const auto end = node.strategyOffset + node.childCount * layout.tables.hands[node.actor].size();
-        float scale = 0.0f;
-        for (auto i = node.strategyOffset; i < end; ++i)
-            scale = std::max(scale, std::fabs(expected[i]));
-        for (auto i = node.strategyOffset; i < end; ++i)
-            if (!(std::fabs(actual[i] - expected[i]) <= 1e-3f * scale) && mismatches++ < 3)
-                ADD_FAILURE() << label << " at node " << node.id.Value() << " entry " << i - node.strategyOffset << ": CPU " << expected[i]
-                              << ", GPU " << actual[i] << ", node scale " << scale;
-    }
-    EXPECT_EQ(mismatches, 0u) << label;
-}
 } // namespace
 
-TEST(StrategyEvaluatorTest, UniformPolicyMatchesIndependentBestResponses)
+TEST(SolverReferenceTest, WeightedFlopCpu)
 {
-    const auto problem = Problem("weighted-flop");
-    const auto actual = engine::EvaluateExploitability(*problem, engine::StrategySnapshot(problem->game, {}));
-    const auto& expected = References().at("weighted-flop").at("uniform");
-    EXPECT_NEAR(actual.player0BestResponseEv, expected.at("heroBestResponseEv").get<float>(), 1e-5f);
-    EXPECT_NEAR(actual.player1BestResponseEv, expected.at("villainBestResponseEv").get<float>(), 1e-5f);
-    EXPECT_NEAR(actual.exploitability, expected.at("exploitability").get<float>(), 1e-5f);
-}
-
-TEST(SolverReferenceTest, WeightedFlopCpuOneWorker)
-{
-    CheckSolve("weighted-flop", engine::ComputeDevice::Cpu, 1);
-}
-
-TEST(SolverReferenceTest, WeightedFlopCpuFourWorkers)
-{
-    CheckSolve("weighted-flop", engine::ComputeDevice::Cpu, 4);
+    CheckSolve("weighted-flop", engine::ComputeDevice::Cpu);
 }
 
 TEST(SolverReferenceTest, WeightedFlopGpu)
 {
     if (!engine::GpuDcfrSession::Available())
         GTEST_SKIP() << "No supported CUDA GPU is available";
-    CheckSolve("weighted-flop", engine::ComputeDevice::Auto, 0);
+    CheckSolve("weighted-flop", engine::ComputeDevice::Auto);
 }
 
-TEST(SolverReferenceTest, RaiseFlopCpuOneWorker)
+TEST(SolverReferenceTest, RaiseFlopCpu)
 {
-    CheckSolve("raise-flop", engine::ComputeDevice::Cpu, 1);
-}
-
-TEST(SolverReferenceTest, RaiseFlopCpuFourWorkers)
-{
-    CheckSolve("raise-flop", engine::ComputeDevice::Cpu, 4);
+    CheckSolve("raise-flop", engine::ComputeDevice::Cpu);
 }
 
 TEST(SolverReferenceTest, RaiseFlopGpu)
 {
     if (!engine::GpuDcfrSession::Available())
         GTEST_SKIP() << "No supported CUDA GPU is available";
-    CheckSolve("raise-flop", engine::ComputeDevice::Auto, 0);
+    CheckSolve("raise-flop", engine::ComputeDevice::Auto);
 }
 
 TEST(BackendParityTest, GpuUpdatesMatchCpuFromSharedState)
 {
     if (!engine::GpuDcfrSession::Available())
         GTEST_SKIP() << "No supported CUDA GPU is available";
-    const auto problem = LoadProblem("backend-parity");
-    const engine::HandTraversalData layout(*problem, problem->game->Root());
-    engine::DcfrSession cpu(problem, engine::ComputeDevice::Cpu, 4);
-    engine::DcfrSession gpu(problem, engine::ComputeDevice::Gpu);
-    RecordProperty("device", gpu.DeviceName());
-    // Independent trajectories diverge at near-tied regrets, so every GPU update starts from the CPU state.
-    const int updates = Fixture("backend-parity").at("iterations").get<int>();
-    auto expected = cpu.ReadTrainingState();
-    for (int update = 0; update < updates; ++update)
-    {
-        SCOPED_TRACE("update " + std::to_string(update));
-        gpu.WriteTrainingState(expected);
-        cpu.Run(1);
-        gpu.Run(1);
-        expected = cpu.ReadTrainingState();
-        const auto reference = layout.Decode(expected);
-        const auto actual = layout.Decode(gpu.ReadTrainingState());
-        ExpectNodesNear(layout, reference.regrets, actual.regrets, "regrets");
-        ExpectNodesNear(layout, reference.strategySums, actual.strategySums, "strategy sums");
-        EXPECT_EQ(actual.stamps, reference.stamps) << "node stamps";
-        ASSERT_FALSE(HasFailure());
-    }
+    solver::test::CheckBackendParity("backend-parity");
 }
 
 TEST(AnalysisSessionTest, FixedPoliciesMatchIndependentNodeValuesAndReach)
