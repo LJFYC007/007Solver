@@ -25,7 +25,10 @@ enum BufferIndex : U32
     SumsBuffer,     // uint16 units in the same layout
     ScratchBuffer, // per slot one row of stride floats (a multiple of four): the opponent's reach entering its node, then the slot's values
     FlagsBuffer,   // per slot: whether the subtree carries opponent reach
-    StampsBuffer,  // two halves of stampCount node stamps, alternating by update parity
+    // Per slot: MaskWords(stride) words; bit j of word w is set when the reach row's hand pair 32 w + j holds stored
+    // values and clear when its lanes are stale, which readers take as +0 (see Reach).
+    MasksBuffer,
+    StampsBuffer, // two halves of stampCount node stamps, alternating by update parity
     StateBuffer,
     kBufferCount,
 };
@@ -45,6 +48,12 @@ enum : U32
     kTileGroup = 256,     // most threads per Reach or Backup hand tile, which their launch bounds and Reach's compaction assume
     kNoIndex = 0xffffffffu,
 };
+// Words of a scratch row's reach mask (MasksBuffer): one bit per hand pair of a row of the given
+// stride (State::stride), covering pairs 0 to stride / 2, the last the zero slot past the hands.
+GPU_TYPES_INLINE constexpr U32 MaskWords(U32 stride)
+{
+    return stride / 2 / kWarpSize + 1;
+}
 // Also the CPU traversal node kind. Fold, Showdown and ForcedRunout are leaves.
 enum class NodeKind : U32
 {

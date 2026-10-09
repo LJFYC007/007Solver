@@ -66,7 +66,7 @@ public:
             for (std::size_t i = 0; i < buffers_.size(); ++i)
                 Upload(i, sources[i]);
             PersistScratch(sources[ScratchBuffer].bytes);
-            for (const auto index : {RegretsBuffer, SumsBuffer, FlagsBuffer, StampsBuffer})
+            for (const auto index : {RegretsBuffer, SumsBuffer, FlagsBuffer, MasksBuffer, StampsBuffer})
                 Check(cudaMemsetAsync(buffers_[index], 0, sources[index].bytes, stream_));
             for (const auto& pass : plan.initialization)
                 Dispatch(pass, stream_);
@@ -357,6 +357,7 @@ private:
             static_cast<unsigned short*>(buffers_[SumsBuffer]),
             static_cast<float*>(buffers_[ScratchBuffer]),
             static_cast<U32*>(buffers_[FlagsBuffer]),
+            static_cast<U32*>(buffers_[MasksBuffer]),
             static_cast<U32*>(buffers_[StampsBuffer]),
             static_cast<const State*>(buffers_[StateBuffer]),
             pass

@@ -35,6 +35,7 @@ The [GPU plan](engine/gpu/GpuPlan.h) supports at most 16 actions per decision (`
 - Cross-stream predecessors derive from the slot intervals each pass reads and writes (`Plan::predecessors`), and CUDA captures them as graph edges. `Executor::Update` may return before the device finishes; `Synchronize`, downloads and root values wait.
 - When the kernels run code built for compute capability 9 or later, captured passes launch programmatically: a kernel's blocks may start before the previous pass in their stream finishes, so before `WaitForPredecessors` a kernel may read only the State and node records.
 - Threads move two adjacent hands at once. Scratch rows hold a lane past an odd hand count, which pair stores fill and every reader ignores; the padding units of the training state's rows stay zero.
+- A reach row's hand pairs without reach may hold stale scratch behind the row's mask (`MasksBuffer`, one bit per pair): the pass that writes a reach row writes its mask, and every reader of reach rows (Reach, Terminal's and Runout's staging) applies it. Value rows are complete wherever their flag is set.
 - The batching target keeps leaf lanes' reach and values mostly in the GPU's L2; it is not a memory limit. Street regions and retained ancestors can exceed it, and the whole tree's regrets and cumulative strategies stay resident. The training state streams through L2 once per update, so kernels load and store it only through `LoadStreamed`/`StoreStreamed` (evict-first), and scratch rows hold a persisting L2 window.
 
 ## Memory

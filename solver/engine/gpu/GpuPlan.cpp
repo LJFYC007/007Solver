@@ -408,8 +408,9 @@ Plan::Plan(const HandTraversalData& data) : entries(data.stateSize)
         }
         return ranges;
     };
-    // Per pass, the slots it writes and those it reads or writes (each slot's scratch row and
-    // flag), merged, from which cross-stream predecessors are derived once every pass exists.
+    // Per pass, the slots it writes and those it reads or writes (each slot's scratch row, mask
+    // words and flag), merged, from which cross-stream predecessors are derived once every pass
+    // exists.
     std::vector<Ranges> writes, touches;
     // Player p's updates launch items begin[p] to end[p] of a pass's list.
     using Items = std::array<U32, 2>;
@@ -802,6 +803,7 @@ std::array<BufferData, kBufferCount> Plan::Buffers() const
     buffers[SumsBuffer] = buffers[RegretsBuffer];
     buffers[ScratchBuffer] = {nullptr, slots * state.stride * sizeof(float)};
     buffers[FlagsBuffer] = {nullptr, slots * sizeof(U32)};
+    buffers[MasksBuffer] = {nullptr, slots * MaskWords(state.stride) * sizeof(U32)};
     buffers[StampsBuffer] = {nullptr, 2 * std::size_t(state.stampCount) * sizeof(U32)};
     buffers[StateBuffer] = {&state, sizeof(State)};
     return buffers;

@@ -2,9 +2,9 @@
 using namespace solver::engine::gpu;
 // Every kernel takes the buffers in BufferIndex order, the last holding the update's State, then
 // the pass by value.
-#define GPU_ARGUMENTS                                                                                                              \
-    const Node *nodes, const Hand *hands, const float *weights, const unsigned short *ranks, const int *runouts, const U32 *order, \
-        const U32 *cards, U32 *outcomes, short *regrets, unsigned short *sums, float *scratch, U32 *flags, U32 *stamps,            \
+#define GPU_ARGUMENTS                                                                                                               \
+    const Node *nodes, const Hand *hands, const float *weights, const unsigned short *ranks, const int *runouts, const U32 *order,  \
+        const U32 *cards, U32 *outcomes, short *regrets, unsigned short *sums, float *scratch, U32 *flags, U32 *masks, U32 *stamps, \
         const State *statePointer, Pass pass
 // numerator / divisor for regret matching's operands: quantized integers, the divisor at most
 // kMaxActions * 65535 < 2^21. For such normal operands CUDA's division fast path, a refined
@@ -82,6 +82,31 @@ __device__ __forceinline__ float4 StagedGroup(const float4* source, U32 group, U
 {
     const float4 r = valid > 0 ? source[group] : make_float4(0.0f, 0.0f, 0.0f, 0.0f);
     return make_float4(r.x, valid > 1 ? r.y : 0.0f, valid > 2 ? r.z : 0.0f, valid > 3 ? r.w : 0.0f);
+}
+
+// value when keep's low bit is set, else +0: a bitwise select, which keeps the value's load
+// unconditional instead of predicated on the mask's arrival.
+__device__ __forceinline__ float Keep(float value, U32 keep)
+{
+    return BitsFloat(FloatBits(value) & (0u - (keep & 1u)));
+}
+
+// LoadPair of a reach row's pair with the pair's mask bit in keep's low bit (see MasksBuffer): a
+// dead pair's stale lanes read as the +0 Reach stores for a live pair's zero hand.
+__device__ __forceinline__ float2 LoadMaskedPair(const float* row, U32 pair, U32 keep)
+{
+    const float2 loaded = LoadPair(row, pair);
+    return make_float2(Keep(loaded.x, keep), Keep(loaded.y, keep));
+}
+
+// StagedGroup of a reach row whose mask words are at mask (see MasksBuffer): a dead pair's stale
+// lanes read as +0.
+__device__ __forceinline__ float4 MaskedGroup(const float4* source, const U32* mask, U32 group, U32 valid)
+{
+    const float4 r = StagedGroup(source, group, valid);
+    // The bits of the group's pairs 2 group and 2 group + 1.
+    const U32 keep = mask[group / (kWarpSize / 2)] >> 2 * (group % (kWarpSize / 2));
+    return make_float4(Keep(r.x, keep), Keep(r.y, keep), Keep(r.z, keep >> 1), Keep(r.w, keep >> 1));
 }
 
 // Whether a staged group carries reach: a float is nonzero when its bits other than the sign
@@ -233,7 +258,7 @@ __device__ __forceinline__ void ReachNode(
 // 48 registers keep about 40 warps per SM resident without spilling; 40 registers spill and
 // lose 5%. Items tile their pass.lanes, two opponent hands per thread, like Backup; a tile
 // compacts its pairs carrying reach to its first threads, since zero-reach hands cluster and
-// only clear their children's rows.
+// need only their children's mask bits.
 __global__ void __launch_bounds__(kTileGroup, 5) Reach(GPU_ARGUMENTS)
 {
     const State state = *statePointer;
@@ -249,7 +274,12 @@ __global__ void __launch_bounds__(kTileGroup, 5) Reach(GPU_ARGUMENTS)
     const U32 h = 2 * lane;
     const bool inside = h < count;
     const U32 pair = h + 1 < count ? 1u : 0u;
-    const float* source = scratch + U64(p ? n.reachSlot[1] : n.reachSlot[0]) * state.stride + h;
+    // The lane's pair is bit warpLane of mask word `word` of a row (see MasksBuffer); the source
+    // row's word loads beside the pair.
+    const U32 maskWords = MaskWords(state.stride), word = lane / kWarpSize, warpLane = local % kWarpSize;
+    const U32 sourceSlot = p ? n.reachSlot[1] : n.reachSlot[0];
+    const float* source = scratch + U64(sourceSlot) * state.stride + h;
+    const U32* sourceMask = masks + U64(sourceSlot) * maskWords + word;
     float value0 = 0.0f, value1 = 0.0f;
     if (inside)
     {
@@ -266,7 +296,7 @@ __global__ void __launch_bounds__(kTileGroup, 5) Reach(GPU_ARGUMENTS)
             // card and the outcome probability to the chance parent's reach. The pair's cards
             // share one word (see CardPairs); without a pair the second value is the zero
             // LoadPair supplies.
-            const float2 entering = LoadPair(source, pair);
+            const float2 entering = LoadMaskedPair(source, pair, *sourceMask >> warpLane);
             const U32 held = cards[CardPairs(state, p) + h / 2];
             value0 = HandBlocked(n.board, held) ? 0.0f : entering.x * n.foldUtility[0];
             value1 = HandBlocked(n.board, held >> 16) ? 0.0f : entering.y * n.foldUtility[0];
@@ -274,7 +304,7 @@ __global__ void __launch_bounds__(kTileGroup, 5) Reach(GPU_ARGUMENTS)
         else
         {
             // The opponent's deeper decisions propagate its reach.
-            const float2 entering = LoadPair(source, pair);
+            const float2 entering = LoadMaskedPair(source, pair, *sourceMask >> warpLane);
             value0 = entering.x;
             value1 = entering.y;
         }
@@ -282,28 +312,28 @@ __global__ void __launch_bounds__(kTileGroup, 5) Reach(GPU_ARGUMENTS)
     if (Kind(n.info) != NodeKind::Decision || Actor(n.info) != p)
     {
         // A region root other than the opponent's decision stores the opponent's reach entering
-        // it for its descendants; an opponent decision's children receive their own rows.
+        // it for its descendants, every hand's, under an all-ones mask; an opponent decision's
+        // children receive their own rows.
         if (inside)
             StorePair(scratch + U64(n.slot) * state.stride + h, value0, value1);
+        if (warpLane == 0 && word < maskWords)
+            masks[U64(n.slot) * maskWords + word] = 0xffffffffu;
         return;
     }
     const U32 actions = Count(n.info);
-    // Pairs without reach clear their children's rows; the others move, in order, to the tile's
-    // first threads: each warp counts its live pairs, which follow those of the warps before it.
+    // Pairs without reach leave their children's rows stale behind the rows' masks, each warp's
+    // ballot stored to one child row per lane; the others move, in order, to the tile's first
+    // threads: each warp counts its live pairs, which follow those of the warps before it.
     __shared__ U32 warpLive[kTileGroup / kWarpSize];
     __shared__ U32 livePairs[kTileGroup];
     __shared__ float2 liveValues[kTileGroup];
     const bool live = inside && (value0 != 0.0f || value1 != 0.0f);
-    const U32 warp = local / kWarpSize, warpLane = local % kWarpSize, ballot = __ballot_sync(0xffffffffu, live);
+    const U32 warp = local / kWarpSize, ballot = __ballot_sync(0xffffffffu, live);
     if (warpLane == 0)
         warpLive[warp] = __popc(ballot);
-    if (inside && !live)
-    {
-        float* child = scratch + U64(n.link) * state.stride + h;
-#pragma unroll 1
-        for (U32 a = 0; a < actions; ++a, child += state.stride)
-            StorePair(child, 0.0f, 0.0f);
-    }
+    static_assert(kMaxActions <= kWarpSize);
+    if (warpLane < actions && word < maskWords)
+        masks[U64(n.link + warpLane) * maskWords + word] = ballot;
     __syncthreads();
     // Lane w holds warp w's count.
     const U32 counted = warpLane < blockDim.x / kWarpSize ? warpLive[warpLane] : 0u;
@@ -415,38 +445,98 @@ __device__ __forceinline__ void ScanSegments(U32 rankCount, const uint2* tokens,
     StoreRun<0, 4 * Groups>(U32(__cvta_generic_to_shared(sums + bounds.begin)), x, carried, length);
 }
 
-// ScanSegments for segments of any length: sums pass through shared memory. Each kChunk groups
-// load before any of their sums, so their latencies overlap; groups past the segment's end add +0, as
-// its last group's ranks past the end do.
-__device__ __forceinline__ void ScanSegmentsLong(U32 rankCount, const uint2* tokens, U32 lane, const unsigned char* staged, float* sums)
+// ScanSegments's path for segments of any length, over groups first to last of the lane's
+// segment of length ranks: sums pass through shared memory, each rank's running sum from the
+// first group to out, and the groups' total returns. Each kChunk groups load before any of their
+// sums, so their latencies overlap; groups past the last add +0, as a group's ranks past the
+// segment's end do.
+__device__ __forceinline__ float ScanGroups(
+    U32 first,
+    U32 last,
+    U32 length,
+    const uint2* tokens,
+    U32 lane,
+    const unsigned char* staged,
+    float* out
+)
 {
     constexpr U32 kChunk = 4;
-    const Segment bounds = LaneSegment(rankCount, lane);
-    const U32 length = bounds.end - bounds.begin, groups = (length + 3) / 4;
-    float* out = sums + bounds.begin;
+    // Stores stop at the range's ranks: a chunk past last would store its unchanged sum into the
+    // ranks of another warp's range.
+    const U32 limit = 4 * last < length ? 4 * last : length;
     float sum = 0.0f;
-    for (U32 first = 0; first < groups; first += kChunk)
+    for (; first < last; first += kChunk)
     {
         float x[4 * kChunk];
 #pragma unroll
         for (U32 g = 0; g < kChunk; ++g)
         {
             U32 offsets[4];
-            Unpack(first + g < groups ? tokens[(first + g) * kWarpSize + lane] : make_uint2(0u, 0u), offsets);
+            Unpack(first + g < last ? tokens[(first + g) * kWarpSize + lane] : make_uint2(0u, 0u), offsets);
 #pragma unroll
             for (U32 c = 0; c < 4; ++c)
-                x[4 * g + c] = first + g < groups ? Staged(staged, offsets[c]) : 0.0f;
+                x[4 * g + c] = first + g < last ? Staged(staged, offsets[c]) : 0.0f;
         }
 #pragma unroll
         for (U32 j = 0; j < 4 * kChunk; ++j)
         {
             sum += x[j];
-            if (4 * first + j < length)
+            if (4 * first + j < limit)
                 out[4 * first + j] = sum;
         }
     }
-    const float carried = WarpBefore(sum, lane);
+    return sum;
+}
+
+__device__ __forceinline__ void ScanSegmentsLong(U32 rankCount, const uint2* tokens, U32 lane, const unsigned char* staged, float* sums)
+{
+    const Segment bounds = LaneSegment(rankCount, lane);
+    const U32 length = bounds.end - bounds.begin;
+    float* out = sums + bounds.begin;
+    const float carried = WarpBefore(ScanGroups(0, (length + 3) / 4, length, tokens, lane, staged, out), lane);
     for (U32 j = 0; j < length; ++j)
+        out[j] += carried;
+}
+
+// A barrier of Threads threads, whole warps, on named barrier Barrier (0 is __syncthreads's): the
+// warps sharing a doubled Terminal block's scan or its runs meet on one while the block's other
+// warps go on.
+template<U32 Barrier, U32 Threads>
+__device__ __forceinline__ void NamedBarrier()
+{
+    static_assert(Barrier != 0 && Threads % kWarpSize == 0);
+    __syncwarp();
+    asm volatile("bar.sync %0, %1;" ::"n"(Barrier), "n"(Threads) : "memory");
+}
+
+// ScanSegmentsLong shared by two warps: each lane of warp half 0 scans the first half of its
+// segment's groups and the same lane of half 1 the rest, each from zero. The halves' totals, their
+// last running sums, pass through the prefix itself over the warps' barrier; then both add the
+// segments before theirs and the second half its first half's total. The summation order differs
+// from one warp's, as that differs from the CPU's sequential prefix.
+__device__ __forceinline__ void ScanSegmentsSplit(
+    U32 rankCount,
+    const uint2* tokens,
+    U32 lane,
+    U32 half,
+    const unsigned char* staged,
+    float* sums
+)
+{
+    const Segment bounds = LaneSegment(rankCount, lane);
+    const U32 length = bounds.end - bounds.begin, groups = (length + 3) / 4, middle = (groups + 1) / 2;
+    // The first half's ranks.
+    const U32 split = 4 * middle < length ? 4 * middle : length;
+    float* out = sums + bounds.begin;
+    const float sum = ScanGroups(half ? middle : 0, half ? groups : middle, length, tokens, lane, staged, out);
+    NamedBarrier<1, 2 * kWarpSize>();
+    // An empty half's total is zero, not a stale slot's.
+    const float first = half ? (split ? out[split - 1] : 0.0f) : sum;
+    const float second = half ? sum : (length > split ? out[length - 1] : 0.0f);
+    // Both halves have read the other's total before either adds its carry in place.
+    NamedBarrier<1, 2 * kWarpSize>();
+    const float carried = WarpBefore(first + second, lane) + (half ? first : 0.0f);
+    for (U32 j = half ? split : 0, end = half ? length : split; j < end; ++j)
         out[j] += carried;
 }
 
@@ -465,16 +555,26 @@ __device__ __forceinline__ void TerminalScan(U32 rankCount, const uint2* tokens,
 
 // Stages the opponent's reach row of slot row into reach, one float4 group per thread of the
 // block's threads (rows and their staged copies are padded to whole groups, see TerminalLayout),
-// and returns whether it carries reach. A terminal without opponent reach leaves its values
-// stale, and Backup substitutes zero from its flag.
-__device__ __forceinline__ bool StageReach(State state, U32 row, U32 local, U32 threads, const float* scratch, float* reach)
+// and returns whether it carries reach. The row's mask words (see MasksBuffer) load beside its
+// groups. A terminal without opponent reach leaves its values stale, and Backup substitutes zero
+// from its flag.
+__device__ __forceinline__ bool StageReach(
+    State state,
+    U32 row,
+    U32 local,
+    U32 threads,
+    const float* scratch,
+    const U32* masks,
+    float* reach
+)
 {
     const U32 opponentCount = state.player ? state.hands[0] : state.hands[1];
     const float4* source = (const float4*)(scratch + U64(row) * state.stride);
+    const U32* mask = masks + U64(row) * MaskWords(state.stride);
     bool nonzero = false;
     for (U32 group = local; 4 * group <= opponentCount; group += threads)
     {
-        const float4 r = StagedGroup(source, group, opponentCount - 4 * group);
+        const float4 r = MaskedGroup(source, mask, group, opponentCount - 4 * group);
         ((float4*)reach)[group] = r;
         nonzero |= AnyReach(r);
     }
@@ -484,17 +584,29 @@ __device__ __forceinline__ bool StageReach(State state, U32 row, U32 local, U32 
 // StageReach for a fold's own row, into foldReach, together with its showdown sibling's row,
 // into reach, so their loads overlap; returns whether each carries reach: bit 0 the fold's,
 // bit 1 the showdown's.
-__device__ __forceinline__ U32
-StageRows(State state, U32 foldRow, U32 showdownRow, U32 local, U32 threads, const float* scratch, float* reach, float* foldReach)
+__device__ __forceinline__ U32 StageRows(
+    State state,
+    U32 foldRow,
+    U32 showdownRow,
+    U32 local,
+    U32 threads,
+    const float* scratch,
+    const U32* masks,
+    float* reach,
+    float* foldReach
+)
 {
     const U32 opponentCount = state.player ? state.hands[0] : state.hands[1];
     const float4* foldSource = (const float4*)(scratch + U64(foldRow) * state.stride);
     const float4* source = (const float4*)(scratch + U64(showdownRow) * state.stride);
+    const U32 maskWords = MaskWords(state.stride);
+    const U32* foldMask = masks + U64(foldRow) * maskWords;
+    const U32* mask = masks + U64(showdownRow) * maskWords;
     bool fold = false, showdown = false;
     for (U32 group = local; 4 * group <= opponentCount; group += threads)
     {
-        const float4 f = StagedGroup(foldSource, group, opponentCount - 4 * group);
-        const float4 r = StagedGroup(source, group, opponentCount - 4 * group);
+        const float4 f = MaskedGroup(foldSource, foldMask, group, opponentCount - 4 * group);
+        const float4 r = MaskedGroup(source, mask, group, opponentCount - 4 * group);
         ((float4*)foldReach)[group] = f;
         ((float4*)reach)[group] = r;
         fold |= AnyReach(f);
@@ -511,12 +623,17 @@ StageRows(State state, U32 foldRow, U32 showdownRow, U32 local, U32 threads, con
 // offset zero) for the others, so a group's loads touch only the sectors of the lanes it reaches.
 // The run's total goes to totals[card] and, with Fold, the holders' mass in a fold sibling's own
 // row, staged at foldStaged, to masses[1 + card], and the zero the hand loop reads for no holders
-// before the run; a lane without a card stores none of them.
-template<bool Fold, U32 MaxGroups>
+// before the run; a lane without a card stores none of them. With Split, two warps share the
+// runs, half 0 taking each run's groups up to its middle one and half 1 those from it: the
+// second half sums from zero until, over the warps' barrier, it adds the first half's total, the
+// entry before its own, and completes the run's total and mass (a run of one group lies in the
+// first half alone). groups then bounds the half's groups.
+template<bool Fold, bool Split, U32 MaxGroups>
 __device__ __forceinline__ void BlockerRun(
     U32 groups,
     U32 zero,
     U32 lane,
+    U32 half,
     const uint2* tokens,
     const unsigned char* staged,
     const unsigned char* foldStaged,
@@ -526,7 +643,17 @@ __device__ __forceinline__ void BlockerRun(
 )
 {
     const U32 length = (lane >> 16) & 0xffu;
-    float* run = (float*)((unsigned char*)runs + (lane & 0xffffu));
+    // The lane's entries: count from the run's entry skip.
+    U32 skip = 0, count = length;
+    if constexpr (Split)
+    {
+        // The first half: the run's first (groups + 1) / 2 groups of four.
+        const U32 middle = 4 * ((length + 7) / 8), first = middle < length ? middle : length;
+        skip = half ? first : 0;
+        count = half ? length - first : first;
+    }
+    float* run = (float*)((unsigned char*)runs + (lane & 0xffffu)) + skip;
+    tokens += (skip / 4) * 2 * kWarpSize;
     float sum = 0.0f, foldMass = 0.0f;
     // Up to MaxGroups the groups' tokens load together before any sum; each group runs behind a
     // uniform test.
@@ -536,7 +663,7 @@ __device__ __forceinline__ void BlockerRun(
     {
 #pragma unroll
         for (U32 g = 0; g < MaxGroups; ++g)
-            loaded[g] = length > 4 * g ? tokens[g * 2 * kWarpSize] : zeros;
+            loaded[g] = count > 4 * g ? tokens[g * 2 * kWarpSize] : zeros;
     }
     // Holders past the run point at the staged rows' zero slot: their +0 leaves the sums.
 #pragma unroll
@@ -545,32 +672,48 @@ __device__ __forceinline__ void BlockerRun(
         if (g >= groups)
             break;
         U32 offsets[4];
-        Unpack(MaxGroups ? loaded[g] : length > 4 * g ? tokens[g * 2 * kWarpSize] : zeros, offsets);
+        Unpack(MaxGroups ? loaded[g] : count > 4 * g ? tokens[g * 2 * kWarpSize] : zeros, offsets);
 #pragma unroll
         for (U32 c = 0; c < 4; ++c)
         {
             sum += Staged(staged, offsets[c]);
             if (Fold)
                 foldMass += Staged(foldStaged, offsets[c]);
-            if (length > 4 * g + c)
+            if (count > 4 * g + c)
                 run[4 * g + c] = sum;
         }
     }
-    if ((lane >> 24) != 0xffu)
+    const U32 card = lane >> 24;
+    if (card != 0xffu && (!Split || half == 0))
     {
         // Past the run, sum only added +0, so it is the run's last entry (+0 for no holders).
-        totals[lane >> 24] = sum;
+        totals[card] = sum;
         if (Fold)
-            masses[1 + (lane >> 24)] = foldMass;
+            masses[1 + card] = foldMass;
         run[-1] = 0.0f;
+    }
+    if constexpr (Split)
+    {
+        NamedBarrier<2, 4 * kWarpSize>();
+        // A lane without a card has no entries.
+        if (half && count)
+        {
+            const float carried = run[-1];
+            for (U32 j = 0; j < count; ++j)
+                run[j] += carried;
+            totals[card] = carried + sum;
+            if (Fold)
+                masses[1 + card] += foldMass;
+        }
     }
 }
 
-template<bool Fold>
+template<bool Fold, bool Split>
 __device__ __forceinline__ void BlockerRuns(
     U32 groups,
     U32 zero,
     U32 lane,
+    U32 half,
     const uint2* tokens,
     const unsigned char* staged,
     const unsigned char* foldStaged,
@@ -579,10 +722,13 @@ __device__ __forceinline__ void BlockerRuns(
     float* totals
 )
 {
+    // A half's groups: the first (groups + 1) / 2 of the warp's, or the last groups / 2.
+    if constexpr (Split)
+        groups = half ? groups / 2 : (groups + 1) / 2;
     if (groups <= 6)
-        BlockerRun<Fold, 6>(groups, zero, lane, tokens, staged, foldStaged, runs, masses, totals);
+        BlockerRun<Fold, Split, 6>(groups, zero, lane, half, tokens, staged, foldStaged, runs, masses, totals);
     else
-        BlockerRun<Fold, 0>(groups, zero, lane, tokens, staged, foldStaged, runs, masses, totals);
+        BlockerRun<Fold, Split, 0>(groups, zero, lane, half, tokens, staged, foldStaged, runs, masses, totals);
 }
 
 // A fold's total opponent mass from the staged reach, summed by one warp.
@@ -808,11 +954,13 @@ __device__ __forceinline__ void BackupLeafPair(
 }
 
 // Showdowns (see Kernel), in blocks of Group threads, kTerminalGroup or, where shared memory
-// limits resident blocks, a multiple (see CudaExecutor's TerminalInstance). Registers are capped
+// limits resident blocks, twice that (see CudaExecutor's TerminalInstance). Registers are capped
 // so 48 warps stay resident per SM. The first warp scans a showdown and the second sums a fold
 // sibling's row while the next two build its blocker runs, one card per lane of its section's
 // 2 * kWarpSize-entry lane table (see BuildSection in GpuPlan.cpp); all take part in the staging
-// and the hand loop.
+// and the hand loop. A doubled block's warps 4, 6 and 7 take the second halves of the scan's
+// segments and of the runs (see ScanSegmentsSplit and BlockerRun), meeting their first halves'
+// warps on named barriers; its warp 5 idles until the hand loop.
 static_assert(kTerminalGroup == 4 * kWarpSize);
 // Averaging instances serve strategy-value evaluation (see Evaluation): acting parents back up by
 // their average strategy. Separate instances keep that path out of the training kernels' code,
@@ -820,7 +968,7 @@ static_assert(kTerminalGroup == 4 * kWarpSize);
 template<bool Averaging, U32 Group>
 __global__ void __launch_bounds__(Group, 12 * kTerminalGroup / Group) Terminal(GPU_ARGUMENTS)
 {
-    static_assert(Group % kTerminalGroup == 0);
+    static_assert(Group == kTerminalGroup || Group == 2 * kTerminalGroup);
     const State state = *statePointer;
     const U32 item = blockIdx.x, local = threadIdx.x;
     const U32 p = state.player, opponent = 1 - p;
@@ -875,7 +1023,7 @@ __global__ void __launch_bounds__(Group, 12 * kTerminalGroup / Group) Terminal(G
         // The fold's own row, propagated by Reach, stages with the showdown's row; the hand
         // loop below takes the fold's values from its masses, which a live showdown's second
         // warp and blocker runs sum along.
-        const U32 any = StageRows(state, n.fold, reachSlot, local, Group, scratch, reach, foldReach);
+        const U32 any = StageRows(state, n.fold, reachSlot, local, Group, scratch, masks, reach, foldReach);
         liveFold = (any & 1u) != 0;
         live = (any & 2u) != 0;
         if (liveFold && !live)
@@ -883,7 +1031,7 @@ __global__ void __launch_bounds__(Group, 12 * kTerminalGroup / Group) Terminal(G
     }
     else
     {
-        live = StageReach(state, reachSlot, local, Group, scratch, reach);
+        live = StageReach(state, reachSlot, local, Group, scratch, masks, reach);
         liveFold = ownFold && live;
     }
     const bool liveParent = live || liveFold, foldFromRow = liveFold && !ownFold;
@@ -916,14 +1064,21 @@ __global__ void __launch_bounds__(Group, 12 * kTerminalGroup / Group) Terminal(G
         const uint4* section =
             (const uint4*)(order + U64(row) * state.orderPitch + (opponent ? state.orderSection : OrderEntryWords(state)));
         // The first warp scans the reach in rank order; the second sums a fold sibling's own row.
-        if (warp == 0)
-            TerminalScan(legal, (const uint2*)(section + 1), lane, staged, prefix);
-        else if (warp == 1)
+        constexpr bool split = Group != kTerminalGroup;
+        const U32 role = split ? warp % (kTerminalGroup / kWarpSize) : warp, half = split ? warp / (kTerminalGroup / kWarpSize) : 0u;
+        if (role == 0)
         {
-            if (foldFromRow)
+            if (split)
+                ScanSegmentsSplit(legal, (const uint2*)(section + 1), lane, half, staged, prefix);
+            else
+                TerminalScan(legal, (const uint2*)(section + 1), lane, staged, prefix);
+        }
+        else if (role == 1)
+        {
+            if (half == 0 && foldFromRow)
                 FoldTotal(opponentCount, lane, foldReach, foldMasses);
         }
-        else if (Group == kTerminalGroup || warp < kTerminalGroup / kWarpSize)
+        else
         {
             // Showdowns accumulate each card's blocked reach in rank order once per node, as the
             // CPU evaluator's per-card masses do, instead of rescanning blockers per hand. The
@@ -932,16 +1087,18 @@ __global__ void __launch_bounds__(Group, 12 * kTerminalGroup / Group) Terminal(G
             // The lane table's place follows from the rank count, so its entries load with the
             // header; a lane's run length predicates its token loads.
             const uint4 header = section[0];
-            const U32 runLane = local - 2 * kWarpSize;
+            const U32 runLane = local % kTerminalGroup - 2 * kWarpSize;
             const uint4* table = section + SectionLaneTable(legal);
             const U32 laneRun = ((const U32*)table)[runLane];
-            const U32 groups = warp == 2 ? header.x & 0xffu : (header.x >> 8) & 0xffu;
+            const U32 groups = role == 2 ? header.x & 0xffu : (header.x >> 8) & 0xffu;
             const uint2* tokens = (const uint2*)(table + 16) + runLane;
             const U32 zero = U32(sizeof(float)) * opponentCount;
             if (foldFromRow)
-                BlockerRuns<true>(groups, zero, laneRun, tokens, staged, (const unsigned char*)foldReach, blockers, foldMasses, totals);
+                BlockerRuns<true, split>(
+                    groups, zero, laneRun, half, tokens, staged, (const unsigned char*)foldReach, blockers, foldMasses, totals
+                );
             else
-                BlockerRuns<false>(groups, zero, laneRun, tokens, staged, staged, blockers, foldMasses, totals);
+                BlockerRuns<false, split>(groups, zero, laneRun, half, tokens, staged, staged, blockers, foldMasses, totals);
         }
     }
     __syncthreads();
@@ -1132,7 +1289,7 @@ __global__ void __launch_bounds__(kRunoutGroup) Runout(GPU_ARGUMENTS)
     WaitForPredecessors();
     extern __shared__ __align__(16) float reach[];
     float* masses = reach + TerminalLayout::Padded(opponentCount + 1);
-    const bool live = StageReach(state, p ? n.reachSlot[0] : n.reachSlot[1], local, threads, scratch, reach);
+    const bool live = StageReach(state, p ? n.reachSlot[0] : n.reachSlot[1], local, threads, scratch, masks, reach);
     if (local == 0)
         flags[n.slot] = live ? 1u : 0u;
     if (!live)
