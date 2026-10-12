@@ -5,9 +5,10 @@ use serde_json::Value;
 use std::{
     collections::HashMap,
     io::{self, BufRead, BufReader, Write},
+    iter, mem,
     os::windows::process::CommandExt,
     process::{Child, ChildStdout, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{mpsc, Arc, Mutex},
     thread,
 };
 use tokio::sync::{oneshot, Semaphore};
@@ -16,35 +17,55 @@ type PendingResponse = oneshot::Sender<Result<Value, String>>;
 
 // Keeps the console service from opening a window.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-// Keeps unanswered requests well inside the service's stdin pipe buffer, so a query never
-// blocks writing while it holds the lock the output reader needs.
-const MAX_PENDING_QUERIES: usize = 32;
 
-struct BridgeState {
-    child: Option<Child>,
+// One solve's service and requests.
+struct Solution {
+    service: Option<Service>,
     generation: u64,
-    next_request_id: u64,
     pending: HashMap<u64, PendingResponse>,
     status: SolverStatus,
 }
 
-// Owns one solve at a time: the desktop app has one bridge, the web server one per page session.
+// A running service process and the request lines for its stdin writer; see `spawn_service`.
+struct Service {
+    child: Child,
+    requests: mpsc::Sender<Vec<u8>>,
+}
+
+struct BridgeState {
+    current: Solution,
+    // A ready solution that keeps answering queries while the current one solves; see `start`.
+    reference: Option<Solution>,
+    last_generation: u64,
+    next_request_id: u64,
+}
+
+// Owns one solve at a time and optionally a reference solution: the desktop app has one bridge,
+// the web server one per page session.
 #[derive(Clone)]
 pub(crate) struct SolverBridge(Arc<Mutex<BridgeState>>);
 
 impl Default for SolverBridge {
     fn default() -> Self {
         Self(Arc::new(Mutex::new(BridgeState {
-            child: None,
-            generation: 0,
+            current: Solution::new(0),
+            reference: None,
+            last_generation: 0,
             next_request_id: 1,
-            pending: HashMap::new(),
-            status: SolverStatus::Idle,
         })))
     }
 }
 
-impl BridgeState {
+impl Solution {
+    fn new(generation: u64) -> Self {
+        Self {
+            service: None,
+            generation,
+            pending: HashMap::new(),
+            status: SolverStatus::Idle,
+        }
+    }
+
     fn fail(&mut self, message: String) {
         self.status = SolverStatus::Failed {
             message: message.clone(),
@@ -53,44 +74,97 @@ impl BridgeState {
             let _ = sender.send(Err(message.clone()));
         }
     }
+}
 
-    fn stop(&mut self) {
-        self.generation += 1;
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-        }
+// Dropping a solution stops its service, whose output reader then finds no solution of its
+// generation.
+impl Drop for Solution {
+    fn drop(&mut self) {
         for (_, sender) in self.pending.drain() {
             let _ = sender.send(Err("The selected solution changed".to_owned()));
         }
-        self.status = SolverStatus::Idle;
+    }
+}
+
+impl Drop for Service {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+    }
+}
+
+impl BridgeState {
+    // Takes the current solution, leaving an idle one of a new generation.
+    fn take_current(&mut self) -> Solution {
+        self.last_generation += 1;
+        mem::replace(&mut self.current, Solution::new(self.last_generation))
+    }
+
+    fn solution(&mut self, generation: u64) -> Option<&mut Solution> {
+        if self.current.generation == generation {
+            Some(&mut self.current)
+        } else {
+            self.reference
+                .as_mut()
+                .filter(|reference| reference.generation == generation)
+        }
+    }
+
+    fn ready(&mut self, generation: u64) -> Option<&mut Solution> {
+        self.solution(generation)
+            .filter(|solution| matches!(solution.status, SolverStatus::Ready(_)))
     }
 }
 
 impl SolverBridge {
     pub(crate) fn status(&self) -> SolverStatus {
-        self.0.lock().unwrap().status.clone()
+        self.0.lock().unwrap().current.status.clone()
     }
 
-    // Replaces the current solve. With a GPU queue, the service starts once it holds the
-    // queue's permit and keeps it until its solve is ready or the service exits.
+    // Replaces the current solve, keeping the ready solution of a `reference` generation
+    // queryable (solver/ARCHITECTURE.md "Service and desktop lifecycle"). With a GPU queue, the
+    // service starts once it holds the queue's permit and keeps it until its solve is ready or the
+    // service exits.
     pub(crate) fn start(
         &self,
         scenario: &Value,
         gpu: Option<Arc<Semaphore>>,
+        reference: Option<u64>,
     ) -> Result<u64, String> {
         let mut request = serde_json::to_vec(scenario).map_err(|error| error.to_string())?;
         request.push(b'\n');
         let mut state = self.0.lock().unwrap();
-        state.stop();
-        state.status = SolverStatus::Starting;
-        let generation = state.generation;
+        if reference.is_some_and(|generation| state.ready(generation).is_none()) {
+            return Err("The GTO solution is no longer available; solve again".to_owned());
+        }
+        let previous = state.take_current();
+        if reference.is_none() {
+            state.reference = None;
+        } else if reference == Some(previous.generation) {
+            state.reference = Some(previous);
+        }
+        state.current.status = SolverStatus::Starting;
+        let generation = state.current.generation;
         let bridge = self.0.clone();
-        thread::spawn(move || run_service(&bridge, generation, &request, gpu));
+        thread::spawn(move || run_service(&bridge, generation, request, gpu));
         Ok(generation)
     }
 
+    // Stops the current solve and makes the reference current again under its generation, returning
+    // its status.
+    pub(crate) fn restore_reference(&self) -> Result<SolverStatus, String> {
+        let mut state = self.0.lock().unwrap();
+        state.current = state
+            .reference
+            .take()
+            .ok_or("There is no reference solution to restore")?;
+        Ok(state.current.status.clone())
+    }
+
+    // Stops the current solve and drops the reference.
     pub(crate) fn stop(&self) {
-        self.0.lock().unwrap().stop();
+        let mut state = self.0.lock().unwrap();
+        state.reference = None;
+        drop(state.take_current());
     }
 
     pub(crate) async fn query(
@@ -101,25 +175,20 @@ impl SolverBridge {
     ) -> Result<Value, String> {
         let receiver = {
             let mut state = self.0.lock().unwrap();
-            if state.generation != generation || !matches!(state.status, SolverStatus::Ready(_)) {
-                return Err("The selected solution is not ready".to_owned());
-            }
-            if state.pending.len() >= MAX_PENDING_QUERIES {
-                return Err("Too many solver requests are in progress".to_owned());
-            }
             let request_id = state.next_request_id;
             state.next_request_id += 1;
+            let solution = state
+                .ready(generation)
+                .ok_or("The selected solution is not ready")?;
             let mut request = encode_query(request_id, node_id, kind)?;
             request.push(b'\n');
             let (sender, receiver) = oneshot::channel();
-            state
-                .child
-                .as_mut()
-                .and_then(|child| child.stdin.as_mut())
-                .ok_or("Solver service is not running")?
-                .write_all(&request)
-                .map_err(|error| error.to_string())?;
-            state.pending.insert(request_id, sender);
+            solution
+                .service
+                .as_ref()
+                .and_then(|service| service.requests.send(request).ok())
+                .ok_or("Solver service is not running")?;
+            solution.pending.insert(request_id, sender);
             receiver
         };
         receiver
@@ -128,25 +197,25 @@ impl SolverBridge {
     }
 }
 
-fn handle_protocol_message(state: &mut BridgeState, line: &[u8]) {
+fn handle_protocol_message(solution: &mut Solution, line: &[u8]) {
     let message = match parse_service_message(line) {
         Ok(message) => message,
         Err(error) => {
-            state.fail(error);
+            solution.fail(error);
             return;
         }
     };
     match message {
         ServiceMessage::Event(event) => match event {
             ServiceEvent::BuildingTree(progress) => {
-                state.status = SolverStatus::BuildingTree(progress)
+                solution.status = SolverStatus::BuildingTree(progress)
             }
-            ServiceEvent::Solving(progress) => state.status = SolverStatus::Solving(progress),
-            ServiceEvent::Ready(solution) => state.status = SolverStatus::Ready(solution),
-            ServiceEvent::Failed { message } => state.fail(message),
+            ServiceEvent::Solving(progress) => solution.status = SolverStatus::Solving(progress),
+            ServiceEvent::Ready(ready) => solution.status = SolverStatus::Ready(ready),
+            ServiceEvent::Failed { message } => solution.fail(message),
         },
         ServiceMessage::Response(response) => {
-            if let Some(sender) = state.pending.remove(&response.request_id) {
+            if let Some(sender) = solution.pending.remove(&response.request_id) {
                 let result = if response.ok {
                     let mut report = response.report.into_values();
                     match (report.next(), report.next()) {
@@ -164,11 +233,12 @@ fn handle_protocol_message(state: &mut BridgeState, line: &[u8]) {
     }
 }
 
-// Runs one solve's service and routes its messages until it exits or the solve is replaced.
+// Runs one solve's service and routes its messages to the solution of its generation, current
+// or reference, until the service exits or the solution is dropped.
 fn run_service(
     bridge: &Mutex<BridgeState>,
     generation: u64,
-    request: &[u8],
+    request: Vec<u8>,
     gpu: Option<Arc<Semaphore>>,
 ) {
     let mut permit = None;
@@ -176,65 +246,86 @@ fn run_service(
         permit = gpu.clone().try_acquire_owned().ok();
         if permit.is_none() {
             let mut state = bridge.lock().unwrap();
-            if state.generation != generation {
+            let Some(solution) = state.solution(generation) else {
                 return;
-            }
-            state.status = SolverStatus::Queued;
+            };
+            solution.status = SolverStatus::Queued;
             drop(state);
             permit = tauri::async_runtime::block_on(gpu.acquire_owned()).ok();
         }
     }
+    {
+        let mut state = bridge.lock().unwrap();
+        let Some(solution) = state.solution(generation) else {
+            return;
+        };
+        solution.status = SolverStatus::Starting;
+    }
+    // Starting a process happens without the lock, which status requests and the reference's
+    // queries need.
+    let spawned = spawn_service(request);
     let stdout = {
         let mut state = bridge.lock().unwrap();
-        if state.generation != generation {
+        // Dropping the service of a dropped solution stops it.
+        let Some(solution) = state.solution(generation) else {
             return;
-        }
-        state.status = SolverStatus::Starting;
-        match spawn_service(request) {
-            Ok((child, stdout)) => {
-                state.child = Some(child);
+        };
+        match spawned {
+            Ok((service, stdout)) => {
+                solution.service = Some(service);
                 stdout
             }
             Err(error) => {
-                state.fail(error.to_string());
+                solution.fail(error.to_string());
                 return;
             }
         }
     };
     let mut reader = BufReader::new(stdout);
     let mut line = Vec::new();
-    let child = loop {
+    let mut service = loop {
         line.clear();
         let read = reader.read_until(b'\n', &mut line);
         let mut state = bridge.lock().unwrap();
-        if state.generation != generation {
+        let Some(solution) = state.solution(generation) else {
             return;
-        }
+        };
         if !matches!(read, Ok(1..)) {
-            break state.child.take();
+            break solution.service.take().unwrap();
         }
         let message = line.trim_ascii_end();
         if !message.is_empty() {
-            handle_protocol_message(&mut state, message);
+            handle_protocol_message(solution, message);
         }
-        // An exported solution no longer uses the GPU.
-        if matches!(state.status, SolverStatus::Ready(_)) {
+        // An exported solution no longer uses the GPU, so a reference never holds it.
+        if matches!(solution.status, SolverStatus::Ready(_)) {
             permit = None;
         }
     };
-    // The service closed its output; hold any permit until it has exited.
-    let Some(mut child) = child else { return };
-    let exit = child
+    // The service closed its output, or reading it failed. Stop it if it still runs, as its stdin
+    // stays open while the service is held here, and hold any permit until it has exited.
+    let _ = service.child.kill();
+    let exit = service
+        .child
         .wait()
         .map_or_else(|error| error.to_string(), |status| status.to_string());
+    let message = format!("Solver service exited unexpectedly ({exit})");
     let mut state = bridge.lock().unwrap();
-    if state.generation == generation && !matches!(state.status, SolverStatus::Failed { .. }) {
-        state.fail(format!("Solver service exited unexpectedly ({exit})"));
+    // A reference only answers queries, so it ends with its service.
+    if let Some(mut reference) = state
+        .reference
+        .take_if(|reference| reference.generation == generation)
+    {
+        reference.fail(message);
+    } else if state.current.generation == generation
+        && !matches!(state.current.status, SolverStatus::Failed { .. })
+    {
+        state.current.fail(message);
     }
     drop(permit);
 }
 
-fn spawn_service(request: &[u8]) -> io::Result<(Child, ChildStdout)> {
+fn spawn_service(scenario: Vec<u8>) -> io::Result<(Service, ChildStdout)> {
     let program = std::env::current_exe()?.with_file_name(service_sidecar());
     let mut child = Command::new(program)
         .arg("--stdin")
@@ -243,14 +334,22 @@ fn spawn_service(request: &[u8]) -> io::Result<(Child, ChildStdout)> {
         .stderr(Stdio::piped())
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()?;
+    let mut stdin = child.stdin.take().unwrap();
     let stdout = child.stdout.take().unwrap();
     let mut stderr = child.stderr.take().unwrap();
     thread::spawn(move || io::copy(&mut stderr, &mut io::stderr()));
-    if let Err(error) = child.stdin.as_mut().unwrap().write_all(request) {
-        let _ = child.kill();
-        return Err(error);
-    }
-    Ok((child, stdout))
+    // A write waits while the service's stdin is full, and the service may be waiting for the
+    // output reader, which routes each message under the bridge lock; so this thread writes,
+    // never a holder of the lock. The scenario goes first and is dropped once written, not kept
+    // for the service's life. A failed write means the service has exited, which its output
+    // reader reports.
+    let (requests, lines) = mpsc::channel();
+    thread::spawn(move || {
+        iter::once(scenario)
+            .chain(lines)
+            .try_for_each(|line| stdin.write_all(&line))
+    });
+    Ok((Service { child, requests }, stdout))
 }
 
 // The package adds an SSE2 service for CPUs that cannot run the /arch:AVX2 build,

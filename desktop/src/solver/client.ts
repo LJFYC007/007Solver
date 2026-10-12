@@ -27,7 +27,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return response.status === 204 ? (undefined as T) : response.json();
 }
 
-// HTTP requests can reach the server out of order, so a solve or cancel waits for the previous one.
+// HTTP requests can reach the server out of order, so a solve, restore or cancel waits for the previous one.
 let lastControl: Promise<unknown> = Promise.resolve();
 function sendControl<T>(path: string, init: RequestInit): Promise<T> {
     const result = lastControl.then(() => request<T>(path, init));
@@ -35,14 +35,25 @@ function sendControl<T>(path: string, init: RequestInit): Promise<T> {
     return result;
 }
 
-export function solveScenario(scenario: PostflopScenario): Promise<number> {
+/**
+ * Replaces the current solve and resolves to its generation. A `reference` generation keeps that solution queryable
+ * (solver/ARCHITECTURE.md "Service and desktop lifecycle").
+ */
+export function solveScenario(scenario: PostflopScenario, reference?: number): Promise<number> {
     return isDesktopApp
-        ? invoke<number>("solve_scenario", { scenario })
-        : sendControl<number>("/solve", {
+        ? invoke<number>("solve_scenario", { scenario, reference })
+        : sendControl<number>(reference === undefined ? "/solve" : `/solve?reference=${reference}`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(scenario),
           });
+}
+
+/** Stops the current solve and makes the reference current again under its generation, resolving to its status. */
+export function restoreReference(): Promise<SolverStatus> {
+    return isDesktopApp
+        ? invoke<SolverStatus>("restore_reference")
+        : sendControl<SolverStatus>("/restore", { method: "POST" });
 }
 
 export function cancelSolver(): Promise<void> {

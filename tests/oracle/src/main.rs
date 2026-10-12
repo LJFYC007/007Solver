@@ -108,6 +108,54 @@ fn metrics(game: &PostFlopGame, scale: f32) -> Value {
     })
 }
 
+// A path step as `play` takes it: an action index, or a dealt card.
+fn step_index(step: &Value) -> usize {
+    match step.as_str() {
+        Some(card) => card_from_str(card).unwrap() as usize,
+        None => step.as_u64().unwrap() as usize,
+    }
+}
+
+// Fix each listed hand's weights at its decision, as the scenario's `locks` state them.
+fn lock(game: &mut PostFlopGame, scenario: &Value) {
+    let Some(locks) = scenario.get("locks") else {
+        return;
+    };
+    let flop = game.card_config().flop;
+    let distinct = |key: fn(&Card) -> Card| {
+        let [a, b, c] = flop.each_ref().map(key);
+        a != b && b != c && a != c
+    };
+    assert!(
+        distinct(|card| card & 3) && distinct(|card| card >> 2),
+        "Locks need a rainbow unpaired flop"
+    );
+    for lock in locks.as_array().unwrap() {
+        game.back_to_root();
+        for step in lock["path"].as_array().unwrap() {
+            game.play(step_index(step));
+        }
+        let hands = game.private_cards(game.current_player()).to_vec();
+        let actions = game.available_actions().len();
+        // Action-major; upstream locks the hands with a positive weight and normalizes them.
+        let mut strategy = vec![0.0; actions * hands.len()];
+        for (combo, weights) in lock["hands"].as_object().unwrap() {
+            let cards = [&combo[..2], &combo[2..]].map(|card| card_from_str(card).unwrap());
+            let hand = hands
+                .iter()
+                .position(|&(a, b)| cards == [a, b] || cards == [b, a])
+                .expect(combo);
+            let weights = weights.as_array().unwrap();
+            assert_eq!(weights.len(), actions, "{combo}");
+            for (action, weight) in weights.iter().enumerate() {
+                strategy[action * hands.len() + hand] = weight.as_f64().unwrap() as f32;
+            }
+        }
+        game.lock_current_strategy(&strategy);
+    }
+    game.back_to_root();
+}
+
 fn hand_name((first, second): (Card, Card)) -> String {
     format!(
         "{} {}",
@@ -162,12 +210,10 @@ fn query_reference(game: &mut PostFlopGame, scenario: &Value, path: Value) -> Va
     let joint_weight: f32 = game.normalized_weights(0).iter().sum();
     let mut chance_factor = 1.0;
     for step in path.as_array().unwrap() {
-        if let Some(card) = step.as_str() {
+        if step.is_string() {
             chance_factor *= (48 - game.current_board().len()) as f32;
-            game.play(card_from_str(card).unwrap() as usize);
-        } else {
-            game.play(step.as_u64().unwrap() as usize);
         }
+        game.play(step_index(step));
     }
     game.cache_normalized_weights();
     let player = game.current_player();
@@ -287,12 +333,14 @@ fn main() {
         return;
     }
     assert!(args.is_empty(), "Usage: solver-test-oracle [--wide]");
-    for name in ["weighted-flop", "raise-flop"] {
+    for name in ["weighted-flop", "raise-flop", "locked-flop"] {
         let scenario: Value = serde_json::from_str(
             &fs::read_to_string(fixtures.join(format!("{name}.json"))).unwrap(),
         )
         .unwrap();
         let mut game = game_for(&scenario, SCALE);
+        lock(&mut game, &scenario);
+        // Before solving, unlocked hands play uniformly.
         let uniform = metrics(&game, SCALE);
         let exploitability = solve(&mut game, MAX_REFERENCE_ITERATIONS, SCALE * 1e-5, false);
         assert!(
@@ -301,6 +349,10 @@ fn main() {
             exploitability / SCALE
         );
         let solved = metrics(&game, SCALE);
+        if name == "locked-flop" {
+            output[name] = json!({"scenario": scenario, "uniform": uniform, "solved": solved});
+            continue;
+        }
         let mut game = game_for(&scenario, SCALE);
         let policy = if name == "weighted-flop" {
             fixed_policy(&mut game)

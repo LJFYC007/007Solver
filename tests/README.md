@@ -8,6 +8,8 @@ The [correctness suite](../README.md#checks), including [CLI end-to-end checks](
 
 The [backend parity input](fixtures/backend-parity.json) has no independent answer: the CPU backend is its reference. It must keep splitting street regions into several GPU batches. The GPU benchmark repeats its comparison on the [wide parity input](fixtures/wide-parity.json), whose full ranges must keep taking the GPU's wide-range kernel paths (256-thread Terminal groups, several hand tiles per Reach or Backup item).
 
+Node locks are test inputs, not ranges. The [locked parity input](fixtures/locked-parity.json) repeats the backend parity comparison with locks that must keep covering each GPU lock site its [definition](../scripts/sync-preflop-fixtures.py) lists. The oracle checks locks on the [locked input](fixtures/locked-flop.json), whose flop must stay rainbow and unpaired: the oracle merges suit-isomorphic runouts, which is exact only for suit-symmetric locks.
+
 ## Benchmark
 
 Benchmarks are opt-in; normal builds and CTest do not run them:
@@ -26,7 +28,7 @@ cmake --build --preset RelWithDebInfo --target 007SolverBenchmark
 ./build/relwithdebinfo/007SolverBenchmark.exe --device=cpu
 ```
 
-[benchmark.cpp](benchmark.cpp) defines the flags, workload and report; [CMakeLists.txt](../CMakeLists.txt) raises `benchmark_gpu` to 2000 updates, which must finish within two minutes, while `benchmark_cpu` keeps the workload's 1000 and takes several minutes. Checks that need longer than [CTest's budget](../README.md#checks) belong here. A run passes on GPU parity over full ranges (GPU runs only), on the independent uniform reference and training improvement, both evaluated on the training device, on CPU evaluation of the export agreeing with that device, and on root queries; it **does not require convergence**, so compare achieved exploitability alongside time. Process memory metrics exclude dedicated GPU allocations.
+[benchmark.cpp](benchmark.cpp) defines the flags, workload and report; [CMakeLists.txt](../CMakeLists.txt) raises `benchmark_gpu` to 2000 updates, which must finish within two minutes, while `benchmark_cpu` keeps the workload's 1000 and takes several minutes. Checks that need longer than [CTest's budget](../README.md#checks) belong here. A run passes on GPU parity over full ranges, also with [node locks](fixtures/locked-wide-parity.json) in every hand tile (GPU runs only), on the independent uniform reference and training improvement, both evaluated on the training device, on CPU evaluation of the export agreeing with that device, and on root queries; it **does not require convergence**, so compare achieved exploitability alongside time. Process memory metrics exclude dedicated GPU allocations.
 
 The [workload](fixtures/utg-bb-wide.json) ranges hold only 254 and 287 hands on its flop, and GPU kernels take other paths and batch differently for wider ranges, so also time GPU performance changes on wider catalog ranges, such as both players' full root ranges.
 
@@ -34,7 +36,7 @@ To compare runs, avoid competing builds and solves, hold inputs, update budget, 
 
 ## Updating inputs and references
 
-The five inputs derive from [captured cases](../resources/gtowizard-preflop/cases/) the way the desktop replays preflop lines; each input's `rangeSource` records its history, subsets, pot/stack reductions and the sha256 of the saved nodes it reads.
+The inputs derive from [captured cases](../resources/gtowizard-preflop/cases/) the way the desktop replays preflop lines; each input's `rangeSource` records its history, subsets, pot/stack reductions and the sha256 of the saved nodes it reads.
 
 1. Edit scenario definitions in [sync-preflop-fixtures.py](../scripts/sync-preflop-fixtures.py) and regenerate the inputs with `python scripts/sync-preflop-fixtures.py`. The script does not touch answers.
 2. Regenerate the affected answers with the independent [Rust oracle](oracle/src/main.rs), pinned by [Cargo.toml](oracle/Cargo.toml) and [Cargo.lock](oracle/Cargo.lock). The pinned upstream code needs the lint allowances below; `RAYON_NUM_THREADS` can limit its workers.

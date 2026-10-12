@@ -1,4 +1,11 @@
-import { foldPreview, nodeFor, solutionFor, type PreflopChoice, type PreflopLine, type PreflopNode } from "./catalog";
+import {
+    nodeFor,
+    previewHistories,
+    solutionFor,
+    type PreflopChoice,
+    type PreflopLine,
+    type PreflopNode,
+} from "./catalog";
 import {
     aggregatePreflopActions,
     comboCount,
@@ -77,12 +84,10 @@ function buildPreflopTimeline(line: PreflopLine, history: PreflopChoice[]): Pref
             node = nodeFor(line, prefix);
         if (node) add(node, prefix);
     }
-    let prefix: PreflopChoice[] | undefined = history;
-    for (let i = 0; prefix && i < solution.positions.length; i++) {
+    for (const prefix of previewHistories(line, history)) {
         const node = nodeFor(line, prefix);
         if (!node) break;
         add(node, prefix);
-        prefix = foldPreview(node);
     }
     return entries;
 }

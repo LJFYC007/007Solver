@@ -34,6 +34,7 @@ Restart `dev` after C++ changes. `npm --prefix desktop run build` packages the i
 
 - The [fixture](tests/fixtures/weighted-flop.json) and [parser](solver/io/ScenarioLoader.cpp) show the scenario fields and defaults. `--stdin` reads the scenario as the first JSON line, followed by queries.
 - `accuracyPercent` is the exploitability target as a percentage of the initial pot (`0.01` means 0.01%); `iterations` limits player updates.
+- `locks` fix listed hands' strategies at chosen decisions; see [Node locks](solver/ARCHITECTURE.md#node-locks).
 - `--device=cpu|gpu|auto` overrides automatic GPU selection.
 - `solver_service` requires AVX2; the app falls back to `solver_service_sse2` on CPUs without AVX2, FMA or BMI. Outside the installer, the service needs the Visual C++ x64 runtime, including OpenMP (`VCOMP140.DLL`).
 
@@ -41,7 +42,7 @@ Restart `dev` after C++ changes. `npm --prefix desktop run build` packages the i
 
 `007solver.exe --serve` serves the interface at `http://127.0.0.1:8007` instead of opening a window; `--serve=<address>` listens elsewhere. Only `npm --prefix desktop run build` embeds the page.
 
-- **Exposure:** the server has no authentication, so expose it only through an authenticating proxy, such as Cloudflare Tunnel with Access. Against DNS rebinding it answers only requests addressed to an IP address or `localhost`, so the proxy must send `Host: 127.0.0.1:8007` (the tunnel's HTTP Host Header setting).
+- **Exposure:** the server has no authentication, so expose it only through an authenticating proxy, such as Cloudflare Tunnel with Access. Against DNS rebinding it answers only requests addressed to an IP address or `localhost`, so the proxy must send `Host: 127.0.0.1:8007` (the tunnel's HTTP Host Header setting). The proxy may cache `/assets/` (content-hashed, served `immutable`; Cloudflare needs a Cache Rule for the JSON there) but never the page or `/api`.
 - **Benchmarking:** server solves queue for the GPU, but desktop, CLI and benchmark solves do not, so stop the server before benchmarking.
 - **Deployment:** [deploy-server.ps1](scripts/deploy-server.ps1) builds the committed tree (uncommitted changes only with `-Force`), installs it as the `007 Solver server` startup app and restarts it, dropping all sessions; a failed build keeps the previous server. It logs to `build/deploy-server.log` and `build/deploy-build.log`. Copy [post-commit](scripts/post-commit) to `.git/hooks/` to deploy every commit on `main`. `Stop-Process -Name 007solver-server` stops the server until the next logon or deploy.
 - **Browser development:** stop the server, run `npm --prefix desktop run build:solver`, `cargo run --manifest-path desktop/src-tauri/Cargo.toml -- --serve` and `npm --prefix desktop run dev:ui`, then open `http://127.0.0.1:1420`, which forwards `/api` to the server.

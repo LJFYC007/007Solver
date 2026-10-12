@@ -1,6 +1,7 @@
 import { HAND_CLASSES, handClassCombos } from "./strategy";
 import type { DecisionAction } from "./types";
 import type { BettingTree } from "./bettingTree";
+import type { ScenarioLock } from "./locks";
 import {
     nodeFor,
     solutionFor,
@@ -141,6 +142,7 @@ export interface PostflopScenario {
     bettingTree: BettingTree;
     ranges: Record<string, Record<string, number>>;
     rangeSource: { solution: TableFormat; history: PreflopChoice[] };
+    locks?: ScenarioLock[];
 }
 export function postflopScenario(
     line: PreflopLine,

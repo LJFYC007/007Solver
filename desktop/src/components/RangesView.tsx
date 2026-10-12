@@ -51,7 +51,7 @@ export default function RangesView({
     report?: EquityReport;
     equityStatus?: string;
     names: Record<Player, string>;
-    opponentEvCache: ReportCache<"opponentEv">;
+    opponentEvCache?: ReportCache<"opponentEv">;
     selection: Selection;
 }) {
     const [actorMode, setActorMode] = useState<DisplayMode>("strategy");

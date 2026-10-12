@@ -33,6 +33,8 @@
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     --accent: #b2e5ba;
+    --accent-surface: #2c3930;
+    --accent-border: #4b7555;
     --matrix-empty: var(--surface-panel);
     --suit-spade: #383d43;
     --suit-heart: #a93254;
@@ -474,7 +476,7 @@ select:focus-visible {
 .timeline-node.active,
 .board-stage.active {
     border-color: #9bd6aa;
-    box-shadow: inset 0 0 0 1px #4b7555;
+    box-shadow: inset 0 0 0 1px var(--accent-border);
 }
 .timeline-node.future {
     opacity: 0.6;
@@ -597,6 +599,42 @@ select:focus-visible {
     display: block;
     padding: 2px 4px;
 }
+.timeline-node-heading {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-bottom: 4px;
+}
+.timeline-node-heading .timeline-node-title {
+    flex: 1;
+    min-width: 0;
+    margin-bottom: 0;
+}
+.timeline-lock {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    height: 19px;
+    padding: 0 4px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+}
+button.timeline-lock:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+}
+.timeline-lock.applied {
+    border-color: var(--accent-border);
+    background: var(--accent-surface);
+    color: var(--accent);
+}
+.timeline-lock.draft {
+    border-color: var(--text-muted);
+    border-style: dashed;
+    color: var(--text-secondary);
+}
 .workspace {
     display: grid;
     min-height: 0;
@@ -698,6 +736,26 @@ select:focus-visible {
 }
 .range-cell.locked {
     outline-color: var(--text-primary);
+}
+.range-cell > .pin-glyph {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 12px;
+    height: 12px;
+    color: #f2f2f2;
+    filter: drop-shadow(0 1px 1px #000a);
+}
+.range-grid.selecting {
+    cursor: crosshair;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.range-cell.dimmed {
+    filter: brightness(0.45);
+}
+.range-cell.dimmed:hover {
+    filter: brightness(0.6);
 }
 .range-grid.compact {
     padding: 0;
@@ -912,7 +970,8 @@ select:focus-visible {
 /* Mixes that strategyGradient draws over an empty track. */
 .range-stat-bar,
 .summary-strategy,
-.filter-strategy {
+.filter-strategy,
+.compare-mix i {
     display: block;
     border-radius: 2px;
     background: #2a2b2e;
@@ -971,6 +1030,7 @@ select:focus-visible {
 .overview-panel,
 .action-summary-panel,
 .hand-panel,
+.lock-editor,
 .line-complete {
     border-radius: 6px;
     overflow: hidden;
@@ -986,6 +1046,12 @@ select:focus-visible {
     height: 28px;
     background: var(--surface-base);
 }
+/* Tabs.tsx's tabs, which its detail follows; a long detail shrinks instead of the tabs. */
+.tab-list {
+    display: flex;
+    flex: none;
+    gap: inherit;
+}
 .inspector-tabs button {
     padding: 4px 14px;
     color: var(--text-secondary);
@@ -997,17 +1063,17 @@ select:focus-visible {
     color: #eee;
     background: var(--surface-panel);
 }
+/* One row: the seats share what the pot figures and the board leave. */
 .overview-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 125px;
+    display: flex;
     align-items: center;
     gap: 9px;
-    height: 88px;
+    height: 48px;
     padding: 6px 7px;
 }
 .overview-seats {
-    grid-column: 1 / -1;
     display: flex;
+    flex: 1;
     min-width: 0;
     gap: 3px;
 }
@@ -1039,8 +1105,8 @@ select:focus-visible {
 }
 .overview-copy {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(3, auto);
+    gap: 10px;
     white-space: nowrap;
     font-size: 13px;
 }
@@ -1057,7 +1123,7 @@ select:focus-visible {
     font-weight: 500;
 }
 .spot-body {
-    height: 88px;
+    height: 48px;
     overflow: hidden;
     transition: height 160ms ease-out;
 }
@@ -1403,7 +1469,8 @@ select:focus-visible {
     border-radius: 4px;
     background: #242426;
 }
-.hand-panel {
+.hand-panel,
+.lock-editor {
     display: flex;
     min-height: 0;
     min-width: 0;
@@ -1412,7 +1479,8 @@ select:focus-visible {
 }
 .combo-grid,
 .summary-scroll,
-.filters-panel {
+.filters-panel,
+.lock-body {
     flex: 1;
     min-height: 0;
     overflow: auto;
@@ -1750,7 +1818,7 @@ select:focus-visible {
     background: var(--surface-panel);
 }
 .filter-category[aria-pressed="true"] {
-    background: #2c3930;
+    background: var(--accent-surface);
     color: var(--accent);
 }
 .filter-strategy {
@@ -1835,7 +1903,7 @@ select:focus-visible {
 }
 .solve-state.reached {
     color: var(--accent);
-    background: #2c3930;
+    background: var(--accent-surface);
 }
 .solve-spot {
     display: flex;
@@ -1926,7 +1994,8 @@ select:focus-visible {
     justify-content: space-between;
     padding: 12px 0;
 }
-.solve-settings h3 {
+.solve-settings h3,
+.node-locks h3 {
     margin: 0;
     font-size: 13px;
     font-weight: 500;
@@ -2342,4 +2411,435 @@ select:focus-visible {
 }
 .window-controls svg {
     shape-rendering: crispEdges;
+}
+
+/* Node locks: the glyph, the lock editor, the lock list and the locked solution's banner. */
+.lock-glyph {
+    flex: none;
+    width: 10px;
+    height: 12px;
+}
+.study-browser[inert] {
+    opacity: 0.55;
+}
+.lock-node-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+    padding: 2px 8px;
+    font-size: 12px;
+}
+.lock-toolbar {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    padding-left: 5px;
+}
+.lock-toolbar-title {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+    color: var(--accent);
+    white-space: nowrap;
+}
+.lock-show-gto {
+    margin-left: auto;
+    padding: 3px 9px;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 12px;
+    white-space: nowrap;
+}
+.lock-show-gto:hover:not(:disabled) {
+    background: var(--surface-control);
+    color: var(--text-primary);
+}
+.lock-show-gto[aria-pressed="true"] {
+    background: var(--accent-surface);
+    color: var(--accent);
+}
+.lock-show-gto:disabled {
+    opacity: 0.4;
+}
+/* The matrix's keys while a lock is edited; they shorten instead of wrapping the toolbar. */
+.lock-keys {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 12px;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.lock-keys kbd {
+    padding: 0 4px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--surface-control);
+    color: var(--text-secondary);
+    font: inherit;
+}
+.lock-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 12px;
+}
+.lock-group + .lock-group {
+    border-top: 1px solid var(--divider);
+}
+.lock-selection {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+}
+.lock-scope {
+    flex: none;
+}
+.lock-scope button:disabled {
+    opacity: 0.5;
+}
+.lock-revert {
+    margin-left: auto;
+    padding: 3px 9px;
+    background: var(--surface-panel);
+    font-size: 12px;
+}
+.lock-revert:disabled {
+    opacity: 0.4;
+}
+.lock-sliders {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.lock-slider {
+    display: grid;
+    grid-template-columns: minmax(90px, 1.2fr) minmax(80px, 2fr) 76px 24px;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+}
+/*
+ * The track fills to the thumb's center, which travels between its radii from the ends. The tick at the GTO frequency
+ * stands behind the track and out above and below it, so the action's color never hides it.
+ */
+.lock-slider input[type="range"] {
+    width: 100%;
+    min-width: 0;
+    height: 16px;
+    margin: 0;
+    appearance: none;
+    background: linear-gradient(
+            to right,
+            transparent calc(7px + (100% - 14px) * var(--gto) - 1px),
+            var(--text-muted) 0 calc(7px + (100% - 14px) * var(--gto) + 1px),
+            transparent 0
+        )
+        center / 100% 12px no-repeat;
+    cursor: pointer;
+}
+/*
+ * The track: the action's color to the thumb, the usual track to the reachable maximum and a striped tail beyond it.
+ * Stripes also cover the color below the reachable minimum, the share that pinned hands hold.
+ */
+.lock-slider input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+    background:
+        repeating-linear-gradient(135deg, var(--surface-control) 0 2px, transparent 2px 6px) 7px center /
+            calc((100% - 14px) * var(--min)) 100% no-repeat,
+        linear-gradient(
+            to right,
+            var(--action) calc(7px + (100% - 14px) * var(--fill)),
+            var(--surface-control) 0 calc(7px + (100% - 14px) * var(--max)),
+            transparent 0
+        ),
+        repeating-linear-gradient(135deg, var(--surface-control) 0 2px, transparent 2px 6px);
+}
+/* Light, so the thumb shows on the track whatever the action's color. */
+.lock-slider input[type="range"]::-webkit-slider-thumb {
+    width: 14px;
+    height: 14px;
+    margin-top: -5px;
+    border-radius: 50%;
+    background: var(--text-primary);
+    box-shadow: 0 1px 3px #000a;
+    appearance: none;
+}
+.lock-slider input[type="range"]::-moz-range-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--surface-control);
+}
+.lock-slider input[type="range"]::-moz-range-progress {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--action);
+}
+.lock-slider input[type="range"]::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--text-primary);
+    box-shadow: 0 1px 3px #000a;
+}
+.lock-slider input[type="range"]:focus-visible {
+    border-radius: 4px;
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.lock-slider input[type="range"]:disabled {
+    cursor: default;
+    opacity: 0.4;
+}
+.lock-action {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 7px;
+    overflow: hidden;
+    white-space: nowrap;
+}
+.lock-action i {
+    flex: none;
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    box-shadow: 0 0 0 1px #0007;
+}
+.lock-action small {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+/* A smaller .solve-input-unit. */
+.lock-percent input {
+    width: 100%;
+    height: 26px;
+    padding: 2px 22px 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface-base);
+    font-size: 13px;
+    text-align: right;
+}
+.lock-percent > span {
+    top: 50%;
+    right: 7px;
+    transform: translateY(-50%);
+    font-size: 12px;
+}
+.lock-percent:has(input:disabled) {
+    opacity: 0.4;
+}
+.lock-pin {
+    display: grid;
+    width: 24px;
+    height: 24px;
+    place-items: center;
+    padding: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+}
+.lock-pin:hover {
+    background: var(--surface-control);
+    color: var(--text-primary);
+}
+.lock-pin[aria-pressed="true"] {
+    color: var(--accent);
+}
+.pin-glyph {
+    width: 14px;
+    height: 14px;
+}
+/* The editor scrolls as a whole. */
+.lock-classes .filters-panel {
+    flex: none;
+    overflow: visible;
+    padding: 0;
+}
+.lock-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border-top: 1px solid var(--divider);
+    background: var(--surface-panel);
+}
+.lock-footer .solve-error {
+    padding: 0;
+    font-size: 12px;
+}
+.lock-options {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    font-size: 13px;
+}
+.lock-options label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+.lock-options input {
+    margin: 0;
+    accent-color: var(--accent);
+}
+/* Exit and Apply & solve sit together on the right, as tall as each other. */
+.lock-exit {
+    margin-left: auto;
+    padding: 6px 14px;
+}
+.lock-options .solve-button,
+.node-locks > footer .solve-button {
+    min-width: 100px;
+    padding: 7px 14px;
+}
+.node-locks {
+    margin: 0 20px 18px;
+    padding: 12px 14px;
+    border-radius: 6px;
+    background: var(--surface-strip);
+}
+.node-locks h3 {
+    margin-bottom: 8px;
+}
+.lock-group > h3 {
+    margin: 2px 0 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+}
+.node-locks ul {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.node-locks li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 8px;
+    border-radius: 4px;
+    background: var(--surface-panel);
+}
+.node-locks li > .lock-glyph {
+    color: var(--text-secondary);
+}
+.node-lock-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.node-lock-state {
+    color: var(--text-muted);
+    font-size: 11px;
+    white-space: nowrap;
+}
+.node-lock-state.applied {
+    color: var(--accent);
+}
+.node-locks li .quiet-button {
+    padding: 3px 8px;
+    font-size: 12px;
+}
+.node-locks > footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 10px;
+}
+.locked-banner {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    padding: 0 4px 0 8px;
+    color: var(--accent);
+}
+.locked-banner button {
+    flex: none;
+    padding: 2px 8px;
+    border: 1px solid var(--accent-border);
+    border-radius: 4px;
+    background: var(--accent-surface);
+    color: var(--accent);
+    font-size: 12px;
+}
+.locked-banner button:hover:not(:disabled) {
+    filter: brightness(1.15);
+}
+.locked-banner button:disabled {
+    opacity: 0.5;
+}
+
+/* Compare with GTO (CompareView): the Ranges view's top row, with its matrices in the same places, and tables. */
+.compare-stats {
+    gap: 14px;
+}
+/* As tall as the Ranges headers with their mode menus. */
+.compare-view .ranges-side header strong {
+    padding: 3px 0;
+}
+.compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.compare-table th,
+.compare-table td {
+    padding: 2px 4px;
+    font-weight: 400;
+    text-align: right;
+    white-space: nowrap;
+}
+.compare-table th:first-child {
+    text-align: left;
+}
+.compare-table thead th {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+.compare-table tbody th {
+    color: var(--text-secondary);
+}
+.compare-table th i {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 5px;
+    border-radius: 2px;
+}
+.compare-mix {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 4px 8px;
+    color: var(--text-muted);
+    font-size: 11px;
+}
+.compare-mix i {
+    height: 8px;
+    border-radius: 4px;
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { type EquityReport, type Player, formatNumber } from "../solver";
 import { PLAYERS, equityRealization } from "../solver/display";
 import { postflopOrder } from "../solver/preflop";
@@ -72,7 +72,16 @@ function PlayerStats({ spot, data }: { spot: SpotSummary; data?: EquityReport })
     );
 }
 
-export default function SpotOverview({ spot, equityCache }: { spot: SpotSummary; equityCache: ReportCache<"equity"> }) {
+export default function SpotOverview({
+    spot,
+    equityCache,
+    detail,
+}: {
+    spot: SpotSummary;
+    equityCache?: ReportCache<"equity">;
+    /** Shown after the tabs, such as the locked solution banner. */
+    detail?: ReactNode;
+}) {
     const [tab, setTab] = useState<(typeof tabs)[number]>("Overview");
     const result = useNodeReport(equityCache, spot.nodeId, tab !== "Overview");
     const data = result?.data;
@@ -103,6 +112,7 @@ export default function SpotOverview({ spot, equityCache }: { spot: SpotSummary;
                 id="spot-information"
                 className="inspector-tabs"
                 panelClassName={`spot-body${tab === "Overview" ? "" : " expanded"}`}
+                detail={detail}
             >
                 {tab === "Overview" ? (
                     <div className="overview-row">

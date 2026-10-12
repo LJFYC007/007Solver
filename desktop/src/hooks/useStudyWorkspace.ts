@@ -13,6 +13,8 @@ import {
 import { postflopScenario, preflopOutcome, replayPreflop, type PostflopScenario } from "../solver/preflop";
 import { buildStudyView } from "../solver/study";
 import { defaultBettingTree, parseBettingTree } from "../solver/bettingTree";
+import type { NodeLock } from "../solver/locks";
+import { type SolutionCaches, requestReport } from "./useNodeReport";
 import { useSolverNavigation } from "./useSolverNavigation";
 
 const DEFAULT_ITERATIONS = 10000;
@@ -21,21 +23,35 @@ const DEFAULT_ACCURACY_PERCENT = 0.01;
 export interface StudyWorkspaceProps {
     root?: SolverNode;
     status: SolverStatus;
-    generation?: number;
+    /** The current solution's reports, from when its solve has started. */
+    caches?: SolutionCaches;
     scenario?: PostflopScenario;
     changing: boolean;
+    /** The GTO solution's reports, kept while a locked solution is current. */
+    reference?: SolutionCaches;
+    /** The locks the current solution was solved with. */
+    appliedLocks?: readonly NodeLock[];
+    /** Whether a locked solve waits for its earlier decisions' GTO strategies. */
+    applying: boolean;
     onSolve: (scenario: PostflopScenario) => Promise<void>;
     onInvalidate: () => Promise<void>;
+    /** Solves the GTO solution's scenario with the locks, keeping the GTO solution. */
+    onApplyLocks: (locks: NodeLock[]) => Promise<void>;
+    /** Makes the GTO solution current again. */
+    onRestore: () => Promise<void>;
 }
 
 export function useStudyWorkspace({
     root,
     status,
-    generation,
+    caches,
     scenario,
     changing,
+    reference,
     onSolve,
     onInvalidate,
+    onApplyLocks,
+    onRestore,
 }: StudyWorkspaceProps) {
     const [line, setLine] = useState(() => unloadedLine(capturedSolutions[0].id));
     const format = line.format;
@@ -46,6 +62,8 @@ export function useStudyWorkspace({
     const [iterations, setIterations] = useState(DEFAULT_ITERATIONS);
     const [accuracyPercent, setAccuracyPercent] = useState(DEFAULT_ACCURACY_PERCENT);
     const [bettingTree, setBettingTree] = useState(defaultBettingTree);
+    // Node locks belong to the baseline: a new baseline or study change clears them.
+    const [locks, setLocks] = useState<NodeLock[]>([]);
     const [rangeSeat, setRangeSeat] = useState<string>();
     const [error, setError] = useState<string>();
     const [picker, setPicker] = useState<{ kind: "flop" } | { kind: "runout"; node: ChanceNode; index: number }>();
@@ -53,7 +71,22 @@ export function useStudyWorkspace({
     // The first line loads like any later change; the editing guard skips a repeated mount effect.
     const loadFirstLine = useEffectEvent(() => void reset());
     useEffect(() => loadFirstLine(), []);
-    const navigation = useSolverNavigation(root, generation);
+    const navigation = useSolverNavigation(root, caches?.node);
+    // Locked and GTO solves share their tree, so the view returns to its node when the other solution arrives.
+    const returnPath = useRef<{ nodeIds: number[]; activeIndex: number }>(undefined);
+    const followReturnPath = useEffectEvent(() => {
+        const target = returnPath.current;
+        returnPath.current = undefined;
+        if (target) void navigation.openPath(target.nodeIds, target.activeIndex);
+    });
+    useEffect(() => {
+        if (root) followReturnPath();
+    }, [root]);
+    // The path's nodes load as soon as the solution is ready, with its root rather than after it.
+    useEffect(() => {
+        if (status.state !== "ready" || !caches) return;
+        for (const nodeId of returnPath.current?.nodeIds ?? []) void requestReport(caches.node, nodeId);
+    }, [status.state, caches]);
     const solveState = status.state;
     const solveError = status.state === "failed" ? status.message : "";
     const view = useMemo(
@@ -115,7 +148,9 @@ export function useStudyWorkspace({
         setPicker(undefined);
         try {
             const next = (await prepare?.()) ?? line;
+            returnPath.current = undefined;
             await onInvalidate();
+            setLocks([]);
             setLine(next);
             apply(next);
             setError(undefined);
@@ -173,6 +208,8 @@ export function useStudyWorkspace({
             );
             setError(undefined);
             setPreIndex(null);
+            returnPath.current = undefined;
+            setLocks([]);
             await onSolve(next);
         } catch (failure) {
             setError(String(failure));
@@ -239,7 +276,47 @@ export function useStudyWorkspace({
         setPicker(undefined);
     }
     function cancel() {
-        void changeStudy(() => setPreIndex(history.length));
+        // A locked solve goes back to the GTO solution it started from.
+        if (reference) void restore();
+        else void changeStudy(() => setPreIndex(history.length));
+    }
+    /**
+     * Changes to another solution of the same tree, which then shows the shown node again; a failure keeps the current
+     * solution and view.
+     */
+    async function switchSolution(change: () => Promise<void>) {
+        if (editing.current) return;
+        if (navigation.path.length && view.showPostflop)
+            returnPath.current = {
+                nodeIds: navigation.path.map((node) => node.nodeId),
+                activeIndex: navigation.activeIndex,
+            };
+        setError(undefined);
+        try {
+            await change();
+        } catch (failure) {
+            returnPath.current = undefined;
+            setError(String(failure));
+        }
+    }
+    const applyLocks = () =>
+        switchSolution(() => {
+            setPreIndex(null);
+            return onApplyLocks(locks);
+        });
+    const restore = () =>
+        switchSolution(() => {
+            // The reference answers queries until it is current again, so the path back loads during the restore.
+            if (reference)
+                for (const nodeId of returnPath.current?.nodeIds ?? []) void requestReport(reference.node, nodeId);
+            return onRestore();
+        });
+    /** Shows a lock's decision, resolving to its node. */
+    function showLock(lock: NodeLock) {
+        setPreIndex(null);
+        setPicker(undefined);
+        setError(undefined);
+        return navigation.openPath(lock.nodeIds);
     }
     const solveSettingsChanged =
         iterations !== DEFAULT_ITERATIONS ||
@@ -292,6 +369,8 @@ export function useStudyWorkspace({
         changeBettingTree: setBettingTree,
         solveSettingsChanged,
         resetSolveSettings,
+        locks,
+        setLocks,
         error,
         picker,
         navigation,
@@ -311,5 +390,8 @@ export function useStudyWorkspace({
         confirmBoard,
         cancel,
         closePicker,
+        applyLocks,
+        restore,
+        showLock,
     };
 }

@@ -10,6 +10,7 @@ from gtowizard_case import CASES, ROOT, history_key
 
 RAKED = "Cash6mSimple_6mGGrcR25_100"
 RAKE_FREE = "Cash6mSimple_6mcEVR25_100"
+RANKS, SUITS = "AKQJT98765432", "shdc"
 
 
 class Case:
@@ -103,6 +104,28 @@ def scenario(case_id, bet_level, selected, stack, board="Ks 9s 2d", pot=2.0, ite
     }
 
 
+def combos(hand_class):
+    first, second, kind = hand_class[0], hand_class[1], hand_class[2:]
+    if first == second:
+        suits = [(a, b) for i, a in enumerate(SUITS) for b in SUITS[i + 1:]]
+    else:
+        suits = [(a, b) for a in SUITS for b in SUITS if (a == b) == (kind == "s")]
+    return [(first + a, second + b) for a, b in suits]
+
+
+def lock(scenario, actor, path, patterns, positions=(0, 1, 4), period=7):
+    """Locks the actor's hands at the given positions of every period hands in the solver's hand order (by card index:
+    rank, then suit shdc). The default mixes locked and free hands within 8-hand AVX2 chunks and in every combination
+    across adjacent hands, which GPU threads move together; an odd period keeps the latter. Weights cycle through
+    patterns; hands holding a dealt card stay free."""
+    flop = set(scenario["board"].split())
+    dealt = flop | {step for step in path if isinstance(step, str)}
+    index = lambda hand: sorted(RANKS.index(card[0]) * 4 + SUITS.index(card[1]) for card in hand)
+    hands = sorted((hand for hand_class in scenario["ranges"][actor] for hand in combos(hand_class) if not flop & set(hand)), key=index)
+    locked = [hand for i, hand in enumerate(hands) if i % period in positions and not dealt & set(hand)]
+    return {"path": path, "hands": {"".join(hand): patterns[i % len(patterns)] for i, hand in enumerate(locked)}}
+
+
 fixtures = ROOT / "tests/fixtures"
 weighted = scenario(RAKED, 4, {"UTG": ["AKs", "TT"], "BB": ["KK", "A5s"]}, 4.0)
 raised = scenario(RAKE_FREE, 4, {"UTG": ["KJs"], "BB": ["AQs"]}, 8.0)
@@ -132,7 +155,48 @@ wide_parity["rangeSource"]["reduction"] = (
     "range and BB's full starting range, as the desktop replays the root, which records only its actor's range. Pot and "
     "stacks are reduced to a shallow tree for runtime. The CPU backend is the reference; there is no independent answer."
 )
+# Node locks (hand -> one weight per action, at an action-index and dealt-card path) are test inputs, not ranges.
+# A rainbow unpaired flop keeps the oracle from merging suit-isomorphic runouts, so its locks may sit on any street.
+locked = scenario(RAKE_FREE, 4, {"UTG": ["KJs", "TT"], "BB": ["AQs", "QQ"]}, 4.0, "Ks 9h 2d")
+locked["locks"] = [
+    # BB's whole range at the root (check, bet); zero weights take actions out of some hands' play.
+    {"path": [], "hands": {"AsQs": [1, 3], "AhQh": [3, 1], "AdQd": [0, 1], "AcQc": [1, 1], "QsQh": [1, 0],
+                           "QsQd": [1, 0], "QsQc": [3, 1], "QhQd": [2, 0], "QhQc": [1, 0], "QdQc": [1, 1]}},
+    # Partial locks of both players: UTG after a check (check, bet) and facing a bet (fold, call, all-in), BB facing a
+    # bet after checking, and BB on a concrete turn.
+    {"path": [0], "hands": {"KhJh": [0, 1], "ThTd": [1, 1]}},
+    {"path": [1], "hands": {"KdJd": [0, 1, 1], "TsTc": [1, 3, 0]}},
+    {"path": [0, 1], "hands": {"QhQd": [0, 1, 0], "AhQh": [2, 1, 1]}},
+    {"path": [0, 0, "7c"], "hands": {"AsQs": [1, 1]}},
+]
+# Locked lockstep updates on the parity tree, at a decision of each GPU lock site: the root, a decision inlined into its
+# parent's Backup (flop and river), street roots on a concrete runout, a river decision fused into its fold and
+# showdown's Terminal block, and a whole-range lock whose zero weight prunes the opponent's subtree.
+locked_parity = {**parity, "iterations": 4}
+river = [0, 0, "7d", 0, 0, "2c"]
+two, three = [[1, 0], [1, 3], [0, 1], [2, 1]], [[0, 1, 0], [1, 1, 2], [1, 0, 0], [0, 2, 1]]
+locked_parity["locks"] = [
+    lock(parity, "BB", [], two),
+    lock(parity, "UTG", [1], three),
+    lock(parity, "BB", [0, 0, "7d"], two),
+    lock(parity, "UTG", [0, 0, "7d", 0], [[1, 0]], range(7)),
+    lock(parity, "BB", river, two),
+    lock(parity, "UTG", river + [1], three),
+    lock(parity, "BB", river + [1, 2], two),
+]
+# The benchmark's locked comparison over the wide parity input's full ranges, whose Reach and Backup items span several
+# 512-hand tiles and whose Terminal groups double: sparse partial locks reach every tile at the root, an inlined child,
+# street roots on a concrete runout and a fused river fold/call. Two updates run each locked site for both players.
+locked_wide_parity = {**wide_parity, "iterations": 2}
+locked_wide_parity["locks"] = [
+    lock(wide_parity, "BB", [], two, period=49),
+    lock(wide_parity, "UTG", [1], three, period=49),
+    lock(wide_parity, "BB", [0, 0, "7d"], two, period=49),
+    lock(wide_parity, "BB", river, two, period=49),
+    lock(wide_parity, "BB", river + [1, 2], two, period=49),
+]
 for name, value in [("weighted-flop", weighted), ("raise-flop", raised), ("utg-bb-wide", wide), ("backend-parity", parity),
-                    ("wide-parity", wide_parity)]:
+                    ("wide-parity", wide_parity), ("locked-flop", locked), ("locked-parity", locked_parity),
+                    ("locked-wide-parity", locked_wide_parity)]:
     (fixtures / f"{name}.json").write_bytes((json.dumps(value, indent=4) + "\n").encode())
-print("Updated five input fixtures from GTO Wizard; regenerate independent references for changed referenced inputs next.")
+print("Updated the input fixtures from GTO Wizard; regenerate independent references for changed referenced inputs next.")

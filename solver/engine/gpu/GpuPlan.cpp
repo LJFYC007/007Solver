@@ -140,7 +140,7 @@ Section BuildSection(const HandBoardData& tables, std::size_t row, U32 q, U32 ha
 }
 } // namespace
 
-Plan::Plan(const HandTraversalData& data) : entries(data.stateSize)
+Plan::Plan(const HandTraversalData& data) : locks(data.lockOffsets), lockedPolicies(data.lockedPolicies), entries(data.stateSize)
 {
     if (data.maxActions > kMaxActions)
         throw std::runtime_error(
@@ -805,6 +805,8 @@ std::array<BufferData, kBufferCount> Plan::Buffers() const
     buffers[FlagsBuffer] = {nullptr, slots * sizeof(U32)};
     buffers[MasksBuffer] = {nullptr, slots * MaskWords(state.stride) * sizeof(U32)};
     buffers[StampsBuffer] = {nullptr, 2 * std::size_t(state.stampCount) * sizeof(U32)};
+    buffers[LocksBuffer] = Table(locks);
+    buffers[LockedPoliciesBuffer] = Table(lockedPolicies);
     buffers[StateBuffer] = {&state, sizeof(State)};
     return buffers;
 }

@@ -38,6 +38,8 @@ struct ActionReport
     bool isAllIn;
     core::Chips amountTo;
     core::Chips chipsCommitted;
+    // See BettingAction::PotPercent.
+    float potPercent;
     game::NodeId nextNodeId;
 };
 

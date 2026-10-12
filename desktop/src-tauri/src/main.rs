@@ -25,8 +25,17 @@ async fn query_solver(
 }
 
 #[tauri::command]
-fn solve_scenario(scenario: Value, state: State<'_, SolverBridge>) -> Result<u64, String> {
-    state.start(&scenario, None)
+fn solve_scenario(
+    scenario: Value,
+    reference: Option<u64>,
+    state: State<'_, SolverBridge>,
+) -> Result<u64, String> {
+    state.start(&scenario, None, reference)
+}
+
+#[tauri::command]
+fn restore_reference(state: State<'_, SolverBridge>) -> Result<SolverStatus, String> {
+    state.restore_reference()
 }
 
 #[tauri::command]
@@ -57,6 +66,7 @@ fn main() {
             solver_status,
             query_solver,
             solve_scenario,
+            restore_reference,
             cancel_solver
         ])
         .build(context)

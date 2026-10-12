@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import type { SolverStatus } from "../solver";
 import BettingTreeSettings from "./BettingTreeSettings";
 import { BoardCard } from "./PlayingCards";
@@ -24,6 +24,9 @@ export default function SolvePanel({
     scenario,
     matchup,
     error,
+    nodeLocks,
+    lockCount,
+    retryLocks,
 }: {
     scenario?: PostflopScenario;
     matchup?: { title: string; detail: string; oop: string; ip: string };
@@ -42,6 +45,12 @@ export default function SolvePanel({
     onAccuracyPercent: (value: number) => void;
     bettingTree: BettingTreeDraft;
     onBettingTree: (value: BettingTreeDraft) => void;
+    /** The study's node locks, shown after the solve's progress or result. */
+    nodeLocks?: ReactNode;
+    /** How many node locks the study has; solving again deletes them. */
+    lockCount: number;
+    /** After a failed locked solve, the primary action applies the locks again. */
+    retryLocks?: { preparing: boolean; disabled: boolean; onRetry: () => void };
 }) {
     const progress = status.state === "solving" ? status : undefined;
     const result = status.state === "ready" ? status : undefined;
@@ -135,7 +144,7 @@ export default function SolvePanel({
                             <small>{limit ? `of ${limit.toLocaleString()}` : "Preparing"}</small>
                         </div>
                         <div>
-                            <dt>Exploitability</dt>
+                            <dt>{scenario?.locks?.length ? "Exploitability (within locks)" : "Exploitability"}</dt>
                             <dd>{accuracy == null ? "—" : `${accuracy.toPrecision(3)}%`}</dd>
                             <small>{target === undefined ? "Initial pot" : `Target ${target}% · initial pot`}</small>
                         </div>
@@ -157,6 +166,7 @@ export default function SolvePanel({
                     )}
                 </div>
             )}
+            {nodeLocks}
             {!busy && (
                 <section className="solve-settings" aria-label="Solve settings">
                     <header>
@@ -217,14 +227,34 @@ export default function SolvePanel({
                         Cancel solve
                     </button>
                 ) : (
-                    <button
-                        type="button"
-                        className="solve-button"
-                        disabled={board.length !== 3 || changing || !!treeError}
-                        onClick={onSolve}
-                    >
-                        {result ? "Solve again" : status.state === "failed" ? "Retry solve" : "Solve"}
-                    </button>
+                    <>
+                        <button
+                            type="button"
+                            className={lockCount ? "quiet-button" : "solve-button"}
+                            disabled={board.length !== 3 || changing || !!treeError}
+                            // It replaces Cancel solve when a locked solve returns to GTO, so the second click of a
+                            // double click on Cancel solve must not delete the locks.
+                            onClick={(event) => (!lockCount || event.detail < 2) && onSolve()}
+                        >
+                            {lockCount
+                                ? "Solve again without locks"
+                                : result
+                                  ? "Solve again"
+                                  : status.state === "failed"
+                                    ? "Retry solve"
+                                    : "Solve"}
+                        </button>
+                        {retryLocks && (
+                            <button
+                                type="button"
+                                className="solve-button"
+                                disabled={retryLocks.disabled}
+                                onClick={retryLocks.onRetry}
+                            >
+                                {retryLocks.preparing ? "Preparing…" : "Retry with locks"}
+                            </button>
+                        )}
+                    </>
                 )}
             </footer>
         </section>

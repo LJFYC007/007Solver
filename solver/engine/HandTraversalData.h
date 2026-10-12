@@ -124,6 +124,18 @@ struct HandTraversalData
     }
     std::size_t runoutRows = 0; // one past the largest RunoutRow of a forced runout, zero without any
 
+    // Node locks inside this traversal (solver/ARCHITECTURE.md "Node locks"), empty without any:
+    // per node its first entry in lockedPolicies or gpu::kNoIndex. A locked decision's entries are
+    // action-major rows of LockRow(actor's hands) floats; a free hand's, and an odd count's padding
+    // entry, are -1.
+    static std::size_t LockRow(std::size_t hands) { return gpu::LockRow(static_cast<gpu::U32>(hands)); }
+    std::vector<std::uint32_t> lockOffsets;
+    std::vector<float> lockedPolicies;
+    const float* Lock(std::size_t node) const
+    {
+        return lockOffsets.empty() || lockOffsets[node] == gpu::kNoIndex ? nullptr : lockedPolicies.data() + lockOffsets[node];
+    }
+
     // Only training prepares the runout outcome rows.
     HandTraversalData(const SolveProblem& problem, game::NodeId root, bool prepareTraining = false);
     // Normalizes this layout's quantized strategy sums; an actor's decisions on one board share
@@ -141,6 +153,7 @@ struct HandTraversalData
 private:
     void PrepareChanceTasks();
     void PrepareRunoutOutcomes();
+    void PrepareLocks(const std::vector<NodeLock>& locks);
 };
 
 // One player update's DCFR weights. Positive regrets are stored divided by positiveScale,

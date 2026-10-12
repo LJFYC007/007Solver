@@ -404,3 +404,17 @@ export function filterRows(rows: HandRow[], filters: HandFilters): HandRow[] {
             [...sections].every(([section, ids]) => ids.includes(rowCategory(row, section) ?? "")),
     );
 }
+
+/**
+ * The hands the lock editor's filters select, which each filter adds to: categories of every section and included
+ * suits combine as alternatives; excluded suits remain a requirement.
+ */
+export function selectRows(rows: HandRow[], filters: HandFilters): HandRow[] {
+    const inCategory = (row: HandRow) => filters.categories.some((id) => rowCategory(row, sectionOf.get(id)!) === id);
+    if (filters.suitMode === "exclude")
+        return rows.filter(
+            (row) => (!filters.categories.length || inCategory(row)) && matchesSuits(row.cards, filters),
+        );
+    const suits = filters.offsuit.length + filters.suited.length > 0;
+    return rows.filter((row) => inCategory(row) || (suits && matchesSuits(row.cards, filters)));
+}

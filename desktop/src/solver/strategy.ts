@@ -9,7 +9,7 @@ export interface ActionInfo {
     isAllIn: boolean;
     kind: DecisionAction["kind"];
     label: string;
-    /** Rounded % pot (after calling, for raises) of sized bets and raises that are not all-in. */
+    /** sizePercent as a label, for bets and raises that are not all-in. */
     size?: string;
 }
 
@@ -28,12 +28,7 @@ export const SUIT_SYMBOLS: Record<string, string> = {
     s: "♠",
 };
 
-function actionPotPercent(action: DecisionAction, node: DecisionNode): number {
-    const toCall = action.kind === "raise" ? (node.actions.find((a) => a.kind === "call")?.chipsCommitted ?? 0) : 0;
-    return ((action.chipsCommitted - toCall) / (node.state.pot + toCall)) * 100;
-}
-
-function actionLabel(action: DecisionAction): string {
+export function actionLabel(action: DecisionAction): string {
     if (action.kind === "fold") return "Fold";
     if (action.kind === "check") return "Check";
     if (action.kind === "call") return "Call";
@@ -93,7 +88,7 @@ function actionColors(node: DecisionNode): string[] {
             .filter(({ action }) => action.kind === kind)
             .sort((first, second) => first.action.amountTo - second.action.amountTo);
         const shades = spreadSizeColors(
-            sized.map(({ action }) => (action.isAllIn ? LAST_STOP : sizePosition(actionPotPercent(action, node)))),
+            sized.map(({ action }) => (action.isAllIn ? LAST_STOP : sizePosition(action.sizePercent ?? 0))),
         );
         sized.forEach(({ index }, i) => (colors[index] = shades[i]));
     }
@@ -116,10 +111,7 @@ export function describeActions(node: DecisionNode): readonly ActionInfo[] {
                 isAllIn: action.isAllIn,
                 kind: action.kind,
                 label: actionLabel(action),
-                size:
-                    (action.kind === "bet" || action.kind === "raise") && !action.isAllIn
-                        ? `${Math.round(actionPotPercent(action, node))}%`
-                        : undefined,
+                size: action.sizePercent && !action.isAllIn ? `${formatNumber(action.sizePercent)}%` : undefined,
             }))
             .sort(
                 (first, second) =>
@@ -131,14 +123,17 @@ export function describeActions(node: DecisionNode): readonly ActionInfo[] {
     return actions;
 }
 
+/** A hand's weight in aggregate action frequencies. */
+export const reachWeight = (hand: HandStrategy) => Math.max(0, hand.ownReachWeight);
+
 export function aggregateActions(node: DecisionNode, hands: HandStrategy[] = node.hands): AggregatedAction[] {
     const handsWithStrategy = hands.filter((hand) => hand.strategy.length === node.actions.length);
-    const totalOwnReachWeight = handsWithStrategy.reduce((sum, hand) => sum + Math.max(0, hand.ownReachWeight), 0);
+    const totalOwnReachWeight = handsWithStrategy.reduce((sum, hand) => sum + reachWeight(hand), 0);
     if (totalOwnReachWeight <= 0) return [];
 
     return describeActions(node).map((action) => {
         const weightedProbability = handsWithStrategy.reduce(
-            (sum, hand) => sum + Math.max(0, hand.ownReachWeight) * hand.strategy[action.index],
+            (sum, hand) => sum + reachWeight(hand) * hand.strategy[action.index],
             0,
         );
 
@@ -149,6 +144,10 @@ export function aggregateActions(node: DecisionNode, hands: HandStrategy[] = nod
         };
     });
 }
+
+/** The frequency of the action with node index `index` in a mix, if the mix has it. */
+export const actionFrequency = (actions: readonly AggregatedAction[] | undefined, index: number) =>
+    actions?.find((action) => action.index === index)?.probability;
 
 export function toHandClass(cards: readonly string[]): string {
     if (cards.length !== 2) return cards.join(" ");

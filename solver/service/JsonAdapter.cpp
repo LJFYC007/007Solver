@@ -185,13 +185,16 @@ Json BuildNodeJson(const analysis::NodeReport& node)
     jsonNode["actions"] = Json::array();
     for (const analysis::ActionReport& action : node.actions)
     {
-        jsonNode["actions"].push_back({
+        Json jsonAction = {
             {"kind", ActionCode(action)},
             {"amountTo", core::ToChipUnits(action.amountTo)},
             {"chipsCommitted", core::ToChipUnits(action.chipsCommitted)},
             {"isAllIn", action.isAllIn},
             {"nextNodeId", action.nextNodeId.Value()},
-        });
+        };
+        if (action.potPercent > 0.0f)
+            jsonAction["sizePercent"] = action.potPercent;
+        jsonNode["actions"].push_back(std::move(jsonAction));
     }
     return jsonNode;
 }

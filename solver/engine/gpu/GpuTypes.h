@@ -29,6 +29,8 @@ enum BufferIndex : U32
     // values and clear when its lanes are stale, which readers take as +0 (see Reach).
     MasksBuffer,
     StampsBuffer, // two halves of stampCount node stamps, alternating by update parity
+    LocksBuffer,  // per node stamp: the node's first entry in the locked policies or kNoIndex (see HandTraversalData)
+    LockedPoliciesBuffer,
     StateBuffer,
     kBufferCount,
 };
@@ -113,6 +115,12 @@ enum : U32
 GPU_TYPES_INLINE U32 StateRow(U32 n)
 {
     return (n + kStateAlign - 1) & ~(kStateAlign - 1);
+}
+// Floats of a locked decision's action row (see HandTraversalData::lockedPolicies): its actor's hands
+// padded to an even count, so a thread's hand pair loads as one 8-byte access.
+GPU_TYPES_INLINE U32 LockRow(U32 hands)
+{
+    return (hands + 1) & ~1u;
 }
 // Node::strategy: a decision's first state unit (HandTraversalData::Node::stateOffset) over
 // kStateAlign in its high half, and its first unpadded entry (Node::strategyOffset), which the

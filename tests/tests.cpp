@@ -36,7 +36,7 @@ std::shared_ptr<const engine::SolveProblem> Problem(const std::string& name)
 {
     // Changing the input requires regenerating its independent reference.
     EXPECT_EQ(Fixture(name), References().at(name).at("scenario"));
-    return solver::test::MakeProblem(solver::io::LoadScenario(std::string(TEST_FIXTURE_DIR) + name + ".json"));
+    return solver::io::MakeProblem(solver::io::LoadScenario(std::string(TEST_FIXTURE_DIR) + name + ".json"));
 }
 
 void CheckSolve(const std::string& name, engine::ComputeDevice requestedDevice)
@@ -57,7 +57,7 @@ void CheckSolve(const std::string& name, engine::ComputeDevice requestedDevice)
         std::cout << name << ": Device: " << session.DeviceName() << "; CPU workers: " << session.WorkerCount() << std::endl;
         if (reference.contains("uniform"))
         {
-            // Before any update, the zero cumulative strategies normalize to uniform play.
+            // Before any update, the zero cumulative strategies normalize to uniform play; locked hands play their locks.
             const auto uniform = session.EvaluateCheckpoint();
             const auto& expected = reference.at("uniform");
             EXPECT_NEAR(uniform.player0BestResponseEv, expected.at("heroBestResponseEv").get<float>(), 1e-5f);
@@ -71,6 +71,14 @@ void CheckSolve(const std::string& name, engine::ComputeDevice requestedDevice)
         checkpoint = session.EvaluateCheckpoint();
         return std::move(session).ExportStrategy();
     }();
+    // The export holds each locked hand's normalized lock exactly.
+    for (const auto& lock : problem->locks)
+        for (const auto& [hand, probabilities] : lock.hands)
+        {
+            const float* exported = strategy.FindStrategy({lock.node, hand});
+            ASSERT_NE(exported, nullptr) << "locked node " << lock.node.Value();
+            EXPECT_EQ(std::vector<float>(exported, exported + probabilities.size()), probabilities) << "locked node " << lock.node.Value();
+        }
     // CPU evaluation of the export cross-checks the training device's evaluation.
     const auto actual = engine::EvaluateExploitability(*problem, strategy);
     EXPECT_NEAR(checkpoint.player0BestResponseEv, actual.player0BestResponseEv, 1e-6f);
@@ -138,11 +146,30 @@ TEST(SolverReferenceTest, RaiseFlopGpu)
     CheckSolve("raise-flop", engine::ComputeDevice::Auto);
 }
 
+TEST(SolverReferenceTest, LockedFlopCpu)
+{
+    CheckSolve("locked-flop", engine::ComputeDevice::Cpu);
+}
+
+TEST(SolverReferenceTest, LockedFlopGpu)
+{
+    if (!engine::GpuDcfrSession::Available())
+        GTEST_SKIP() << "No supported CUDA GPU is available";
+    CheckSolve("locked-flop", engine::ComputeDevice::Auto);
+}
+
 TEST(BackendParityTest, GpuUpdatesMatchCpuFromSharedState)
 {
     if (!engine::GpuDcfrSession::Available())
         GTEST_SKIP() << "No supported CUDA GPU is available";
     solver::test::CheckBackendParity("backend-parity");
+}
+
+TEST(BackendParityTest, LockedGpuUpdatesMatchCpuFromSharedState)
+{
+    if (!engine::GpuDcfrSession::Available())
+        GTEST_SKIP() << "No supported CUDA GPU is available";
+    solver::test::CheckBackendParity("locked-parity");
 }
 
 TEST(AnalysisSessionTest, FixedPoliciesMatchIndependentNodeValuesAndReach)

@@ -656,7 +656,7 @@ void HandTraversal::WalkTasks(
             const Node& node = nodes[nodeIndex];
             float* policy = scratch.strategies.data();
             if (node.kind == Kind::Decision && node.actor == opponent)
-                LoadPolicy(node, context, policy, reach);
+                LoadPolicy(nodeIndex, context, policy, reach);
             reach = PropagateChild(nodeIndex, action, opponent, policy, reach, scratch.reach.data() + (depth + 1) * stride);
             nodeIndex = children[node.childOffset + action];
             ++depth;
@@ -676,36 +676,42 @@ void HandTraversal::WalkTasks(
     Walk(0, context, workspace, 0, rootReach, values, &cursor);
 }
 
-void HandTraversal::LoadPolicy(const Node& node, const WalkContext& context, float* current, const float* actorReach) const
+void HandTraversal::LoadPolicy(std::uint32_t nodeIndex, const WalkContext& context, float* current, const float* actorReach) const
 {
+    const Node& node = nodes[nodeIndex];
     const auto actorCount = hands[node.actor].size();
     if (context.train)
-    {
         MatchRegrets(node, *context.train, current, actorReach);
-        return;
-    }
-    if (context.strategySums)
+    else if (context.strategySums)
     {
         const std::uint16_t* sums = context.strategySums + node.stateOffset;
         for (std::size_t hand = 0; hand < actorCount; ++hand)
             NormalizeAverageStrategy(sums + hand, HandTraversalData::RowUnits(actorCount), node.childCount, current + hand, actorCount);
-        return;
     }
-    const auto source = context.strategy->FindNodeStrategy(node.id);
-    std::fill_n(current, node.childCount * actorCount, 1.0f / node.childCount);
-    if (!source)
-        return;
-    // Both hand lists are sorted; merge once rather than looking up each infoset.
-    std::size_t other = 0;
-    for (std::size_t hand = 0; hand < actorCount; ++hand)
+    else
     {
-        const auto cards = hands[node.actor][hand].cards;
-        while (other < source->handCount && source->hands[other] < cards)
-            ++other;
-        if (other < source->handCount && source->hands[other] == cards)
-            for (std::size_t action = 0; action < node.childCount; ++action)
-                current[action * actorCount + hand] = source->probabilities[other * source->actionCount + action];
+        std::fill_n(current, node.childCount * actorCount, 1.0f / node.childCount);
+        if (const auto source = context.strategy->FindNodeStrategy(node.id))
+        {
+            // Both hand lists are sorted; merge once rather than looking up each infoset.
+            std::size_t other = 0;
+            for (std::size_t hand = 0; hand < actorCount; ++hand)
+            {
+                const auto cards = hands[node.actor][hand].cards;
+                while (other < source->handCount && source->hands[other] < cards)
+                    ++other;
+                if (other < source->handCount && source->hands[other] == cards)
+                    for (std::size_t action = 0; action < node.childCount; ++action)
+                        current[action * actorCount + hand] = source->probabilities[other * source->actionCount + action];
+            }
+        }
     }
+    // Locked hands' regrets and sums keep updating but never decide their policies.
+    if (const float* lock = data_->Lock(nodeIndex))
+        for (std::size_t hand = 0; hand < actorCount; ++hand)
+            if (lock[hand] >= 0.0f)
+                for (std::size_t action = 0; action < node.childCount; ++action)
+                    current[action * actorCount + hand] = lock[action * HandTraversalData::LockRow(actorCount) + hand];
 }
 
 std::vector<float> HandTraversal::EvaluateSnapshot(
@@ -819,14 +825,15 @@ bool HandTraversal::Walk(
     }
     const bool acting = node.kind == Kind::Decision && node.actor == player;
     const float* nodeStrategy = nullptr;
-    // Best responses maximize own action values and propagate only opponent reach.
+    // Best responses maximize own action values, but locked hands follow their locks, and propagate only opponent reach.
+    const float* lock = acting ? data_->Lock(nodeIndex) : nullptr;
     if (node.kind == Kind::Decision &&
         !(acting && std::all_of(evaluations.begin(), evaluations.end(), [](Evaluation e) { return e == Evaluation::BestResponse; })))
     {
         // Preserve this entry policy until reach, backup and average-strategy accumulation
         // finish. Descendants and other workers use separate rows.
         float* current = workspace.strategies.data() + depth * maxActions * stride;
-        LoadPolicy(node, context, current, node.actor == player ? nullptr : opponentReach);
+        LoadPolicy(nodeIndex, context, current, node.actor == player ? nullptr : opponentReach);
         nodeStrategy = current;
     }
     const bool parallel = node.kind == Kind::Chance && parallelCursor;
@@ -837,11 +844,15 @@ bool HandTraversal::Walk(
         *parallelCursor += node.childCount;
     float* accumulated = workspace.accumulated.data() + depth * rows * stride;
     for (std::size_t row = 0; row < rows; ++row)
-        std::fill_n(
-            accumulated + row * count,
-            count,
-            acting && evaluations[row] == Evaluation::BestResponse ? -std::numeric_limits<float>::infinity() : 0.0f
-        );
+    {
+        const bool best = acting && evaluations[row] == Evaluation::BestResponse;
+        std::fill_n(accumulated + row * count, count, best ? -std::numeric_limits<float>::infinity() : 0.0f);
+        // Locked hands sum their policy-weighted values instead.
+        if (best && lock)
+            for (std::size_t hand = 0; hand < count; ++hand)
+                if (lock[hand] >= 0.0f)
+                    accumulated[row * count + hand] = 0.0f;
+    }
     const auto descend = [&](std::size_t action, float* output)
     {
         const auto childIndex = children[node.childOffset + action];
@@ -860,8 +871,17 @@ bool HandTraversal::Walk(
             const float* childRow = child + row * count;
             float* sum = accumulated + row * count;
             if (acting && evaluations[row] == Evaluation::BestResponse)
-                for (std::size_t hand = 0; hand < count; ++hand)
-                    sum[hand] = std::max(sum[hand], childRow[hand]);
+            {
+                if (lock)
+                {
+                    const float* locked = lock + action * HandTraversalData::LockRow(count);
+                    for (std::size_t hand = 0; hand < count; ++hand)
+                        sum[hand] = lock[hand] >= 0.0f ? sum[hand] + locked[hand] * childRow[hand] : std::max(sum[hand], childRow[hand]);
+                }
+                else
+                    for (std::size_t hand = 0; hand < count; ++hand)
+                        sum[hand] = std::max(sum[hand], childRow[hand]);
+            }
             else if (acting)
             {
                 const float* probability = nodeStrategy + action * count;

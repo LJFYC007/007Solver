@@ -1,7 +1,6 @@
 #include "service/SolverService.h"
 #include "analysis/AnalysisSession.h"
 #include "engine/DcfrSession.h"
-#include "game/GameCompiler.h"
 #include "io/ScenarioLoader.h"
 #include "service/ConvergenceEstimate.h"
 #include "service/JsonAdapter.h"
@@ -51,10 +50,10 @@ int SolverService::Run(const std::string& scenarioPath, engine::ComputeDevice de
         WriteMessage(output_, {ServiceMessageKind::BuildingTree, 0, 0, scenario.iterations});
 
         diagnostics_ << "Start building decision tree...\n";
-        std::shared_ptr<const game::CompiledGame> game = game::CompileGame(scenario.game);
+        const auto problem = io::MakeProblem(scenario);
+        const auto& game = problem->game;
         diagnostics_ << "Decision tree has " << game->NodeCount() << " nodes\n";
 
-        auto problem = std::make_shared<const engine::SolveProblem>(engine::SolveProblem{game, std::move(scenario.ranges)});
         engine::MemoryEstimate estimate{};
 
         diagnostics_ << "Start solving game...\n";

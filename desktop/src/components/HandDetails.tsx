@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { strategyGradient } from "../solver";
 import {
     type DisplayMode,
@@ -151,15 +151,19 @@ export default function HandDetails({
 export function ActionSummary({
     actions,
     actor,
+    tool,
 }: {
     actions: (DetailAction & { combos: number; onSelect?: () => void })[];
     actor?: string;
+    /** Shown at the end of the heading, such as the node lock button. */
+    tool?: ReactNode;
 }) {
     return (
         <section className="action-summary-panel">
             <div className="panel-strip-title">
                 <strong>Actions</strong>
                 <span>{actor}</span>
+                {tool}
             </div>
             {actions.length ? (
                 <>

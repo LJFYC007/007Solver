@@ -3,7 +3,6 @@
 #include "engine/DcfrSession.h"
 #include "engine/StrategyEvaluator.h"
 #include "engine/MemoryEstimate.h"
-#include "game/GameCompiler.h"
 #include "io/ScenarioLoader.h"
 #include "service/JsonAdapter.h"
 #include <Windows.h>
@@ -119,6 +118,11 @@ TEST(WideRangeBenchmark, UtgBbSingleRaisedFixedWork)
         test::CheckBackendParity("wide-parity");
         FinishStage("wide_parity");
         ASSERT_FALSE(HasFailure());
+        StartStage("locked_wide_parity");
+        // Node locks on those paths, with locked hands in every hand tile.
+        test::CheckBackendParity("locked-wide-parity");
+        FinishStage("locked_wide_parity");
+        ASSERT_FALSE(HasFailure());
     }
     StartStage("preparation");
     const std::string fixturePath = std::string(TEST_FIXTURE_DIR) + "utg-bb-wide.json";
@@ -143,9 +147,8 @@ TEST(WideRangeBenchmark, UtgBbSingleRaisedFixedWork)
     const double initialPot = input.at("initialPot").get<double>();
     const double targetExploitability = initialPot * scenario.accuracyPercent / 100.0;
     report["exploitability_limit"] = targetExploitability;
-    const auto problem =
-        std::make_shared<const engine::SolveProblem>(engine::SolveProblem{game::CompileGame(scenario.game), std::move(scenario.ranges)});
     const int iterations = iterationBudget == 0 ? scenario.iterations : iterationBudget;
+    const auto problem = io::MakeProblem(scenario);
     report["iterations"] = iterations;
     report["node_count"] = problem->game->NodeCount();
     const auto estimate = engine::EstimateCpuMemory(*problem, workers);

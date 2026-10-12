@@ -28,6 +28,8 @@ export interface DecisionAction {
     isAllIn: boolean;
     kind: "fold" | "check" | "call" | "bet" | "raise";
     nextNodeId: number;
+    /** Bets and raises: the configured % pot (after calling, for raises), or what the legal limits made of it. */
+    sizePercent?: number;
 }
 
 export interface DecisionNode {

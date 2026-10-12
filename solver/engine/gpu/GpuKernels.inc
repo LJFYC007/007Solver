@@ -5,7 +5,7 @@ using namespace solver::engine::gpu;
 #define GPU_ARGUMENTS                                                                                                               \
     const Node *nodes, const Hand *hands, const float *weights, const unsigned short *ranks, const int *runouts, const U32 *order,  \
         const U32 *cards, U32 *outcomes, short *regrets, unsigned short *sums, float *scratch, U32 *flags, U32 *masks, U32 *stamps, \
-        const State *statePointer, Pass pass
+        const U32 *locks, const float *lockedPolicies, const State *statePointer, Pass pass
 // numerator / divisor for regret matching's operands: quantized integers, the divisor at most
 // kMaxActions * 65535 < 2^21. For such normal operands CUDA's division fast path, a refined
 // reciprocal and a residual correction, is the correctly rounded quotient, and zero numerators
@@ -30,6 +30,23 @@ __device__ __forceinline__ float RegretRatio(float numerator, float divisor, flo
 __device__ __forceinline__ float MatchedProbability(float regret, float positive, float reciprocal, U32 actions)
 {
     return positive > 0.0f ? RegretRatio(regret > 0.0f ? regret : 0.0f, positive, reciprocal) : 1.0f / float(actions);
+}
+
+// The locked policies of the decision with this node stamp, null for a free decision (see
+// HandTraversalData::lockOffsets).
+__device__ __forceinline__ const float* LockedPolicy(const U32* locks, const float* lockedPolicies, U32 stamp)
+{
+    const U32 offset = locks[stamp];
+    return offset == kNoIndex ? nullptr : lockedPolicies + offset;
+}
+
+// A hand pair's action probabilities with the locked hands' entries at entries, which a free hand
+// leaves negative in every action row, in place of their matched ones.
+__device__ __forceinline__ void LockPair(const float* entries, float& probability0, float& probability1)
+{
+    const float2 entry = *(const float2*)entries;
+    probability0 = entry.x >= 0.0f ? entry.x : probability0;
+    probability1 = entry.y >= 0.0f ? entry.y : probability1;
 }
 
 // Training state streams through the L2 once per update while a batch's passes reuse its scratch
@@ -179,7 +196,7 @@ __device__ __forceinline__ float2 MatchedPair(U32 word)
 // re-encoding at its own exponent byte reproduces. A zero ActionCount keeps the general path,
 // whose entry arrays live in local memory and whose loops stay rolled: unrolled to kMaxActions
 // they triple the code and spill.
-template<U32 ActionCount>
+template<U32 ActionCount, bool Locked>
 __device__ __forceinline__ void ReachNode(
     Node n,
     State state,
@@ -189,7 +206,8 @@ __device__ __forceinline__ void ReachNode(
     float value1,
     const short* regrets,
     unsigned short* sums,
-    float* scratch
+    float* scratch,
+    const float* lock
 )
 {
     const U32 count = p ? state.hands[1] : state.hands[0], row = StateRow(count);
@@ -229,8 +247,13 @@ __device__ __forceinline__ void ReachNode(
 #pragma unroll(ActionCount ? ActionCount : 1)
     for (U32 a = 0; a < actions; ++a)
     {
-        const float child0 = value0 * MatchedProbability(entries0[a], positive0, reciprocal0, actions);
-        const float child1 = value1 * MatchedProbability(entries1[a], positive1, reciprocal1, actions);
+        float probability0 = MatchedProbability(entries0[a], positive0, reciprocal0, actions);
+        float probability1 = MatchedProbability(entries1[a], positive1, reciprocal1, actions);
+        if constexpr (Locked)
+            if (lock)
+                LockPair(lock + a * LockRow(count) + h, probability0, probability1);
+        const float child0 = value0 * probability0;
+        const float child1 = value1 * probability1;
         StorePair(children + a * state.stride, child0, child1);
         if (accumulate)
         {
@@ -259,6 +282,7 @@ __device__ __forceinline__ void ReachNode(
 // lose 5%. Items tile their pass.lanes, two opponent hands per thread, like Backup; a tile
 // compacts its pairs carrying reach to its first threads, since zero-reach hands cluster and
 // need only their children's mask bits.
+template<bool Locked>
 __global__ void __launch_bounds__(kTileGroup, 5) Reach(GPU_ARGUMENTS)
 {
     const State state = *statePointer;
@@ -349,12 +373,15 @@ __global__ void __launch_bounds__(kTileGroup, 5) Reach(GPU_ARGUMENTS)
         return;
     const U32 liveH = livePairs[local];
     const float2 v = liveValues[local];
+    const float* lock = nullptr;
+    if constexpr (Locked)
+        lock = LockedPolicy(locks, lockedPolicies, n.stamp);
     if (actions == 2)
-        ReachNode<2>(n, state, p, liveH, v.x, v.y, regrets, sums, scratch);
+        ReachNode<2, Locked>(n, state, p, liveH, v.x, v.y, regrets, sums, scratch, lock);
     else if (actions == 3)
-        ReachNode<3>(n, state, p, liveH, v.x, v.y, regrets, sums, scratch);
+        ReachNode<3, Locked>(n, state, p, liveH, v.x, v.y, regrets, sums, scratch, lock);
     else
-        ReachNode<0>(n, state, p, liveH, v.x, v.y, regrets, sums, scratch);
+        ReachNode<0, Locked>(n, state, p, liveH, v.x, v.y, regrets, sums, scratch, lock);
 }
 
 // All lanes of the warp participate, including zero-padded tails.
@@ -846,7 +873,7 @@ __device__ __forceinline__ float AdvanceStamp(State state, U32 index, bool live,
 // One hand of a decision whose only children are the fold and showdown the calling block
 // evaluated (see BackupLeafPair): its value and, when training, its regrets' new codes and
 // exponent byte. r0 and r1 are its matched entries (see MatchedPair).
-template<bool Averaging>
+template<bool Averaging, bool Locked>
 __device__ __forceinline__ float LeafHand(
     U32 actor,
     U32 ditherIndex,
@@ -859,15 +886,30 @@ __device__ __forceinline__ float LeafHand(
     float halving,
     U32& code0,
     U32& code1,
-    U32& next
+    U32& next,
+    float locked0,
+    float locked1
 )
 {
     if (actor != state.player)
         return child0 + child1;
+    // A locked hand's entries locked0 and locked1 replace its matched policy (see LockedPolicy).
     if (!Averaging && state.evaluation != Evaluation::None)
+    {
+        if constexpr (Locked)
+            if (locked0 >= 0.0f)
+                return child0 * locked0 + child1 * locked1;
         return child1 > child0 ? child1 : child0;
+    }
     const float positive = (r0 > 0.0f ? r0 : 0.0f) + (r1 > 0.0f ? r1 : 0.0f), reciprocal = RegretReciprocal(positive);
-    const float value = child0 * MatchedProbability(r0, positive, reciprocal, 2) + child1 * MatchedProbability(r1, positive, reciprocal, 2);
+    float probability0 = MatchedProbability(r0, positive, reciprocal, 2), probability1 = MatchedProbability(r1, positive, reciprocal, 2);
+    if constexpr (Locked)
+        if (locked0 >= 0.0f)
+        {
+            probability0 = locked0;
+            probability1 = locked1;
+        }
+    const float value = child0 * probability0 + child1 * probability1;
     if (!Averaging)
     {
         const float updated0 = UpdatedRegret(Dequantize(r0, exponent), child0 - value, halving, state);
@@ -887,8 +929,9 @@ __device__ __forceinline__ float LeafHand(
 // ditherIndex is that regret's unpadded index, and values points at hand h's value in the
 // decision's scratch row; action foldAction is the fold. The pair's entries share a word (see
 // StateRow); past an odd hand count, hand h + 1 is padding, whose zero entries and values keep
-// zero codes.
-template<bool Averaging>
+// zero codes. lock points at hand h's first locked entry, rows lockRow floats apart, or is null
+// (see LockedPolicy).
+template<bool Averaging, bool Locked>
 __device__ __forceinline__ void BackupLeafPair(
     U32 actor,
     U32 ditherIndex,
@@ -902,7 +945,9 @@ __device__ __forceinline__ void BackupLeafPair(
     float fold1,
     float showdown1,
     float halving,
-    float* values
+    float* values,
+    const float* lock,
+    U32 lockRow
 )
 {
     const bool regrets = actor == state.player && (Averaging || state.evaluation == Evaluation::None);
@@ -915,8 +960,16 @@ __device__ __forceinline__ void BackupLeafPair(
             exponentPair = LoadStreamed((const unsigned short*)exponents);
     }
     const float2 entries0 = MatchedPair<Averaging>(word0), entries1 = MatchedPair<Averaging>(word1);
+    // Both hands' locked entries of actions 0 and 1.
+    float2 locked0 = make_float2(-1.0f, -1.0f), locked1 = make_float2(-1.0f, -1.0f);
+    if constexpr (Locked)
+        if (lock)
+        {
+            locked0 = *(const float2*)lock;
+            locked1 = *(const float2*)(lock + lockRow);
+        }
     U32 codes[2][2] = {}, next[2] = {};
-    const float value0 = LeafHand<Averaging>(
+    const float value0 = LeafHand<Averaging, Locked>(
         actor,
         ditherIndex,
         entries0.x,
@@ -928,9 +981,11 @@ __device__ __forceinline__ void BackupLeafPair(
         halving,
         codes[0][0],
         codes[0][1],
-        next[0]
+        next[0],
+        locked0.x,
+        locked1.x
     );
-    const float value1 = LeafHand<Averaging>(
+    const float value1 = LeafHand<Averaging, Locked>(
         actor,
         ditherIndex + 1,
         entries0.y,
@@ -942,7 +997,9 @@ __device__ __forceinline__ void BackupLeafPair(
         halving,
         codes[1][0],
         codes[1][1],
-        next[1]
+        next[1],
+        locked0.y,
+        locked1.y
     );
     if (!Averaging && regrets)
     {
@@ -965,7 +1022,7 @@ static_assert(kTerminalGroup == 4 * kWarpSize);
 // Averaging instances serve strategy-value evaluation (see Evaluation): acting parents back up by
 // their average strategy. Separate instances keep that path out of the training kernels' code,
 // where it cost wide ranges 16%.
-template<bool Averaging, U32 Group>
+template<bool Averaging, U32 Group, bool Locked>
 __global__ void __launch_bounds__(Group, 12 * kTerminalGroup / Group) Terminal(GPU_ARGUMENTS)
 {
     static_assert(Group == kTerminalGroup || Group == 2 * kTerminalGroup);
@@ -1162,8 +1219,13 @@ __global__ void __launch_bounds__(Group, 12 * kTerminalGroup / Group) Terminal(G
             fold = FoldValue(foldMasses, first.y, identical ? foldReach[identical - 1] : 0.0f, scale, foldPayoff);
     };
     // A thread takes hands h and h + 1, whose parent entries share words (see BackupLeafPair);
-    // past an odd count, hand h + 1 is padding, which is closed (see Plan::order).
+    // past an odd count, hand h + 1 is padding, which is closed (see Plan::order). Only an acting
+    // parent's policy weights its children.
     const U32 half = (count + 1) / 2;
+    const float* lock = nullptr;
+    if constexpr (Locked)
+        if (backup && ownFold)
+            lock = LockedPolicy(locks, lockedPolicies, n.stamp);
     for (U32 k = local; k < half; k += Group)
     {
         const U32 h = 2 * k;
@@ -1182,7 +1244,7 @@ __global__ void __launch_bounds__(Group, 12 * kTerminalGroup / Group) Terminal(G
                 StorePair(foldOutput + h, fold0, fold1);
         }
         else
-            BackupLeafPair<Averaging>(
+            BackupLeafPair<Averaging, Locked>(
                 Actor(n.info),
                 U32(n.strategy) + h,
                 parentRegrets + h,
@@ -1195,7 +1257,9 @@ __global__ void __launch_bounds__(Group, 12 * kTerminalGroup / Group) Terminal(G
                 fold1,
                 showdown1,
                 halving,
-                output + h
+                output + h,
+                lock ? lock + h : nullptr,
+                LockRow(count)
             );
     }
 }
@@ -1360,9 +1424,20 @@ __global__ void __launch_bounds__(kRunoutGroup) Runout(GPU_ARGUMENTS)
 // zero values and keep their regrets, whose skipped discounts the stamps apply at the next
 // live update. An update re-encodes each hand's regrets (see GpuQuantize.h). With Averaging,
 // regrets points at the cumulative strategies instead, whose average strategy weights an
-// acting decision's children (see Terminal).
-template<U32 ActionCount, bool Averaging>
-__device__ __forceinline__ void BackupNode(Node n, State state, U32 h, U32 pair, short* regrets, float* values, U32* flags, U32* stamps)
+// acting decision's children (see Terminal). An acting decision's locked hands follow lock (see
+// LockedPolicy), also in best responses.
+template<U32 ActionCount, bool Averaging, bool Locked>
+__device__ __forceinline__ void BackupNode(
+    Node n,
+    State state,
+    U32 h,
+    U32 pair,
+    short* regrets,
+    float* values,
+    U32* flags,
+    U32* stamps,
+    const float* lock
+)
 {
     const U32 count = state.player ? state.hands[1] : state.hands[0];
     const U32 actions = ActionCount ? ActionCount : Count(n.info);
@@ -1486,6 +1561,22 @@ __device__ __forceinline__ void BackupNode(Node n, State state, U32 h, U32 pair,
             value0 = a == 0 || childValues0[a] > value0 ? childValues0[a] : value0;
             value1 = a == 0 || childValues1[a] > value1 ? childValues1[a] : value1;
         }
+        if constexpr (Locked)
+            if (lock)
+            {
+                // Locked hands, whose first entries are not negative, back up by their locks instead.
+                const float2 locked = *(const float2*)(lock + h);
+                float sum0 = 0.0f, sum1 = 0.0f;
+#pragma unroll(ActionCount ? ActionCount : 1)
+                for (U32 a = 0; a < actions; ++a)
+                {
+                    const float2 entry = *(const float2*)(lock + a * LockRow(count) + h);
+                    sum0 += childValues0[a] * entry.x;
+                    sum1 += childValues1[a] * entry.y;
+                }
+                value0 = locked.x >= 0.0f ? sum0 : value0;
+                value1 = locked.y >= 0.0f ? sum1 : value1;
+            }
     }
     else if (acting)
     {
@@ -1493,8 +1584,13 @@ __device__ __forceinline__ void BackupNode(Node n, State state, U32 h, U32 pair,
 #pragma unroll(ActionCount ? ActionCount : 1)
         for (U32 a = 0; a < actions; ++a)
         {
-            value0 += childValues0[a] * MatchedProbability(entryRegrets0[a], positive0, reciprocal0, actions);
-            value1 += childValues1[a] * MatchedProbability(entryRegrets1[a], positive1, reciprocal1, actions);
+            float probability0 = MatchedProbability(entryRegrets0[a], positive0, reciprocal0, actions);
+            float probability1 = MatchedProbability(entryRegrets1[a], positive1, reciprocal1, actions);
+            if constexpr (Locked)
+                if (lock)
+                    LockPair(lock + a * LockRow(count) + h, probability0, probability1);
+            value0 += childValues0[a] * probability0;
+            value1 += childValues1[a] * probability1;
         }
     }
     else
@@ -1582,7 +1678,7 @@ __device__ __forceinline__ void BackupChance(Node n, State state, U32 h, U32 pai
 
 // 48 registers keep 42 warps per SM resident for both hand-tile sizes instead of 36. Averaging
 // instances serve strategy-value evaluation (see Terminal).
-template<bool Averaging>
+template<bool Averaging, bool Locked>
 __global__ void __launch_bounds__(kTileGroup, 5) Backup(GPU_ARGUMENTS)
 {
     const State state = *statePointer;
@@ -1598,14 +1694,18 @@ __global__ void __launch_bounds__(kTileGroup, 5) Backup(GPU_ARGUMENTS)
     WaitForPredecessors();
     const U32 actions = Count(n.info);
     short* entries = Averaging ? (short*)sums : regrets;
+    const float* lock = nullptr;
+    if constexpr (Locked)
+        if (Kind(n.info) == NodeKind::Decision && Actor(n.info) == state.player)
+            lock = LockedPolicy(locks, lockedPolicies, n.stamp);
     if (Kind(n.info) == NodeKind::Chance)
         BackupChance(n, state, h, pair, scratch, flags);
     else if (actions == 2)
-        BackupNode<2, Averaging>(n, state, h, pair, entries, scratch, flags, stamps);
+        BackupNode<2, Averaging, Locked>(n, state, h, pair, entries, scratch, flags, stamps, lock);
     else if (actions == 3)
-        BackupNode<3, Averaging>(n, state, h, pair, entries, scratch, flags, stamps);
+        BackupNode<3, Averaging, Locked>(n, state, h, pair, entries, scratch, flags, stamps, lock);
     else
-        BackupNode<0, Averaging>(n, state, h, pair, entries, scratch, flags, stamps);
+        BackupNode<0, Averaging, Locked>(n, state, h, pair, entries, scratch, flags, stamps, lock);
 }
 
 __global__ void Outcomes(GPU_ARGUMENTS)

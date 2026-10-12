@@ -31,31 +31,33 @@ export default function Tabs<T extends string>({
     const enabled = tabs.filter((name) => !disabled[name]);
     return (
         <>
-            <div className={className} role="tablist" aria-label={label}>
-                {tabs.map((name) => (
-                    <button
-                        id={tabId(name)}
-                        aria-controls={id}
-                        type="button"
-                        key={name}
-                        role="tab"
-                        aria-selected={selected === name}
-                        tabIndex={selected === name ? 0 : -1}
-                        disabled={!!disabled[name]}
-                        title={disabled[name]}
-                        onClick={() => onSelect(name)}
-                        onKeyDown={(event) => {
-                            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-                            event.preventDefault();
-                            const step = event.key === "ArrowLeft" ? -1 : 1;
-                            const next = enabled[(enabled.indexOf(name) + step + enabled.length) % enabled.length];
-                            onSelect(next);
-                            document.getElementById(tabId(next))?.focus();
-                        }}
-                    >
-                        {name}
-                    </button>
-                ))}
+            <div className={className}>
+                <div className="tab-list" role="tablist" aria-label={label}>
+                    {tabs.map((name) => (
+                        <button
+                            id={tabId(name)}
+                            aria-controls={id}
+                            type="button"
+                            key={name}
+                            role="tab"
+                            aria-selected={selected === name}
+                            tabIndex={selected === name ? 0 : -1}
+                            disabled={!!disabled[name]}
+                            title={disabled[name]}
+                            onClick={() => onSelect(name)}
+                            onKeyDown={(event) => {
+                                if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                                event.preventDefault();
+                                const step = event.key === "ArrowLeft" ? -1 : 1;
+                                const next = enabled[(enabled.indexOf(name) + step + enabled.length) % enabled.length];
+                                onSelect(next);
+                                document.getElementById(tabId(next))?.focus();
+                            }}
+                        >
+                            {name}
+                        </button>
+                    ))}
+                </div>
                 {detail}
             </div>
             <div className={panelClassName} id={id} role="tabpanel" aria-labelledby={tabId(selected)}>

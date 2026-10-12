@@ -3,7 +3,7 @@ use crate::{
     solver_protocol::{QueryKind, SolverStatus},
 };
 use axum::{
-    extract::{Path, Query, Request, State},
+    extract::{DefaultBodyLimit, Path, Query, Request, State},
     http::{header, StatusCode, Uri},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -20,6 +20,7 @@ use std::{
 };
 use tauri::utils::{assets::AssetKey, mime_type::MimeType};
 use tokio::sync::Semaphore;
+use tower_http::compression::CompressionLayer;
 
 // Loopback only: the server has no authentication of its own.
 pub(crate) const DEFAULT_ADDRESS: &str = "127.0.0.1:8007";
@@ -27,7 +28,8 @@ pub(crate) const DEFAULT_ADDRESS: &str = "127.0.0.1:8007";
 // it at once.
 const IDLE_RELEASE: Duration = Duration::from_secs(10 * 60);
 // Ready solutions stay in host memory, about 4 bytes per strategy entry plus the last evaluated
-// decision's traversal tables; beyond this many, the least recently used are released.
+// decision's traversal tables; beyond this many sessions with a ready current solution (their
+// reference solutions uncounted), the least recently used are released.
 const MAX_READY_SOLUTIONS: usize = 4;
 
 struct Session {
@@ -104,13 +106,20 @@ pub(crate) async fn serve(
         }
     });
     let app = Router::new()
-        .route("/api/sessions/{id}/solve", post(solve))
+        // Locked scenarios list strategies for every hand of each locked decision.
+        .route(
+            "/api/sessions/{id}/solve",
+            post(solve).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
+        .route("/api/sessions/{id}/restore", post(restore))
         .route("/api/sessions/{id}/cancel", post(cancel))
         .route("/api/sessions/{id}/close", post(close))
         .route("/api/sessions/{id}/status", get(status))
         .route("/api/sessions/{id}/reports/{kind}/{node}", get(query))
         .fallback(asset)
         .layer(middleware::from_fn(require_address_host))
+        // A tunnel carries responses as sent, and strategy JSON compresses several times over.
+        .layer(CompressionLayer::new())
         .with_state(server);
     let listener = tokio::net::TcpListener::bind(address).await?;
     eprintln!("Serving 007 Solver on http://{address}");
@@ -141,19 +150,41 @@ async fn require_address_host(request: Request, next: Next) -> Response {
     }
 }
 
+// The generation of the solution to keep as the reference, as the desktop command takes it.
+#[derive(Deserialize)]
+struct SolveOptions {
+    reference: Option<u64>,
+}
+
 async fn solve(
     State(server): Shared,
     Path(id): Path<String>,
+    Query(SolveOptions { reference }): Query<SolveOptions>,
     Json(scenario): Json<Value>,
 ) -> Response {
     let mut sessions = server.sessions.lock().unwrap();
+    // A released session's reference is gone, which the new session's bridge would also report.
+    if reference.is_some() && !sessions.contains_key(&id) {
+        return released();
+    }
     let session = sessions.entry(id).or_insert_with(Session::new);
     if session.closed {
         return released();
     }
     session.used = Instant::now();
     // Starting under the sessions lock keeps a concurrent close from missing this solve.
-    reply(session.bridge.start(&scenario, Some(server.gpu.clone())))
+    reply(
+        session
+            .bridge
+            .start(&scenario, Some(server.gpu.clone()), reference),
+    )
+}
+
+async fn restore(State(server): Shared, Path(id): Path<String>) -> Response {
+    match server.session(&id) {
+        Some(bridge) => reply(bridge.restore_reference()),
+        None => released(),
+    }
 }
 
 // Like the desktop app, cancelling keeps the session and its generation count.

@@ -1,4 +1,254 @@
 {
+  "locked-flop": {
+    "scenario": {
+      "bettingTree": {
+        "allInSpr": 0.15,
+        "ip": {
+          "flop": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          },
+          "river": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          },
+          "turn": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          }
+        },
+        "maxRaises": 2,
+        "oop": {
+          "flop": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          },
+          "river": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          },
+          "turn": {
+            "bet": [
+              50
+            ],
+            "raise": [
+              50
+            ]
+          }
+        }
+      },
+      "board": "Ks 9h 2d",
+      "heroActsFirst": false,
+      "heroPosition": "UTG",
+      "heroStack": 4.0,
+      "initialPot": 2.0,
+      "iterations": 200,
+      "locks": [
+        {
+          "hands": {
+            "AcQc": [
+              1,
+              1
+            ],
+            "AdQd": [
+              0,
+              1
+            ],
+            "AhQh": [
+              3,
+              1
+            ],
+            "AsQs": [
+              1,
+              3
+            ],
+            "QdQc": [
+              1,
+              1
+            ],
+            "QhQc": [
+              1,
+              0
+            ],
+            "QhQd": [
+              2,
+              0
+            ],
+            "QsQc": [
+              3,
+              1
+            ],
+            "QsQd": [
+              1,
+              0
+            ],
+            "QsQh": [
+              1,
+              0
+            ]
+          },
+          "path": []
+        },
+        {
+          "hands": {
+            "KhJh": [
+              0,
+              1
+            ],
+            "ThTd": [
+              1,
+              1
+            ]
+          },
+          "path": [
+            0
+          ]
+        },
+        {
+          "hands": {
+            "KdJd": [
+              0,
+              1,
+              1
+            ],
+            "TsTc": [
+              1,
+              3,
+              0
+            ]
+          },
+          "path": [
+            1
+          ]
+        },
+        {
+          "hands": {
+            "AhQh": [
+              2,
+              1,
+              1
+            ],
+            "QhQd": [
+              0,
+              1,
+              0
+            ]
+          },
+          "path": [
+            0,
+            1
+          ]
+        },
+        {
+          "hands": {
+            "AsQs": [
+              1,
+              1
+            ]
+          },
+          "path": [
+            0,
+            0,
+            "7c"
+          ]
+        }
+      ],
+      "rakeCap": 0,
+      "rakePercent": 0,
+      "rangeSource": {
+        "catalog": "resources/gtowizard-preflop/cases/Cash6mSimple_6mcEVR25_100",
+        "history": [
+          {
+            "action": "Raise 2.5",
+            "actor": "UTG"
+          },
+          {
+            "action": "Fold",
+            "actor": "HJ"
+          },
+          {
+            "action": "Fold",
+            "actor": "CO"
+          },
+          {
+            "action": "Fold",
+            "actor": "BTN"
+          },
+          {
+            "action": "Fold",
+            "actor": "SB"
+          },
+          {
+            "action": "Raise 12.5",
+            "actor": "BB"
+          },
+          {
+            "action": "Raise 26.5",
+            "actor": "UTG"
+          },
+          {
+            "action": "Call",
+            "actor": "BB"
+          }
+        ],
+        "reduction": "Postflop pot/stacks are reduced for runtime; retained hand classes, when listed, are a test subset. Source weights are not rounded or rescaled.",
+        "retainedClasses": {
+          "BB": [
+            "AQs",
+            "QQ"
+          ],
+          "UTG": [
+            "KJs",
+            "TT"
+          ]
+        },
+        "sha256": "ddf3b630c6664143bad58f7d440a2a53f39b60b551e007325067543f37406c3c",
+        "solution": "Cash6mSimple_6mcEVR25_100"
+      },
+      "ranges": {
+        "BB": {
+          "AQs": 0.42565743,
+          "QQ": 0.7933173
+        },
+        "UTG": {
+          "KJs": 0.255,
+          "TT": 0.0619
+        }
+      },
+      "villainPosition": "BB",
+      "villainStack": 4.0
+    },
+    "solved": {
+      "exploitability": 9.94873062154511e-6,
+      "heroBestResponseEv": 1.2710002660751343,
+      "villainBestResponseEv": -1.2709803581237793
+    },
+    "uniform": {
+      "exploitability": 1.0455608367919922,
+      "heroBestResponseEv": 2.1168267726898193,
+      "villainBestResponseEv": -0.025705143809318542
+    }
+  },
   "raise-flop": {
     "policy": [],
     "queries": [

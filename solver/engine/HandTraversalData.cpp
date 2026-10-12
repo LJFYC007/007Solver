@@ -147,6 +147,32 @@ HandTraversalData::HandTraversalData(const SolveProblem& problem, game::NodeId r
     PrepareChanceTasks();
     if (prepareTraining)
         PrepareRunoutOutcomes();
+    PrepareLocks(problem.locks);
+}
+
+void HandTraversalData::PrepareLocks(const std::vector<NodeLock>& locks)
+{
+    for (const auto& lock : locks)
+    {
+        // Preorder node IDs increase with the traversal index; locks outside this subtree are absent.
+        const auto node = std::lower_bound(nodes.begin(), nodes.end(), lock.node, [](const Node& n, game::NodeId id) { return n.id < id; });
+        if (node == nodes.end() || node->id != lock.node)
+            continue;
+        if (lockOffsets.empty())
+            lockOffsets.assign(nodes.size(), gpu::kNoIndex);
+        const auto& hands = tables.hands[node->actor];
+        const auto offset = lockedPolicies.size(), row = LockRow(hands.size());
+        lockOffsets[node - nodes.begin()] = static_cast<std::uint32_t>(offset);
+        lockedPolicies.resize(offset + node->childCount * row, -1.0f);
+        // Resolved locks name range hands that the locked node's board leaves, which the tables list.
+        for (const auto& [cards, probabilities] : lock.hands)
+        {
+            const auto hand =
+                std::lower_bound(hands.begin(), hands.end(), cards, [](const Hand& h, core::HoleCards c) { return h.cards < c; });
+            for (std::size_t action = 0; action < node->childCount; ++action)
+                lockedPolicies[offset + action * row + static_cast<std::size_t>(hand - hands.begin())] = probabilities[action];
+        }
+    }
 }
 
 void HandTraversalData::PrepareChanceTasks()
@@ -267,13 +293,20 @@ StrategySnapshot HandTraversalData::ExportStrategy(std::size_t chunkUnits, const
             {
                 const Node& node = nodes[decisions[block]];
                 const auto& hands = tables.hands[node.actor];
+                const float* lock = Lock(decisions[block]);
                 float* output = probabilities.get() + blocks[block].probabilityOffset;
-                // Action-major sums normalize into the compact hand-major output.
+                // Action-major sums normalize into the compact hand-major output; locked hands export their locks.
                 for (std::size_t hand = 0; hand < hands.size(); ++hand)
                 {
                     if (hands[hand].mask & node.boardMask)
                         continue;
-                    NormalizeAverageStrategy(units + (node.stateOffset - begin) + hand, RowUnits(hands.size()), node.childCount, output, 1);
+                    if (lock && lock[hand] >= 0.0f)
+                        for (std::size_t action = 0; action < node.childCount; ++action)
+                            output[action] = lock[action * LockRow(hands.size()) + hand];
+                    else
+                        NormalizeAverageStrategy(
+                            units + (node.stateOffset - begin) + hand, RowUnits(hands.size()), node.childCount, output, 1
+                        );
                     output += node.childCount;
                 }
             }

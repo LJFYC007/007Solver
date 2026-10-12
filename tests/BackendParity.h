@@ -3,13 +3,11 @@
 #include "core/Chips.h"
 #include "engine/DcfrSession.h"
 #include "engine/HandTraversalData.h"
-#include "game/GameCompiler.h"
 #include "io/ScenarioLoader.h"
 #include <algorithm>
 #include <cmath>
 #include <memory>
 #include <string>
-#include <utility>
 #include <vector>
 #include <gtest/gtest.h>
 
@@ -47,18 +45,13 @@ inline void ExpectNodesNear(
     EXPECT_EQ(mismatches, 0u) << label;
 }
 
-inline std::shared_ptr<const engine::SolveProblem> MakeProblem(io::Scenario scenario)
-{
-    return std::make_shared<const engine::SolveProblem>(engine::SolveProblem{game::CompileGame(scenario.game), std::move(scenario.ranges)});
-}
-
 // Compares the fixture's updates one at a time, then both devices' evaluations of the last state. Independent
 // trajectories diverge at near-tied regrets, so every GPU update starts from the CPU state.
 inline void CheckBackendParity(const std::string& fixture)
 {
     auto scenario = io::LoadScenario(std::string(TEST_FIXTURE_DIR) + fixture + ".json");
     const int updates = scenario.iterations;
-    const auto problem = MakeProblem(std::move(scenario));
+    const auto problem = io::MakeProblem(scenario);
     const engine::HandTraversalData layout(*problem, problem->game->Root());
     engine::DcfrSession cpu(problem, engine::ComputeDevice::Cpu);
     engine::DcfrSession gpu(problem, engine::ComputeDevice::Gpu);

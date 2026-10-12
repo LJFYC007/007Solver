@@ -46,21 +46,22 @@ Allocation estimates combine host and device memory and impose no limit. They in
 
 Each service process owns one solve and stops at the accuracy target or update limit, or when a message write fails because its client has closed stdout. Only `Ready` marks completion.
 
-Interface requests and caches belong to a solution generation. Replacing or cancelling a solve invalidates pending requests and reports; stale responses must not update the view. Line and board edits invalidate before applying changes. Solver settings are drafts for the next solve and preserve the current result and submitted scenario.
+Interface requests and caches belong to a solution generation. Replacing, restoring or cancelling a solve invalidates its pending requests and reports, unless a solve naming it as the reference keeps it; stale responses must not update the view. Line and board edits invalidate before applying changes. Solver settings are drafts for the next solve and preserve the current result and submitted scenario.
 
-A [bridge](../desktop/src-tauri/src/solver_bridge.rs) owns one solve at a time: one in the desktop app, and one per page session in the [web server](../desktop/src-tauri/src/server.rs), whose routes mirror the Tauri commands. Cancelling keeps the session in both. [client.ts](../desktop/src/solver/client.ts) must keep both transports equivalent; it serializes solves and cancels because HTTP can reorder them.
+A [bridge](../desktop/src-tauri/src/solver_bridge.rs) owns one solve at a time: one in the desktop app, and one per page session in the [web server](../desktop/src-tauri/src/server.rs), whose routes mirror the Tauri commands. Cancelling keeps the session in both. A solve naming a `reference` generation keeps that ready solution, the reference or the replaced one, queryable, and fails without changing anything when the bridge no longer holds it. Restoring makes the reference current again under its original generation; cancelling, a solve without a `reference` or the exit of its service drops it. Its service stays alive with its analysis tables and CUDA context, which the server's releases do not count. Status describes only the current solve. [client.ts](../desktop/src/solver/client.ts) must keep both transports equivalent; it serializes solves, restores and cancels because HTTP can reorder them.
 
-Server solves wait as `queued` for the server's single GPU permit and hold it until `Ready`, when export has freed the training memory but not the CUDA context, or until their service exits. A session ends when its page unloads (a `pagehide` that does not keep the page in the back/forward cache, after which a late solve request is refused) or when the server releases it for idleness or memory; its later requests fail.
+Server solves wait as `queued` for the server's single GPU permit and hold it until `Ready`, when export has freed the training memory but not the CUDA context, or until their service exits. A session ends when its page unloads (a `pagehide` that does not keep the page in the back/forward cache, after which a late solve request is refused) or when the server releases it for idleness or memory; its later requests fail, but after a release a solve without a `reference` starts a new session, whose generations start over.
 
 Service stdout carries one JSON message per line; diagnostics go to stderr. Protocol changes must agree across the [C++ serializer](service/JsonAdapter.cpp), [Rust envelope](../desktop/src-tauri/src/solver_protocol.rs) and [TypeScript types](../desktop/src/solver/types.ts). Rust forwards a successful query response's only field besides `requestId` and `ok`; each report kind is a `QueryKind` in the envelope and the same key of `SolverReports` in [client.ts](../desktop/src/solver/client.ts).
 
 ## Identity and amounts
 
-- A `NodeId` identifies one complete action and concrete-card history within one tree, not a topology index or an identity across solves. Shared betting topology and unordered turn/river rank tables must not merge ordered strategy histories.
+- A `NodeId` identifies one complete action and concrete-card history within one tree, not a topology index or an identity across solves. Shared betting topology and unordered turn/river rank tables must not merge ordered strategy histories. Solves of one scenario that differ only in node locks compile the same NodeIds, which comparing a locked solve with its baseline relies on.
 - An `InfoSetKey` pairs a node with an exact private hand. Preserve original suits and input flop order with [Card.h](core/Card.h) helpers.
 - `Chips` stores integer tenths of a chip. External amounts and EVs use chip units. Core has no big-blind conversion.
 - Player 0 is hero and player 1 is villain on the wire, not persistent seat identities.
 - `amountTo` is the player's total commitment on the current street; `chipsCommitted` is the additional payment from the parent state.
+- `sizePercent` names a bet or raise by its configured size (a bet's percentage of the pot, a raise's of the pot after calling), or by the size the legal limits made of it; clients show this rather than recomputing it from the rounded amount.
 
 ## Values and reach
 
@@ -101,6 +102,15 @@ Bet percentages use the current pot. Raise percentages specify the additional ra
 `maxRaises` counts raises per street, excluding the opening bet; at the cap only call/fold remain. `allInSpr` replaces a configured bet/raise with the effective-stack maximum when the remaining effective stack divided by the pot **after the opponent calls** is at most the threshold. Zero disables replacement; equal resulting sizes are deduplicated.
 
 All-in is a property of a bet, raise or call; no separate action kind or size is added. `isAllIn` requires exhausting the acting player's stack, even when covering the opponent.
+
+## Node locks
+
+A scenario's `locks` fix listed hands' policies at concrete decisions ([ResolveLocks](io/ScenarioLoader.cpp)); other hands and decisions train as usual.
+
+- **Training.** Wherever either device computes a locked hand's policy, it reads the lock from [HandTraversalData](engine/HandTraversalData.h)'s table instead; the hand's regrets and sums keep updating but never decide its policy. GPU plans with locks run the `Locked` kernel instances (see `LockedPolicy` in [GpuKernels.inc](engine/gpu/GpuKernels.inc)), and plans without them the unlocked ones unchanged.
+- **Export.** The snapshot holds each locked hand's lock exactly, whatever its sums.
+- **Exploitability.** Best responses follow locked hands' locks and maximize elsewhere, so exploitability and the accuracy target measure convergence within the locks, not how exploitable the locks are.
+- **Desktop.** The client locks whole decisions and solves the unlocked baseline scenario with its locks. "Lock previous nodes" is not an engine feature: [locks.ts](../desktop/src/solver/locks.ts) also locks the decisions on a lock's path without a lock of their own to the baseline solution's strategies.
 
 ## Preflop input
 

@@ -194,14 +194,41 @@ class CliEndToEndTest(unittest.TestCase):
         self.assertEqual(stdout, "")
         self.assertIn("Device:", stderr)
 
+    def test_stdin_locks_fix_reported_strategies(self):
+        process, ready = self.start("locked-flop", stdin=True)
+        root = self.query(process, ready["rootNodeId"])
+        for lock in json.loads((FIXTURES / "locked-flop.json").read_text())["locks"]:
+            node = root
+            for step in lock["path"]:
+                if isinstance(step, int):
+                    node = self.query(process, node["actions"][step]["nextNodeId"])
+                else:
+                    node = self.query(process, next(o for o in node["outcomes"] if o["card"] == step)["nextNodeId"])
+            hands = {frozenset(hand["cards"]): hand for hand in node["hands"]}
+            for cards, weights in lock["hands"].items():
+                with self.subTest(path=lock["path"], hand=cards):
+                    hand = hands[frozenset((cards[:2], cards[2:]))]
+                    self.assertGreater(hand["marginalReachMass"], 0)
+                    # The fixture's weights normalize exactly in binary floating point.
+                    self.assertEqual(hand["strategy"], [weight / sum(weights) for weight in weights])
+        process.stdin.close()
+        process.stdin = None
+        stdout, stderr = process.communicate(timeout=15)
+        self.assertEqual(process.returncode, 0, stderr)
+
     def test_invalid_invocation_and_scenario_fail_as_json(self):
-        for arguments, stdin in [([], ""), (["--stdin", "--device=invalid"], ""), (["--stdin"], "{}\n")]:
-            with self.subTest(arguments=arguments):
+        # A lock needs one weight per action of its decision; this one fails after the tree is built.
+        locked = json.loads((FIXTURES / "locked-flop.json").read_text())
+        locked["locks"] = [{"path": [], "hands": {"AsQs": [1]}}]
+        for arguments, stdin, built in [([], "", False), (["--stdin", "--device=invalid"], "", False),
+                                        (["--stdin"], "{}\n", False), (["--stdin"], json.dumps(locked) + "\n", True)]:
+            with self.subTest(arguments=arguments, stdin=stdin[:20]):
                 result = subprocess.run([SERVICE, *arguments], input=stdin, capture_output=True, text=True, timeout=5)
                 self.assertNotEqual(result.returncode, 0)
-                message = json.loads(result.stdout)
-                self.assertEqual(message["event"], "failed")
-                self.assertTrue(message["message"])
+                messages = [json.loads(line) for line in result.stdout.splitlines()]
+                self.assertEqual([message["event"] for message in messages[:-1]], ["building_tree"] if built else [])
+                self.assertEqual(messages[-1]["event"], "failed")
+                self.assertTrue(messages[-1]["message"])
 
 
 if __name__ == "__main__":

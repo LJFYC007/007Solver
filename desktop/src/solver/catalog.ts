@@ -97,6 +97,8 @@ const files = import.meta.glob<string>(
 );
 type NodeIndex = Record<string, string>;
 const indexes = new Map<TableFormat, NodeIndex>();
+/** The exporter stores nodes in path order, so the root opens the first block. */
+const ROOT_BLOCK = "chunks/00000.json";
 /** A case's index and the blocks one line reads: its history ancestors and the saved Fold preview. */
 export interface PreflopLine {
     format: TableFormat;
@@ -126,12 +128,19 @@ export function nodeFor(line: PreflopLine, history: PreflopChoice[]) {
     const key = choiceKey(history);
     return line.blocks.get(line.index[key])?.get(key);
 }
-/** The history after the node's Fold when that leads to a saved decision; ZERO_RANGE markers have no actions. */
-export function foldPreview(node: PreflopNode) {
-    const fold = node.actions.find((action) => action.label === "Fold");
-    return fold?.next.kind === "node" && !fold.locked
-        ? [...node.history, { actor: node.actor, action: fold.label }]
-        : undefined;
+/** The history, then the saved decisions of its Fold preview: each one after the previous one's actor folds. */
+export function previewHistories(line: PreflopLine, history: PreflopChoice[]) {
+    const { positions } = solutionFor(line.format);
+    // Only the actor can fold, and ZERO_RANGE markers have no saved descendants.
+    const afterFold = (prefix: PreflopChoice[]) =>
+        positions.map((actor) => [...prefix, { actor, action: "Fold" }]).find((next) => line.index[choiceKey(next)]);
+    const histories: PreflopChoice[][] = [];
+    let prefix: PreflopChoice[] | undefined = history;
+    while (prefix) {
+        histories.push(prefix);
+        prefix = afterFold(prefix);
+    }
+    return histories;
 }
 
 /** Load history ancestors and the saved Fold preview, reusing the previous line's blocks of the same case. */
@@ -141,14 +150,17 @@ export async function loadPreflopLine(
     previous: PreflopLine,
 ): Promise<PreflopLine> {
     const solution = solutionFor(format);
-    const index = indexes.get(format) ?? (await readIndex(format));
+    // Every line reads the root, so a case's first load fetches its block with the index.
+    const [index, rootBlock] = indexes.has(format)
+        ? [indexes.get(format)!, undefined]
+        : await Promise.all([readIndex(format), readFile<StoredNode[]>(format, ROOT_BLOCK)]);
     const line: PreflopLine = { format, index, blocks: new Map() };
     /** In-flight block reads, so prefixes loading in parallel fetch a shared block once. */
     const reads = new Map<string, Promise<Map<string, PreflopNode>>>();
     const byHand = <T>(values: (hand: number) => T) =>
         Object.fromEntries(solution.handOrder.map((hand, i) => [hand, values(i)]));
     async function readBlock(file: string) {
-        const captured = await readFile<StoredNode[]>(format, file);
+        const captured = (file === ROOT_BLOCK && rootBlock) || (await readFile<StoredNode[]>(format, file));
         const block = new Map<string, PreflopNode>();
         for (const { actions, incomingRanges, nodeEvs, actionEvs, ...node } of captured) {
             const key = choiceKey(node.history);
@@ -197,13 +209,11 @@ export async function loadPreflopLine(
         if (!node) throw new Error("Indexed strategy node is missing from its block.");
         return node;
     }
-    // The index names every ancestor's block, so they load in parallel.
-    const ancestors = await Promise.all(history.map((_, i) => load(history.slice(0, i))));
+    // The index names the blocks of every ancestor and preview node, so they load in parallel.
+    const [ancestors] = await Promise.all([
+        Promise.all(history.map((_, i) => load(history.slice(0, i)))),
+        Promise.all(previewHistories(line, history).map(load)),
+    ]);
     if (!ancestors.every(Boolean)) throw new Error("This history contains an undownloaded branch.");
-    let prefix: PreflopChoice[] | undefined = history;
-    for (let i = 0; prefix && i < solution.positions.length; i++) {
-        const node = await load(prefix);
-        prefix = node && foldPreview(node);
-    }
     return line;
 }

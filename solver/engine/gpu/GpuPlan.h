@@ -126,6 +126,9 @@ struct Plan
     std::vector<U32> order;
     std::vector<int> runouts;
     std::vector<U32> cards;
+    // HandTraversalData's node locks by node stamp, empty without any.
+    std::vector<U32> locks;
+    std::vector<float> lockedPolicies;
     std::vector<Pass> initialization;
     std::vector<Pass> passes;
     // Per pass, the earlier passes in other streams whose slot accesses conflict with it and

@@ -174,8 +174,9 @@ private:
         std::vector<Workspace>& workers
     ) const;
     // The actor's entry policy at a decision as action-major rows of its hands, from the
-    // context's regrets (see MatchRegrets for actorReach), sums or snapshot.
-    void LoadPolicy(const Node& node, const WalkContext& context, float* current, const float* actorReach) const;
+    // context's regrets (see MatchRegrets for actorReach), sums or snapshot; locked hands play
+    // their locks.
+    void LoadPolicy(std::uint32_t nodeIndex, const WalkContext& context, float* current, const float* actorReach) const;
     // Required entry policies stay in a row per depth. The opponent's reach points at
     // the row written by the nearest ancestor that changed it, which rewrites that row
     // only after the subtree reading it finishes. Returns whether the subtree carried

@@ -28,20 +28,26 @@ using KernelFunction = void (*)(GPU_ARGUMENTS);
 // 2 * kTerminalGroup threads where shared memory, which grows with the opponent's hands, already
 // limits resident blocks to what the doubled block allows, so wide ranges' hand loops take half the
 // rounds at the same resident blocks.
+template<bool Locked>
 std::pair<KernelFunction, U32> TerminalInstance(bool averaging, std::size_t shared)
 {
-    const KernelFunction narrow = averaging ? Terminal<true, kTerminalGroup> : Terminal<false, kTerminalGroup>;
-    const KernelFunction wide = averaging ? Terminal<true, 2 * kTerminalGroup> : Terminal<false, 2 * kTerminalGroup>;
+    const KernelFunction narrow = averaging ? Terminal<true, kTerminalGroup, Locked> : Terminal<false, kTerminalGroup, Locked>;
+    const KernelFunction wide = averaging ? Terminal<true, 2 * kTerminalGroup, Locked> : Terminal<false, 2 * kTerminalGroup, Locked>;
     int narrowBlocks = 0, wideBlocks = 0;
     Check(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&narrowBlocks, narrow, kTerminalGroup, shared));
     Check(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&wideBlocks, wide, 2 * kTerminalGroup, shared));
     return wideBlocks >= narrowBlocks ? std::pair{wide, 2u * kTerminalGroup} : std::pair{narrow, U32(kTerminalGroup)};
 }
+template<bool Locked>
+KernelFunction TileInstance(Kernel operation, bool averaging)
+{
+    return operation == Kernel::Reach ? Reach<Locked> : averaging ? Backup<true, Locked> : Backup<false, Locked>;
+}
 class CudaExecutor final : public Executor
 {
 public:
     explicit CudaExecutor(const Plan& plan)
-        : shape_(plan.state), entries_(plan.entries), passes_(plan.passes), predecessors_(plan.predecessors)
+        : shape_(plan.state), entries_(plan.entries), passes_(plan.passes), predecessors_(plan.predecessors), locked_(!plan.locks.empty())
     {
         try
         {
@@ -50,7 +56,7 @@ public:
             // The kernels wait for their predecessors only when built for compute capability 9 or
             // later; a device without such code JIT-compiles older PTX.
             cudaFuncAttributes attributes{};
-            Check(cudaFuncGetAttributes(&attributes, Reach));
+            Check(cudaFuncGetAttributes(&attributes, Reach<false>));
             programmatic_ = attributes.ptxVersion >= 90;
             for (auto& stream : streams_)
                 Check(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
@@ -175,6 +181,7 @@ private:
     std::size_t entries_;
     std::vector<Pass> passes_;
     std::vector<std::vector<U32>> predecessors_;
+    bool locked_;
     // One stream per Pass::lane; the first is the capture origin and update stream. Each
     // pass records an event so passes in other streams can wait for their predecessors.
     std::array<cudaStream_t, kLaneCount> streams_{};
@@ -293,14 +300,14 @@ private:
         {
         case Kernel::Reach:
         case Kernel::Backup:
-            kernel = pass.operation == Kernel::Reach ? Reach : averaging ? Backup<true> : Backup<false>;
+            kernel = locked_ ? TileInstance<true>(pass.operation, averaging) : TileInstance<false>(pass.operation, averaging);
             group = (std::min<U32>(pass.lanes, kTileGroup) + kWarpSize - 1) / kWarpSize * kWarpSize;
             blocks = dim3(pass.count, (pass.lanes + group - 1) / group);
             break;
         case Kernel::Terminal:
         {
             shared = TerminalLayout(pass.lanes).end * sizeof(float);
-            const auto instance = TerminalInstance(averaging, shared);
+            const auto instance = locked_ ? TerminalInstance<true>(averaging, shared) : TerminalInstance<false>(averaging, shared);
             kernel = instance.first;
             group = instance.second;
             break;
@@ -359,6 +366,8 @@ private:
             static_cast<U32*>(buffers_[FlagsBuffer]),
             static_cast<U32*>(buffers_[MasksBuffer]),
             static_cast<U32*>(buffers_[StampsBuffer]),
+            static_cast<const U32*>(buffers_[LocksBuffer]),
+            static_cast<const float*>(buffers_[LockedPoliciesBuffer]),
             static_cast<const State*>(buffers_[StateBuffer]),
             pass
         ));

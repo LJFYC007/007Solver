@@ -67,10 +67,10 @@ std::vector<BettingAction> BettingAbstraction::SelectActions(const PublicState& 
     if (range.kind == BettingActionKind::Raise && state.raiseCount >= maxRaises)
         return actions;
     const auto& sizes = players[state.playerToAct.Index()].at(static_cast<std::size_t>(state.street));
-    const auto addAmountTo = [&](core::Chips amountTo)
+    const auto addAmountTo = [&](core::Chips resolved, const auto& size)
     {
         // A configured size always yields legal aggression, including a short all-in.
-        amountTo = std::min(range.maximumAmountTo, std::max(range.minimumAmountTo, amountTo));
+        core::Chips amountTo = std::min(range.maximumAmountTo, std::max(range.minimumAmountTo, resolved));
 
         const std::int64_t potAfterCall = static_cast<std::int64_t>(state.pot.Raw()) + 2LL * amountTo.Raw() -
                                           state.Contribution(state.playerToAct).Raw() - state.Contribution(state.playerToAct.Other()).Raw();
@@ -80,19 +80,27 @@ std::vector<BettingAction> BettingAbstraction::SelectActions(const PublicState& 
 
         const bool duplicate =
             std::any_of(actions.begin(), actions.end(), [&](const BettingAction& action) { return action.AmountTo() == amountTo; });
-        if (!duplicate)
-            actions.emplace_back(range.kind, amountTo);
+        if (duplicate)
+            return;
+        // A size the limits changed is named by what it became.
+        const core::Chips potBefore = state.pot + AmountToCall(state);
+        const float configuredPercent = 100.0f * static_cast<float>(size.fractionNumerator) / static_cast<float>(size.fractionDenominator);
+        const float percent =
+            amountTo == resolved && configuredPercent > 0.0f
+                ? configuredPercent
+                : 100.0f * static_cast<float>(amountTo.Raw() - range.passiveAmountTo.Raw()) / static_cast<float>(potBefore.Raw());
+        actions.emplace_back(range.kind, amountTo, percent);
     };
 
     if (range.kind == BettingActionKind::Bet)
     {
         for (const BetSize& size : sizes.betSizes)
-            addAmountTo(ResolveBetAmountTo(size, state));
+            addAmountTo(ResolveBetAmountTo(size, state), size);
     }
     else
     {
         for (const RaiseSize& size : sizes.raiseSizes)
-            addAmountTo(ResolveRaiseAmountTo(size, state, range.passiveAmountTo));
+            addAmountTo(ResolveRaiseAmountTo(size, state, range.passiveAmountTo), size);
     }
 
     return actions;

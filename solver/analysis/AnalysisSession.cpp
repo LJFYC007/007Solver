@@ -91,6 +91,7 @@ NodeReport AnalysisSession::QueryNode(game::NodeId nodeId)
             game::IsAllIn(node.State(), action),
             action.AmountTo(),
             game::ChipsCommitted(node.State(), action),
+            action.PotPercent(),
             node.GetBettingEdge(edgeIndex).NextNode(),
         });
     }

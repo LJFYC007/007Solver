@@ -1,7 +1,9 @@
 #include "io/ScenarioLoader.h"
 #include "core/Card.h"
 #include "core/Chips.h"
+#include "game/GameCompiler.h"
 #include "io/RangeNotationParser.h"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <fstream>
@@ -103,6 +105,54 @@ game::BettingAbstraction ParseBettingTree(const Json& json, core::PlayerId outOf
         throw std::runtime_error("bettingTree.allInSpr must be a finite non-negative number");
     return {std::move(players), maxRaises.get<std::uint32_t>(), allInSpr.get<float>()};
 }
+
+std::vector<LockSpec> ParseLocks(const Json& json)
+{
+    const auto found = json.find("locks");
+    if (found == json.end())
+        return {};
+    if (!found->is_array())
+        throw std::runtime_error("locks must be an array");
+    std::vector<LockSpec> locks;
+    for (const auto& lock : *found)
+    {
+        LockSpec spec;
+        const auto& path = lock.at("path");
+        if (!path.is_array())
+            throw std::runtime_error("A lock's path must be an array");
+        for (const auto& step : path)
+        {
+            if (step.is_number_unsigned())
+                spec.path.emplace_back(step.get<std::size_t>());
+            else if (step.is_string())
+                spec.path.emplace_back(core::ParseCard(step.get<std::string>()));
+            else
+                throw std::runtime_error("Lock path steps must be action indices or dealt cards");
+        }
+        const auto& hands = lock.at("hands");
+        if (!hands.is_object())
+            throw std::runtime_error("A lock's hands must be an object");
+        for (const auto& [hand, weights] : hands.items())
+        {
+            if (hand.size() != 4)
+                throw std::runtime_error("Locked hand " + hand + " must name two cards, such as AsKd");
+            if (!weights.is_array())
+                throw std::runtime_error("Locked hand " + hand + " must list one weight per action");
+            std::vector<float> values;
+            for (const auto& weight : weights)
+            {
+                if (!weight.is_number())
+                    throw std::runtime_error("Locked hand " + hand + " has a weight that is not a number");
+                values.push_back(weight.get<float>());
+            }
+            spec.hands.emplace_back(
+                core::HoleCards(core::ParseCard(hand.substr(0, 2)), core::ParseCard(hand.substr(2))), std::move(values)
+            );
+        }
+        locks.push_back(std::move(spec));
+    }
+    return locks;
+}
 } // namespace
 
 Scenario LoadScenario(const std::string& jsonPath)
@@ -150,6 +200,81 @@ Scenario ReadScenario(std::istream& input)
         core::RangeSet(LoadRange(ranges, heroPosition), LoadRange(ranges, villainPosition)),
         iterations,
         accuracyPercent,
+        ParseLocks(json),
     };
+}
+
+namespace
+{
+std::vector<engine::NodeLock> ResolveLocks(const game::CompiledGame& game, const core::RangeSet& ranges, const std::vector<LockSpec>& locks)
+{
+    std::vector<engine::NodeLock> resolved;
+    for (const auto& lock : locks)
+    {
+        game::GameNode node = game.GetNode(game.Root());
+        for (const auto& step : lock.path)
+        {
+            if (const auto* action = std::get_if<std::size_t>(&step))
+            {
+                if (node.Kind() != game::NodeKind::Decision || *action >= node.BettingEdgeCount())
+                    throw std::runtime_error("A lock path's action index does not name an action of its decision");
+                node = node.Child(*action);
+                continue;
+            }
+            const core::Card card = std::get<core::Card>(step);
+            if (node.Kind() != game::NodeKind::Chance)
+                throw std::runtime_error("A lock path deals " + core::FormatCard(card) + " where no card is dealt");
+            std::size_t outcome = 0;
+            while (outcome < node.ChanceOutcomeCount() && !(node.GetChanceOutcome(outcome).DealtCard() == card))
+                ++outcome;
+            if (outcome == node.ChanceOutcomeCount())
+                throw std::runtime_error("A lock path deals " + core::FormatCard(card) + ", which the board holds");
+            node = node.Child(outcome);
+        }
+        if (node.Kind() != game::NodeKind::Decision)
+            throw std::runtime_error("A lock path must end at a decision");
+        const core::PlayerId actor = node.State().playerToAct;
+        engine::NodeLock entry{node.Id(), {}};
+        for (const auto& [hand, weights] : lock.hands)
+        {
+            const std::string name = core::FormatCard(hand.Cards()[0]) + core::FormatCard(hand.Cards()[1]);
+            const auto weight = ranges.For(actor).Entries().find(hand);
+            if (weight == ranges.For(actor).Entries().end() || !(weight->second > 0.0f) || core::Overlaps(hand, node.State().board))
+                throw std::runtime_error("Locked hand " + name + " is not in the acting player's range at its node");
+            if (weights.size() != node.BettingEdgeCount())
+                throw std::runtime_error("Locked hand " + name + " must list one weight per action");
+            double total = 0.0;
+            for (const float value : weights)
+            {
+                if (!std::isfinite(value) || value < 0.0f)
+                    throw std::runtime_error("Locked hand " + name + " has a negative or non-finite weight");
+                total += value;
+            }
+            if (!(total > 0.0))
+                throw std::runtime_error("Locked hand " + name + " has no positive weight");
+            std::vector<float> probabilities;
+            for (const float value : weights)
+                probabilities.push_back(static_cast<float>(value / total));
+            entry.hands.emplace_back(hand, std::move(probabilities));
+        }
+        std::sort(entry.hands.begin(), entry.hands.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        if (std::adjacent_find(entry.hands.begin(), entry.hands.end(), [](const auto& a, const auto& b) { return a.first == b.first; }) !=
+            entry.hands.end())
+            throw std::runtime_error("A lock lists a hand twice");
+        resolved.push_back(std::move(entry));
+    }
+    std::sort(resolved.begin(), resolved.end(), [](const auto& a, const auto& b) { return a.node < b.node; });
+    if (std::adjacent_find(resolved.begin(), resolved.end(), [](const auto& a, const auto& b) { return a.node == b.node; }) !=
+        resolved.end())
+        throw std::runtime_error("Two locks name the same decision");
+    return resolved;
+}
+} // namespace
+
+std::shared_ptr<const engine::SolveProblem> MakeProblem(const Scenario& scenario)
+{
+    auto game = game::CompileGame(scenario.game);
+    auto locks = ResolveLocks(*game, scenario.ranges, scenario.locks);
+    return std::make_shared<const engine::SolveProblem>(engine::SolveProblem{std::move(game), scenario.ranges, std::move(locks)});
 }
 } // namespace solver::io
