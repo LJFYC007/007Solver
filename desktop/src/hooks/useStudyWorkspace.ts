@@ -37,8 +37,8 @@ export interface StudyWorkspaceProps {
     onInvalidate: () => Promise<void>;
     /** Solves the GTO solution's scenario with the locks, keeping the GTO solution. */
     onApplyLocks: (locks: NodeLock[]) => Promise<void>;
-    /** Makes the GTO solution current again. */
-    onRestore: () => Promise<void>;
+    /** Makes the GTO solution current again, resolving whether this call did. */
+    onRestore: () => Promise<boolean>;
 }
 
 export function useStudyWorkspace({
@@ -276,8 +276,8 @@ export function useStudyWorkspace({
         setPicker(undefined);
     }
     function cancel() {
-        // A locked solve goes back to the GTO solution it started from.
-        if (reference) void restore();
+        // A locked solve goes back to the GTO solution it started from, keeping the locks to edit.
+        if (reference) void restore(true);
         else void changeStudy(() => setPreIndex(history.length));
     }
     /**
@@ -304,12 +304,14 @@ export function useStudyWorkspace({
             setPreIndex(null);
             return onApplyLocks(locks);
         });
-    const restore = () =>
-        switchSolution(() => {
+    /** Makes the GTO solution current again, which ends the node locking unless `keepLocks`. */
+    const restore = (keepLocks = false) =>
+        switchSolution(async () => {
             // The reference answers queries until it is current again, so the path back loads during the restore.
             if (reference)
                 for (const nodeId of returnPath.current?.nodeIds ?? []) void requestReport(reference.node, nodeId);
-            return onRestore();
+            // A decision with a lock shows the lock's strategies, so the locks go for GTO's to show.
+            if ((await onRestore()) && !keepLocks) setLocks([]);
         });
     /** Shows a lock's decision, resolving to its node. */
     function showLock(lock: NodeLock) {

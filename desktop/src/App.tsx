@@ -83,10 +83,13 @@ export default function App() {
         if (outlived()) return;
         await solve(locked, { locks: next, reference: source });
     }
-    /** Makes the GTO solution current again. Rejects, leaving the current solution as it is, when the bridge cannot. */
+    /**
+     * Makes the GTO solution current again, resolving whether this call did. Rejects, leaving the current solution as
+     * it is, when the bridge cannot.
+     */
     async function restore() {
         // Synchronous double clicks run both handlers before React re-renders.
-        if (restoring.current || !reference) return;
+        if (restoring.current || !reference) return false;
         restoring.current = true;
         // The locked solution stays current, and keeps polling, until the bridge has swapped the solutions.
         const epoch = request.current;
@@ -96,7 +99,7 @@ export default function App() {
             // Its root's report is cached, so the view returns without waiting for the next status poll.
             const restoredRoot =
                 restored.state === "ready" ? await requestReport(reference.node, restored.rootNodeId) : undefined;
-            if (epoch !== request.current) return;
+            if (epoch !== request.current) return false;
             request.current++;
             setScenario(baseline);
             setLockedSolve(undefined);
@@ -104,6 +107,7 @@ export default function App() {
             // Ready at once: a starting state would offer a Cancel solve that ends the study.
             setStatus(restored);
             setCaches(reference);
+            return true;
         } finally {
             restoring.current = false;
         }
