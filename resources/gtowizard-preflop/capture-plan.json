@@ -37,11 +37,10 @@
     "edge": [
       "Cash6mSimple_6mcEVR25_100",
       "Cash6mSimple_6mGGrcR25_100",
-      "Cash6mGeneral_6mGGrcR25_100"
-    ],
-    "chrome": [
+      "Cash6mGeneral_6mGGrcR25_100",
       "Cash6mGeneral_6mcEVR25_100"
-    ]
+    ],
+    "chrome": []
   },
   "nodePriority": "Shortest source history first, then fewer raises; skip known nodes and stop at source ZERO_RANGE",
   "selectionPolicy": "Open an unlocked target after its root node is saved. Missing node branches remain locked.",

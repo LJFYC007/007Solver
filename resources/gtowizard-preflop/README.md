@@ -11,9 +11,9 @@ Four GTO Wizard preflop solutions supply every application and test range. [raw/
 | 1 | Edge | No cold calls | cEV | `Cash6mSimple_6mcEVR25_100` |
 | 2 | Edge | No cold calls | GG R&C | `Cash6mSimple_6mGGrcR25_100` |
 | 3 | Edge | With cold calls | GG R&C | `Cash6mGeneral_6mGGrcR25_100` |
-| 4 | Chrome | With cold calls | cEV | `Cash6mGeneral_6mcEVR25_100` |
+| 4 | Edge | With cold calls | cEV | `Cash6mGeneral_6mcEVR25_100` |
 
-Edge and Chrome use different accounts with independent quotas, as the user has confirmed. Each run processes both queues until that account's quota is exhausted, its queue completes or an error requires stopping; Chrome may start before Edge finishes. An exhausted account must not transfer its cases to the other browser.
+Edge and Chrome use different accounts with independent quotas, as the user has confirmed. All four cases are assigned to Edge by explicit user reassignment. Each run processes the assigned queue until that account's quota is exhausted, its queue completes or an error requires stopping. Do not automatically transfer an exhausted account's cases to the other browser.
 
 [library.json](library.json) keeps the captured listing's display metadata, including configurations outside this scope; it is not a complete source library.
 
@@ -41,7 +41,7 @@ GTO Wizard's [terms, section 7.7](https://gtowizard.com/terms/) prohibit automat
 ### Rules
 
 - **Serial only.** Use one capture session and one receiver across both browsers, one source tab in the assigned browser and one request at a time, with no artificial delay or self-imposed daily cap. Never use parallel tools, workers or tabs.
-- **Stops.** Stop immediately on a source limit, security prompt, CAPTCHA, login requirement or any other request error, and do not retry it with another tab, account, browser, IP or endpoint. When the UI requires login or presents a security prompt, preserve the checkpoint for the user.
+- **Stops.** Stop immediately on a source limit, security prompt, CAPTCHA, login requirement or any other request error, and do not automatically retry it with another tab, account, browser, IP or endpoint. When the UI requires login or presents a security prompt, preserve the checkpoint for the user.
 - **HTTP 401** is the exception: [recover the session](#http-401-recovery) and retry in the assigned browser. A 401 must not end the daily run.
 - **Quota.** Once the source's `usage` count reaches its limit, never request before its actual `reset_date`, even when the daily scheduled run starts late. Never infer a quota or reset time the source omits. A first visit that discovers `ZERO_RANGE` can still count toward the quota.
 - **Credentials.** Authentication headers and tokens stay in the browser. Do not export them or replace the flow with an unauthenticated API fetch.
@@ -51,6 +51,8 @@ GTO Wizard's [terms, section 7.7](https://gtowizard.com/terms/) prohibit automat
 ### Starting a case
 
 Select the next incomplete case assigned to the browser, in priority order, and finish it before starting that browser's next case. After a case stops, confirm that the next one is accessible through the ordinary source UI before capturing it. Pass the ID explicitly with `--case` to the receiver and exporter.
+
+For an explicit user reassignment between independent accounts, stop the receiver first and update the browser assignment. Preserve the old account's stop in the ledger's `browserStopReasons` before removing its global or case stop; keep every request and node count. Clear the reassigned case's old-account `captureStopReason` and `sourceUsage` only after preserving them with that account, so startup does not apply them to the new account. Never treat reassignment as a quota reset. Verify the new account through its ordinary UI and honor any stop it reports.
 
 On a case's first capture, select it from the unlocked library listing, confirm its actual game mode and stack in the source UI, and save the verified metadata (`caseId`, `mode`, `handOrder`, `scope`, `rootActor`, `openingSize`, `smallBlind`, `bigBlind`, `ante`). Confirm the exact rake percentage and cap for that source mode; never reuse another solution's rake.
 
@@ -74,6 +76,14 @@ Drive both tabs with the supported browser CDP tool.
 ### HTTP 401 recovery
 
 Save any pending node and the request count, call `dispose()` and reload the same source tab. Read the receiver's updated `/config`, reinstall the collector after the page loads and observe a successful ordinary UI request for the case before retrying `/next`. The failed node remains unresolved, so capture resumes from it. A repeated 401 calls for checking the same session's authentication flow, not a daily stop or another account.
+
+### Browser tool recovery
+
+If browser CDP reports `Raw CDP is unavailable while Browser Use is resolving a paused document response`, distinguish it from a source HTTP error. It can occur while the page's Freshchat iframe loads, even though the solution UI is visible. Keep the source and receiver tabs open, reset the browser tool's JavaScript session, rediscover Edge and reattach to those same tabs after loading settles. Browser IDs can change after a reset. Use the supported tool reset; do not disable document interception or bypass its guards.
+
+After reconnecting, inspect the existing collector before installing anything. Save and acknowledge any pending node first. If the collector remains installed, resume it without reinstalling or recounting bootstrap requests. If the source page was reloaded, read the receiver's `/config`, install the collector once and observe a successful ordinary UI request before resuming `/next`. A source HTTP 401 still requires the [session recovery](#http-401-recovery) above.
+
+If the existing tabs still report `Debugger unattached` after reconnection, preserve and export the checkpoint before asking the user to restart Edge and reconnect its extension. Keep the last source response in `captureStopReason`; report the browser tool failure separately rather than recording it as a source quota stop.
 
 ### Stopping
 
