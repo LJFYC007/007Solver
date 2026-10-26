@@ -1,4 +1,5 @@
 #include "engine/DcfrSession.h"
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -7,6 +8,15 @@
 
 namespace solver::engine
 {
+namespace
+{
+// DCFR's discount exponents (see Run).
+constexpr double kAlphaStart = 1.0;
+constexpr double kAlphaMax = 1.5;
+constexpr double kAlphaUpdates = 100.0; // the ramp from kAlphaStart to kAlphaMax
+constexpr double kNegativeBeta = 0.5;
+} // namespace
+
 DcfrSession::DcfrSession(std::shared_ptr<const SolveProblem> problem, ComputeDevice device, int workers)
 {
     if (!problem || !problem->game)
@@ -33,12 +43,17 @@ void DcfrSession::Run(int iterations, const std::function<void(int)>& callback)
     {
         const auto player = static_cast<std::size_t>(completedIterations_ % 2);
         const auto t = static_cast<std::uint32_t>(completedIterations_ / 2 + 1);
-        // Both discounts apply lazily: positive regrets are stored divided by the product
-        // of their t^1.5 / (t^1.5 + 1) discounts, and cumulative strategies hold the sum of
-        // t^3 * reach * policy, a (t / (t + 1))^3 discount rescaled away by normalization (DCFR's
-        // gamma 3 rather than the paper's 2 converges faster on the test inputs).
+        // Positive regrets are stored divided by the product of their t^alpha / (t^alpha + 1)
+        // discounts, and cumulative strategies hold the sum of t^3 * reach * policy, a
+        // (t / (t + 1))^3 discount rescaled away by normalization (DCFR's gamma 3 rather than the
+        // paper's 2 converges faster on the test inputs), so both apply lazily. Negative regrets
+        // take t^beta / (t^beta + 1) after each update (see gpu::NegativeDecay for skipped ones).
         const UpdateWeights weights{
-            t, static_cast<float>(positiveScale_), static_cast<float>(1.0 / positiveScale_), static_cast<float>(double(t) * t * t)
+            t,
+            static_cast<float>(positiveScale_),
+            static_cast<float>(1.0 / positiveScale_),
+            static_cast<float>(double(t) * t * t),
+            static_cast<float>(1.0 / (1.0 + std::pow(double(t), -kNegativeBeta))),
         };
         if (gpu_)
             gpu_->Update(player, weights);
@@ -47,8 +62,9 @@ void DcfrSession::Run(int iterations, const std::function<void(int)>& callback)
         ++completedIterations_;
         if (completedIterations_ % 2 == 0)
         {
-            const double power = t * std::sqrt(static_cast<double>(t));
-            positiveScale_ *= power / (power + 1.0);
+            // The ramp forgets the first updates' positive regrets faster.
+            const double alpha = std::min(kAlphaMax, kAlphaStart + (kAlphaMax - kAlphaStart) * double(t) / kAlphaUpdates);
+            positiveScale_ /= 1.0 + std::pow(double(t), -alpha);
         }
         if (callback)
         {

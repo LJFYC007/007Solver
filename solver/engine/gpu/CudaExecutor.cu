@@ -47,7 +47,12 @@ class CudaExecutor final : public Executor
 {
 public:
     explicit CudaExecutor(const Plan& plan)
-        : shape_(plan.state), entries_(plan.entries), passes_(plan.passes), predecessors_(plan.predecessors), locked_(!plan.locks.empty())
+        : shape_(plan.state)
+        , entries_(plan.entries)
+        , symmetric_(static_cast<U32>(plan.symmetric.size()))
+        , passes_(plan.passes)
+        , predecessors_(plan.predecessors)
+        , locked_(!plan.locks.empty())
     {
         try
         {
@@ -174,11 +179,14 @@ public:
                 cudaMemcpyHostToDevice
             );
     }
+    void SymmetrizeSums() override { CopySymmetric(false); }
+    void RestoreSums() override { CopySymmetric(true); }
 
 private:
     std::array<void*, kBufferCount> buffers_{};
     State shape_;
     std::size_t entries_;
+    U32 symmetric_; // the decisions isomorphic evaluation symmetrizes (Plan::symmetric)
     std::vector<Pass> passes_;
     std::vector<std::vector<U32>> predecessors_;
     bool locked_;
@@ -229,6 +237,25 @@ private:
         scratchWindow_.hitRatio = std::min(1.0f, float(setAside) / float(scratchWindow_.num_bytes));
         scratchWindow_.hitProp = cudaAccessPropertyPersisting;
         scratchWindow_.missProp = cudaAccessPropertyNormal;
+    }
+    // Isomorphic evaluation's kernels queue in the origin stream, between the updates and evaluations,
+    // one block row per listed decision and a thread per hand of the larger range.
+    void CopySymmetric(bool restore)
+    {
+        if (!symmetric_)
+            return;
+        const dim3 blocks(symmetric_, (std::max(shape_.hands[0], shape_.hands[1]) + kTileGroup - 1) / kTileGroup);
+        const auto decisions = static_cast<const SymmetricDecision*>(buffers_[SymmetricBuffer]);
+        const auto sums = static_cast<unsigned short*>(buffers_[SumsBuffer]);
+        const auto saved = static_cast<unsigned short*>(buffers_[SavedSumsBuffer]);
+        if (restore)
+            CopySaved<true><<<blocks, kTileGroup, 0, stream_>>>(decisions, sums, saved, shape_);
+        else
+        {
+            CopySaved<false><<<blocks, kTileGroup, 0, stream_>>>(decisions, sums, saved, shape_);
+            Symmetrize<<<blocks, kTileGroup, 0, stream_>>>(decisions, static_cast<const U32*>(buffers_[CardsBuffer]), saved, sums, shape_);
+        }
+        Check(cudaGetLastError());
     }
     void Copy(void* target, const void* source, std::size_t bytes, cudaMemcpyKind kind)
     {

@@ -10,18 +10,27 @@ A result and its snapshot must refer to the same compiled game. Sparse snapshots
 
 Each [DcfrSession](engine/DcfrSession.h) iteration updates one player, alternating across successive `Run` calls. Checkpoints preserve training state; export consumes it.
 
-CPU and GPU run the same algorithm and may differ only in summation order and FMA rounding:
+CPU and GPU run the same algorithm and may differ only in summation order, FMA rounding and the math library's rounding in `NegativeDecay` over more than one skipped update:
 
 - **Reach.** An update propagates only the opponent's reach (range weight, the opponent's action probabilities and chance), using the policy at entry to each decision node.
 - **Pruning.** Subtrees without opponent reach are skipped exactly: their values and increments are zero, and an acting decision keeps its stamp, the index of its actor's last unpruned update.
 - **State.** Both devices share the 16-bit layout of [HandTraversalData.h](engine/HandTraversalData.h) and the stochastic rounding of [GpuQuantize.h](engine/gpu/GpuQuantize.h); a hand an update does not touch keeps its values exactly.
-- **Discounts.** Both DCFR discounts apply lazily ([UpdateWeights](engine/HandTraversalData.h)). Cumulative strategies sum t³ · reach · policy during the opponent's updates (Burch et al.'s alternating average), so only per-hand normalization gives the average policy; a hand without reach at a decision is left untouched there.
+- **Discounts.** Both DCFR regret discounts, which [DcfrSession](engine/DcfrSession.cpp) schedules, apply lazily ([UpdateWeights](engine/HandTraversalData.h)): positive regrets are stored divided by the product of earlier discounts, and a decision pruned for k updates scales its negative regrets by the current update's discount to the k-th power ([NegativeDecay](engine/gpu/GpuQuantize.h)), not by the skipped updates' own. Cumulative strategies sum t³ · reach · policy during the opponent's updates (Burch et al.'s alternating average), so only per-hand normalization gives the average policy; a hand without reach at a decision is left untouched there.
 - **Terminals.** Both devices use one formulation ([HandEvaluation.h](engine/HandEvaluation.h)). Training and GPU checkpoint evaluation take all-in runouts from precomputed win/loss rows; CPU evaluation walks them exactly.
 - **CPU parallelism.** CPU walks run chance subtrees in parallel but must retain ancestor entry policies, use separate scratch and preserve backup order, so results do not depend on the worker count; training must also keep the alternating-player boundary.
 
 Near-tied regrets flip regret matching under rounding differences, so independently trained CPU and GPU trajectories diverge within a few updates. Compare devices one update at a time from a state shared through `DcfrSession::ReadTrainingState` and `WriteTrainingState`, between sessions with equal completed iterations, by decoded values (`HandTraversalData::Decode`): equal values can have different encodings.
 
 `DcfrSession::EvaluateCheckpoint` evaluates on the training device, so GPU solves stop on and report GPU evaluation. Its metrics must describe the exported strategy with the same cumulative-strategy normalization and agree with CPU evaluation of the export ([EvaluateExploitability](engine/StrategyEvaluator.h)).
+
+## Suit isomorphism
+
+Both devices' training sessions use the isomorphic layout of [HandTraversalData](engine/HandTraversalData.h) wherever it applies: at the game root without locks, when the suit permutations that fix the root board form a nontrivial group and map each player's hands onto hands of equal weight. Snapshot evaluation ([EvaluateExploitability](engine/StrategyEvaluator.h)) and the [analysis session](analysis/AnalysisSession.h) keep the full layout, so CPU evaluation of the export stays an independent full-game check.
+
+- **Training.** A chance node lists one canonical card per orbit of its board's stabilizer, each at the full tree's outcome probability (see [Values and reach](#values-and-reach)), and sums each canonical child's values over the hand images of its orbit, in the same order on both devices. This is CFR on the quotient tree: it assumes that hands of one orbit have equal reach, which holds only approximately because their regrets round independently.
+- **Evaluation and export.** Checkpoints evaluate, and export writes to the full tree, the orbit-symmetrized strategy: decisions before the river whose board stabilizer is nontrivial read each hand orbit's mean cumulative sums (`SymmetrizeSums`, which both backends write over the training state's sums for each checkpoint, restoring them after, and once before export). Reach at merged chance outcomes is then symmetric, so isomorphic evaluation is exact and checkpoint metrics describe the export. Export takes each full chance outcome as the image of the canonical card under the element by which the chance backups merge it (`orbitMasks`); river decisions stay unsymmetrized, so another element would export a strategy the checkpoints did not measure.
+- **Identity.** The compiled game and its NodeIds stay the full tree's, and so do snapshots. `ReadTrainingState` and `WriteTrainingState` use the isomorphic layout.
+- **Locks** disable it: a lock on one card's history breaks its orbit. A locked solve still compiles its baseline's NodeIds.
 
 ## GPU plan
 
@@ -40,7 +49,7 @@ The [GPU plan](engine/gpu/GpuPlan.h) supports at most 16 actions per decision (`
 
 ## Memory
 
-Allocation estimates combine host and device memory and impose no limit. They include checkpoint scratch while training remains resident; later queries are excluded. After training, the [analysis session](analysis/AnalysisSession.h) keeps the traversal tables of the last decision whose EVs it evaluated, about 100 bytes per node of its subtree, for later queries of that decision. See [CPU sizing](engine/MemoryEstimate.cpp) and [GPU sizing](engine/GpuDcfrSession.cpp).
+Allocation estimates combine host and device memory and impose no limit. They include checkpoint scratch while training remains resident; later queries are excluded. Estimates and the GPU's checks against free device memory count the layout training allocates, isomorphic where it applies, while the node and strategy-entry counts that estimates report remain the compiled game's. Counts taken before the layout is built come from [MeasureSubtree](engine/HandTraversalData.h), which construction also uses to reserve its parallel subtrees, so it must match the built layout exactly. After training, the [analysis session](analysis/AnalysisSession.h) keeps the traversal tables of the last decision whose EVs it evaluated, about 100 bytes per node of its subtree, for later queries of that decision. See [CPU sizing](engine/MemoryEstimate.cpp) and [GPU sizing](engine/GpuDcfrSession.cpp).
 
 ## Service and desktop lifecycle
 

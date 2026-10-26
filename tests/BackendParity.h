@@ -46,13 +46,15 @@ inline void ExpectNodesNear(
 }
 
 // Compares the fixture's updates one at a time, then both devices' evaluations of the last state. Independent
-// trajectories diverge at near-tied regrets, so every GPU update starts from the CPU state.
-inline void CheckBackendParity(const std::string& fixture)
+// trajectories diverge at near-tied regrets, so every GPU update starts from the CPU state. suitGroup is the size of the
+// suit group the fixture must train under (solver/ARCHITECTURE.md "Suit isomorphism"), zero for the full layout.
+inline void CheckBackendParity(const std::string& fixture, std::size_t suitGroup = 0)
 {
     auto scenario = io::LoadScenario(std::string(TEST_FIXTURE_DIR) + fixture + ".json");
     const int updates = scenario.iterations;
     const auto problem = io::MakeProblem(scenario);
-    const engine::HandTraversalData layout(*problem, problem->game->Root());
+    const auto layout = engine::HandTraversalData::TrainingLayout(*problem, false);
+    ASSERT_EQ(layout->suitGroup.size(), suitGroup) << "suit isomorphism";
     engine::DcfrSession cpu(problem, engine::ComputeDevice::Cpu);
     engine::DcfrSession gpu(problem, engine::ComputeDevice::Gpu);
     testing::Test::RecordProperty("device", gpu.DeviceName());
@@ -64,10 +66,10 @@ inline void CheckBackendParity(const std::string& fixture)
         cpu.Run(1);
         gpu.Run(1);
         expected = cpu.ReadTrainingState();
-        const auto reference = layout.Decode(expected);
-        const auto actual = layout.Decode(gpu.ReadTrainingState());
-        ExpectNodesNear(layout, reference.regrets, actual.regrets, "regrets");
-        ExpectNodesNear(layout, reference.strategySums, actual.strategySums, "strategy sums");
+        const auto reference = layout->Decode(expected);
+        const auto actual = layout->Decode(gpu.ReadTrainingState());
+        ExpectNodesNear(*layout, reference.regrets, actual.regrets, "regrets");
+        ExpectNodesNear(*layout, reference.strategySums, actual.strategySums, "strategy sums");
         EXPECT_EQ(actual.stamps, reference.stamps) << "node stamps";
         ASSERT_FALSE(testing::Test::HasFailure());
     }

@@ -52,7 +52,8 @@ public:
         // rake.
         ExpectedRake,
     };
-    // Allocation sizes before constructing the traversal; excludes training/snapshot state.
+    // Allocation sizes before constructing the traversal of the game root, its layout under suitGroup
+    // (HandTraversalData::MeasureSubtree); excludes training/snapshot state.
     struct StorageEstimate
     {
         std::uint64_t fixedBytes;
@@ -72,6 +73,7 @@ public:
     static StorageEstimate EstimateStorage(
         const game::CompiledGame& game,
         const std::array<std::size_t, 2>& handCounts,
+        const std::vector<HandTraversalData::SuitMap>& suitGroup = {},
         bool prepareTraining = false
     );
 
@@ -112,6 +114,8 @@ public:
         const std::vector<Evaluation>& evaluations,
         std::vector<float>* actionValues = nullptr
     ) const;
+    // The same from the quantized sums as given; isomorphic evaluation symmetrizes them first
+    // (HandTraversalData::SymmetrizeSums).
     std::vector<float> EvaluateAverage(
         const std::uint16_t* strategySums,
         std::size_t player,

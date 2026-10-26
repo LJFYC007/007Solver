@@ -25,7 +25,7 @@ private:
     StrategySnapshot ExportStrategy() &&;
     QuantizedState ReadTrainingState() const { return executor_->DownloadTraining(); }
     void WriteTrainingState(const QuantizedState& state);
-    std::unique_ptr<const HandTraversalData> data_;
+    std::shared_ptr<const HandTraversalData> data_;
     std::unique_ptr<gpu::Executor> executor_;
     gpu::State state_{};
     MemoryEstimate memory_{};

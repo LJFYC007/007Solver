@@ -15,16 +15,20 @@ struct MemoryEstimate
     int workers;
 };
 
-// Counts available before either backend allocates a traversal or strategy state.
+// Counts available before either backend allocates a traversal or strategy state. The tree and strategy
+// entries are the full game's; the rest describe the training layout (HandTraversalData::TrainingLayout),
+// isomorphic where it applies.
 struct SolveSize
 {
     game::GameTreeSize tree;
     std::array<std::size_t, 2> hands{};
     std::uint64_t strategyEntries = 0;
-    std::uint64_t stateUnits = 0; // 16-bit units of the regrets or the strategy sums (HandTraversalData::StateUnits)
+    std::uint64_t layoutNodes = 0;    // traversal nodes (HandTraversalData::MeasureSubtree)
+    std::uint64_t stateUnits = 0;     // 16-bit units of the regrets or the strategy sums (HandTraversalData::StateUnits)
+    std::uint64_t symmetricUnits = 0; // those of the sums checkpoints symmetrize (HandTraversalData::SymmetrizeSums)
 };
 SolveSize MeasureSolveSize(const SolveProblem& problem);
-// Resident regrets and strategy sums together.
+// The training layout's resident regrets and strategy sums together.
 inline std::uint64_t TrainingStateBytes(const SolveSize& size)
 {
     return 2 * sizeof(std::uint16_t) * size.stateUnits;

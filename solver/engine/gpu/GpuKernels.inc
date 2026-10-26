@@ -847,14 +847,14 @@ __device__ __forceinline__ void TerminalFold(
 
 // The stored regret after adding increment. Positive regrets are stored divided by
 // positiveScale, so the discounts of the updates a node skipped are already in place;
-// negative regrets halve once per skipped update.
-__device__ __forceinline__ float UpdatedRegret(float old, float increment, float halving, State state)
+// negative regrets decay once per skipped update (see NegativeDecay).
+__device__ __forceinline__ float UpdatedRegret(float old, float increment, float decay, State state)
 {
-    const float regret = (old > 0.0f ? old * state.positiveScale : old * halving) + increment;
-    return regret > 0.0f ? regret * state.positiveInverse : regret * 0.5f;
+    const float regret = (old > 0.0f ? old * state.positiveScale : old * decay) + increment;
+    return regret > 0.0f ? regret * state.positiveInverse : regret * state.negativeDiscount;
 }
 
-// Advances an acting decision's stamp at a training update and returns the halving of its
+// Advances an acting decision's stamp at a training update and returns the decay of its
 // negative regrets for the updates it skipped. Stamps alternate between two halves: a pass
 // reads the half its player's previous update wrote while writing the other, and every
 // acting decision writes its entry, from the one writer thread.
@@ -867,7 +867,7 @@ __device__ __forceinline__ float AdvanceStamp(State state, U32 index, bool live,
         StoreStreamed(stamps + write + index, state.update);
     else if (writer)
         StoreStreamed(stamps + write + index, stamp);
-    return Halving(state.update - 1u - stamp);
+    return NegativeDecay(state.update - 1u - stamp, state.negativeDiscount);
 }
 
 // One hand of a decision whose only children are the fold and showdown the calling block
@@ -883,7 +883,7 @@ __device__ __forceinline__ float LeafHand(
     State state,
     float child0,
     float child1,
-    float halving,
+    float decay,
     U32& code0,
     U32& code1,
     U32& next,
@@ -912,8 +912,8 @@ __device__ __forceinline__ float LeafHand(
     const float value = child0 * probability0 + child1 * probability1;
     if (!Averaging)
     {
-        const float updated0 = UpdatedRegret(Dequantize(r0, exponent), child0 - value, halving, state);
-        const float updated1 = UpdatedRegret(Dequantize(r1, exponent), child1 - value, halving, state);
+        const float updated0 = UpdatedRegret(Dequantize(r0, exponent), child0 - value, decay, state);
+        const float updated1 = UpdatedRegret(Dequantize(r1, exponent), child1 - value, decay, state);
         next = RegretExponent(fmaxf(fabsf(updated0), fabsf(updated1)));
         const float dither = Dither(ditherIndex, state.update);
         code0 = U32(Quantize(updated0, next, dither)) & 0xffffu;
@@ -944,7 +944,7 @@ __device__ __forceinline__ void BackupLeafPair(
     float showdown0,
     float fold1,
     float showdown1,
-    float halving,
+    float decay,
     float* values,
     const float* lock,
     U32 lockRow
@@ -978,7 +978,7 @@ __device__ __forceinline__ void BackupLeafPair(
         state,
         foldAction == 0 ? fold0 : showdown0,
         foldAction == 0 ? showdown0 : fold0,
-        halving,
+        decay,
         codes[0][0],
         codes[0][1],
         next[0],
@@ -994,7 +994,7 @@ __device__ __forceinline__ void BackupLeafPair(
         state,
         foldAction == 0 ? fold1 : showdown1,
         foldAction == 0 ? showdown1 : fold1,
-        halving,
+        decay,
         codes[1][0],
         codes[1][1],
         next[1],
@@ -1092,7 +1092,7 @@ __global__ void __launch_bounds__(Group, 12 * kTerminalGroup / Group) Terminal(G
         liveFold = ownFold && live;
     }
     const bool liveParent = live || liveFold, foldFromRow = liveFold && !ownFold;
-    const float halving = trainParent ? AdvanceStamp(state, n.stamp, liveParent, local == 0, stamps) : 1.0f;
+    const float decay = trainParent ? AdvanceStamp(state, n.stamp, liveParent, local == 0, stamps) : 1.0f;
     if (local == 0)
     {
         if (backup)
@@ -1256,7 +1256,7 @@ __global__ void __launch_bounds__(Group, 12 * kTerminalGroup / Group) Terminal(G
                 showdown0,
                 fold1,
                 showdown1,
-                halving,
+                decay,
                 output + h,
                 lock ? lock + h : nullptr,
                 LockRow(count)
@@ -1513,7 +1513,7 @@ __device__ __forceinline__ void BackupNode(
     }
     if (h == 0)
         flags[n.slot] = live;
-    const float halving = training ? AdvanceStamp(state, n.stamp, live != 0, h == 0, stamps) : 1.0f;
+    const float decay = training ? AdvanceStamp(state, n.stamp, live != 0, h == 0, stamps) : 1.0f;
     float* output = values + U64(n.slot) * state.stride + h;
     if (!live)
     {
@@ -1609,8 +1609,8 @@ __device__ __forceinline__ void BackupNode(
 #pragma unroll(ActionCount ? ActionCount : 1)
         for (U32 a = 0; a < actions; ++a)
         {
-            entryRegrets0[a] = UpdatedRegret(Dequantize(entryRegrets0[a], exponent0), childValues0[a] - value0, halving, state);
-            entryRegrets1[a] = UpdatedRegret(Dequantize(entryRegrets1[a], exponent1), childValues1[a] - value1, halving, state);
+            entryRegrets0[a] = UpdatedRegret(Dequantize(entryRegrets0[a], exponent0), childValues0[a] - value0, decay, state);
+            entryRegrets1[a] = UpdatedRegret(Dequantize(entryRegrets1[a], exponent1), childValues1[a] - value1, decay, state);
             magnitude0 = fmaxf(magnitude0, fabsf(entryRegrets0[a]));
             magnitude1 = fmaxf(magnitude1, fabsf(entryRegrets1[a]));
         }
@@ -1628,9 +1628,9 @@ __device__ __forceinline__ void BackupNode(
 }
 
 // A chance node sums its children, whose slots are consecutive from its link (see
-// Plan), so eight children's flags and values are loaded per round with no dependent
-// slot lookup; the sums keep child order. Launches of a few such nodes end an update.
-__device__ __forceinline__ void BackupChance(Node n, State state, U32 h, U32 pair, float* values, U32* flags)
+// Plan), in child order; without orbits, eight children's flags and values are loaded per
+// round with no dependent slot lookup. Launches of a few such nodes end an update.
+__device__ __forceinline__ void BackupChance(Node n, State state, U32 h, U32 pair, float* values, U32* flags, const U32* cards)
 {
     U32 live = 0;
     float value0 = 0.0f, value1 = 0.0f;
@@ -1642,30 +1642,58 @@ __device__ __forceinline__ void BackupChance(Node n, State state, U32 h, U32 pai
 #pragma unroll 1
     for (U32 a = 0; a < children; ++a)
         PrefetchL2(row + U64(a) * state.stride);
-    if (h == 0)
+    if (n.rankCounts != kNoIndex)
     {
-        PrefetchL2(flags + n.link);
-        PrefetchL2(flags + n.link + children / 2);
-        PrefetchL2(flags + n.link + children - 1);
-    }
+        // Suit isomorphism: child a sums its orbit (HandTraversalData::orbitMasks, Node::rankCounts).
+        const U32* masks = cards + n.rankCounts;
 #pragma unroll 1
-    for (U32 a = 0; a < children; a += 8, row += 8 * state.stride)
-    {
-        U32 flag[8];
-        float loaded0[8], loaded1[8];
-        for (U32 k = 0; k < 8; ++k)
+        for (U32 a = 0; a < children; ++a)
         {
-            const bool present = a + k < children;
-            const float2 source = present ? LoadPair(row + k * state.stride, pair) : make_float2(0.0f, 0.0f);
-            flag[k] = present ? flags[n.link + a + k] : 0u;
-            loaded0[k] = source.x;
-            loaded1[k] = source.y;
+            const U32 flag = flags[n.link + a];
+            live |= flag;
+            if (!flag)
+                continue;
+            const float* child = values + U64(n.link + a) * state.stride;
+            const float2 own = LoadPair(child + h, pair);
+            float sum0 = own.x, sum1 = own.y;
+            for (U32 mask = masks[a] >> 1, e = 1; mask; mask >>= 1, ++e)
+                if (mask & 1u)
+                {
+                    const U32 images = cards[HandImages(state, e, state.player, h)];
+                    sum0 += child[images & 0xffffu];
+                    sum1 += pair ? child[images >> 16] : 0.0f;
+                }
+            value0 += sum0;
+            value1 += sum1;
         }
-        for (U32 k = 0; k < 8; ++k)
+    }
+    else
+    {
+        if (h == 0)
         {
-            live |= flag[k];
-            value0 += flag[k] ? loaded0[k] : 0.0f;
-            value1 += flag[k] ? loaded1[k] : 0.0f;
+            PrefetchL2(flags + n.link);
+            PrefetchL2(flags + n.link + children / 2);
+            PrefetchL2(flags + n.link + children - 1);
+        }
+#pragma unroll 1
+        for (U32 a = 0; a < children; a += 8, row += 8 * state.stride)
+        {
+            U32 flag[8];
+            float loaded0[8], loaded1[8];
+            for (U32 k = 0; k < 8; ++k)
+            {
+                const bool present = a + k < children;
+                const float2 source = present ? LoadPair(row + k * state.stride, pair) : make_float2(0.0f, 0.0f);
+                flag[k] = present ? flags[n.link + a + k] : 0u;
+                loaded0[k] = source.x;
+                loaded1[k] = source.y;
+            }
+            for (U32 k = 0; k < 8; ++k)
+            {
+                live |= flag[k];
+                value0 += flag[k] ? loaded0[k] : 0.0f;
+                value1 += flag[k] ? loaded1[k] : 0.0f;
+            }
         }
     }
     if (h == 0)
@@ -1699,7 +1727,7 @@ __global__ void __launch_bounds__(kTileGroup, 5) Backup(GPU_ARGUMENTS)
         if (Kind(n.info) == NodeKind::Decision && Actor(n.info) == state.player)
             lock = LockedPolicy(locks, lockedPolicies, n.stamp);
     if (Kind(n.info) == NodeKind::Chance)
-        BackupChance(n, state, h, pair, scratch, flags);
+        BackupChance(n, state, h, pair, scratch, flags, cards);
     else if (actions == 2)
         BackupNode<2, Averaging, Locked>(n, state, h, pair, entries, scratch, flags, stamps, lock);
     else if (actions == 3)
@@ -1772,4 +1800,49 @@ __global__ void Outcomes(GPU_ARGUMENTS)
         }
     }
     store(wins, losses);
+}
+
+// Isomorphic evaluation's kernels (see Executor::SymmetrizeSums) take one block row per listed
+// decision. CopySaved copies a decision's units (StateUnits, whole kStateAlign groups) to its saved
+// sums, or with Restore back, in 16-byte vectors.
+template<bool Restore>
+__global__ void CopySaved(const SymmetricDecision* decisions, unsigned short* sums, unsigned short* saved, State shape)
+{
+    const SymmetricDecision d = decisions[blockIdx.x];
+    const U32 vectors = U32(StateUnits(Count(d.info), shape.hands[Actor(d.info)]) / 8);
+    uint4* state = (uint4*)(sums + U64(d.state) * kStateAlign);
+    uint4* copy = (uint4*)(saved + U64(d.saved) * kStateAlign);
+    for (U32 i = blockIdx.y * blockDim.x + threadIdx.x; i < vectors; i += gridDim.y * blockDim.x)
+        if constexpr (Restore)
+            StoreStreamed(state + i, copy[i]);
+        else
+            copy[i] = LoadStreamed(state + i);
+}
+
+// HandTraversalData::SymmetrizeSums of the listed decisions from their saved sums into the training
+// state's, one thread per hand (OrbitMean). A hand that is its own orbit keeps its stored sums.
+__global__ void Symmetrize(
+    const SymmetricDecision* decisions,
+    const U32* cards,
+    const unsigned short* saved,
+    unsigned short* sums,
+    State shape
+)
+{
+    const SymmetricDecision d = decisions[blockIdx.x];
+    const U32 p = Actor(d.info), count = shape.hands[p], h = blockIdx.y * blockDim.x + threadIdx.x;
+    if (h >= count)
+        return;
+    // The index of e^-1 k for an element e > 0 (see HandImages).
+    const auto image = [&](U32 e, U32 k) { return (cards[HandImages(shape, e, p, k)] >> (16 * (k & 1u))) & 0xffffu; };
+    const U32 actions = Count(d.info), row = StateRow(count);
+    float mean[kMaxActions];
+    const U32 exponent = OrbitMean(saved + U64(d.saved) * kStateAlign, actions, row, h, d.elements, image, mean);
+    if (exponent == kNoIndex)
+        return;
+    unsigned short* target = sums + U64(d.state) * kStateAlign;
+#pragma unroll 1
+    for (U32 a = 0; a < actions; ++a)
+        StoreStreamed(target + U64(a) * row + h, (unsigned short)Quantize(mean[a], exponent, 0.5f));
+    StoreStreamed(ExponentBytes(target, actions, row) + h, (unsigned char)exponent);
 }

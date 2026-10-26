@@ -18,6 +18,9 @@ SolveSize MeasureSolveSize(const SolveProblem& problem)
     if (!problem.game)
         throw std::invalid_argument("Memory estimate requires a compiled game");
     SolveSize size{problem.game->Size()};
+    const auto layout =
+        HandTraversalData::MeasureSubtree(problem.game->GetNode(problem.game->Root()), HandTraversalData::RootSuitGroup(problem));
+    size.layoutNodes = layout.nodes;
     const auto& board = problem.game->Spec().initialBoard;
     for (std::uint8_t player = 0; player < 2; ++player)
     {
@@ -25,8 +28,9 @@ SolveSize MeasureSolveSize(const SolveProblem& problem)
             if (weight > 0.0f && !core::Overlaps(hand, board))
                 ++size.hands[player];
         size.strategyEntries += size.tree.actionEntries[player] * size.hands[player];
-        size.stateUnits +=
-            HandTraversalData::StateUnits(size.tree.actionEntries[player], size.hands[player], size.tree.decisionNodes[player]);
+        size.stateUnits += HandTraversalData::StateUnits(layout.actions[player], size.hands[player], layout.decisions[player]);
+        size.symmetricUnits +=
+            HandTraversalData::StateUnits(layout.symmetricActions[player], size.hands[player], layout.symmetricDecisions[player]);
     }
     return size;
 }
@@ -51,23 +55,27 @@ MemoryEstimate EstimateCpuMemory(const SolveProblem& problem, int workers)
     const std::uint64_t entries = counts.strategyEntries;
     const std::uint64_t decisions = size.decisionNodes[0] + size.decisionNodes[1];
     const int count = CpuWorkerCount(workers);
-    const auto storage = HandTraversal::EstimateStorage(*problem.game, counts.hands, true);
+    const auto suitGroup = HandTraversalData::RootSuitGroup(problem);
+    const auto storage = HandTraversal::EstimateStorage(*problem.game, counts.hands, suitGroup, true);
     // Include the bounded runout/regret scratch and per-team runtime overhead.
     const std::uint64_t workspace = storage.WalkBytes(count);
     // Training retains quantized regrets and strategy sums and node stamps; current policies live in depth rows.
     const std::uint64_t trainingPeak =
-        TrainingStateBytes(counts) + sizeof(std::uint32_t) * size.traversalNodes + workspace + storage.runoutOutcomesBytes;
-    // Checkpoints borrow sums while all training allocations remain resident; evaluation
-    // walks use the default team, and raked games walk policy values beside the best response.
-    const std::uint64_t evaluationWalk = storage.WalkBytes(CpuWorkerCount(), problem.game->Spec().HasRake() ? 2 : 1);
-    const auto checkpointPeak = trainingPeak + evaluationWalk;
+        TrainingStateBytes(counts) + sizeof(std::uint32_t) * counts.layoutNodes + workspace + storage.runoutOutcomesBytes;
+    // Checkpoints borrow sums, saving those they symmetrize, while all training allocations remain
+    // resident; evaluation walks use the default team, and raked games walk policy values beside
+    // the best response.
+    const std::size_t rows = problem.game->Spec().HasRake() ? 2 : 1;
+    const auto checkpointPeak = trainingPeak + sizeof(std::uint16_t) * counts.symmetricUnits + storage.WalkBytes(CpuWorkerCount(), rows);
     // Final export releases regrets and workspaces before allocating the snapshot, whose
     // probabilities are normalized from the still resident quantized sums. Strategy entries
     // bound its probabilities, which cover board-compatible hands only.
     const std::uint64_t snapshot = StrategySnapshot::EstimateStorageBytes(decisions, entries);
     const std::uint64_t exportPeak = sizeof(std::uint16_t) * counts.stateUnits + snapshot + storage.runoutOutcomesBytes;
-    const std::uint64_t evaluationPeak = snapshot + evaluationWalk;
-    const std::uint64_t peak = size.storageBytes + storage.fixedBytes + std::max({checkpointPeak, exportPeak, evaluationPeak});
+    // Snapshot evaluation walks the full layout, once training has released its own.
+    const auto full = suitGroup.empty() ? storage : HandTraversal::EstimateStorage(*problem.game, counts.hands);
+    const std::uint64_t evaluationPeak = full.fixedBytes + snapshot + full.WalkBytes(CpuWorkerCount(), rows);
+    const std::uint64_t peak = size.storageBytes + std::max(storage.fixedBytes + std::max(checkpointPeak, exportPeak), evaluationPeak);
     return MakeMemoryEstimate(counts, peak, count);
 }
 } // namespace solver::engine

@@ -5,6 +5,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 namespace solver::engine::gpu
 {
@@ -184,6 +185,14 @@ Plan::Plan(const HandTraversalData& data) : locks(data.lockOffsets), lockedPolic
         for (U32 h = 0; h < state.hands[p]; h += 2)
             cards.push_back((hands[base + h].cards & 0xffffu) | (hands[base + h + 1].cards & 0xffffu) << 16);
     }
+    // Suit isomorphism: each element's hand images (see HandImages), a padding hand its own image.
+    for (U32 e = 1; e < data.suitGroup.size(); ++e)
+        for (U32 p = 0; p < 2; ++p)
+        {
+            const auto& images = data.handImages[e][p];
+            for (U32 h = 0; h < state.hands[p]; h += 2)
+                cards.push_back(U32(images[h]) | (h + 1 < state.hands[p] ? U32(images[h + 1]) : h + 1) << 16);
+        }
     ranks.resize(tables.rankRows.size() * std::size_t(PaddedHands(state)), 0xffff);
     // Each rank row's section per opponent, then the rows at a pitch that fits the largest.
     std::vector<std::array<Section, 2>> sections(tables.rankRows.size());
@@ -274,6 +283,8 @@ Plan::Plan(const HandTraversalData& data) : locks(data.lockOffsets), lockedPolic
         if (source.rankRow >= 0)
             for (U32 p = 0; p < 2; ++p)
                 n.rankCounts |= static_cast<U32>(tables.rankRows[source.rankRow][p].hands.size()) << (16 * p);
+        else if (source.kind == NodeKind::Chance)
+            n.rankCounts = kNoIndex;
         for (U32 p = 0; p < 2; ++p)
         {
             std::copy(source.utilities[p].begin(), source.utilities[p].end(), n.utility[p]);
@@ -289,6 +300,36 @@ Plan::Plan(const HandTraversalData& data) : locks(data.lockOffsets), lockedPolic
     for (std::int64_t k = 0; k < nodeCount; ++k)
         for (U32 i = static_cast<U32>(k), a = 0; a < layout[i].count; ++a)
             layout[edges[layout[i].edge + a]].parent = i;
+    // Suit isomorphism: chance nodes on one board, whose orbit masks are equal (HandTraversalData::CanonicalOutcomes),
+    // share their words (see Node::rankCounts).
+    if (data.Isomorphic())
+    {
+        std::unordered_map<U64, U32> patterns;
+        for (auto& n : layout)
+        {
+            if (n.kind != NodeKind::Chance)
+                continue;
+            const auto masks = data.orbitMasks.begin() + n.edge;
+            if (std::all_of(masks, masks + n.count, [](U32 mask) { return mask == 1u; }))
+                continue;
+            const auto [pattern, created] = patterns.try_emplace(n.board, static_cast<U32>(cards.size()));
+            if (created)
+                cards.insert(cards.end(), masks, masks + n.count);
+            n.rankCounts = pattern->second;
+        }
+    }
+    // Suit isomorphism: the decisions whose sums evaluation symmetrizes, their saved sums packed in order.
+    for (std::size_t k = 0; k < data.symmetricDecisions.size(); ++k)
+    {
+        const auto& node = data.nodes[data.symmetricDecisions[k]];
+        symmetric.push_back({
+            static_cast<U32>(node.stateOffset / kStateAlign),
+            static_cast<U32>(data.savedOffsets[k] / kStateAlign),
+            PackInfo(NodeKind::Decision, static_cast<U32>(node.actor), false, static_cast<U32>(node.childCount), 0),
+            data.SymmetricElements(node),
+        });
+    }
+    savedUnits = data.savedOffsets.back();
     // A fold and a showdown under one decision share the showdown's Terminal block; when
     // they are the decision's only children, that block also backs the decision up, so
     // neither the fold nor the decision is a Terminal or Backup work item. (Propagating the
@@ -318,7 +359,16 @@ Plan::Plan(const HandTraversalData& data) : locks(data.lockOffsets), lockedPolic
             fused[i] = 1;
     }
     state.stampCount = static_cast<U32>(layout.size());
+    // The flop row sums the turn row of every undealt card (OutcomeStage::SumTurns), whether or not
+    // the chance nodes list them all: with any turn row, the rows up to the highest undealt card's.
     state.outcomeRows = static_cast<U32>(data.runoutRows);
+    if (data.runoutRows > 1)
+    {
+        U32 highest = 51;
+        while (state.board >> highest & 1u)
+            --highest;
+        state.outcomeRows = highest + 2;
+    }
     // Both hand-major layouts of every runout row, so either player's Runout loop reads its own
     // hands contiguously: the flop row's 32-bit entries, then the turn rows' 16-bit ones (see
     // Outcomes).
@@ -780,7 +830,7 @@ Plan::Plan(const HandTraversalData& data) : locks(data.lockOffsets), lockedPolic
                     const LayoutNode& chance = layout[parent];
                     std::copy(chance.reachSlot, chance.reachSlot + 2, n.reachSlot);
                     n.board = layout[root].board & ~chance.board;
-                    n.foldUtility[0] = 1.0f / float(chance.count - 4);
+                    n.foldUtility[0] = HandTraversalData::OutcomeProbability(data.nodes[parent].board);
                 }
             }
             nodes[i] = Pack(n);
@@ -808,6 +858,8 @@ std::array<BufferData, kBufferCount> Plan::Buffers() const
     buffers[LocksBuffer] = Table(locks);
     buffers[LockedPoliciesBuffer] = Table(lockedPolicies);
     buffers[StateBuffer] = {&state, sizeof(State)};
+    buffers[SymmetricBuffer] = Table(symmetric);
+    buffers[SavedSumsBuffer] = {nullptr, savedUnits * sizeof(std::uint16_t)};
     return buffers;
 }
 

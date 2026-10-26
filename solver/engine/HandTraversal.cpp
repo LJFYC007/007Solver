@@ -211,8 +211,8 @@ void AccumulateNodeStrategy(
 // entry has the dither index offset (see AccumulateNodeStrategy), from its child value rows
 // (actions * count floats, overwritten with the stored regrets) and its values. Positive
 // regrets are stored divided by positiveScale, so the discounts of the updates the node
-// skipped are already in place; negative regrets halve once per skipped update. Each
-// hand is then re-encoded (see GpuQuantize.h).
+// skipped are already in place; negative regrets take decay for the updates it skipped (see
+// gpu::NegativeDecay), then negativeDiscount. Each hand is then re-encoded (see GpuQuantize.h).
 void UpdateNodeRegrets(
     std::int16_t* regrets,
     std::size_t offset,
@@ -220,18 +220,19 @@ void UpdateNodeRegrets(
     std::size_t count,
     float* rows,
     const float* values,
-    float scale,
-    float inverse,
-    float halving,
-    std::uint32_t update
+    const UpdateWeights& weights,
+    float decay
 )
 {
+    // Locals, because stores to rows may alias the weights as far as the compiler knows.
+    const float scale = weights.positiveScale, inverse = weights.positiveInverse, negativeDiscount = weights.negativeDiscount;
+    const std::uint32_t update = weights.update;
     const std::size_t row = HandTraversalData::RowUnits(count);
     std::uint8_t* exponents = ExponentBytes(regrets, actions, row);
     std::size_t hand = 0;
 #if defined(__AVX2__)
-    const __m256 zero = _mm256_setzero_ps(), half = _mm256_set1_ps(0.5f);
-    const __m256 scales = _mm256_set1_ps(scale), inverses = _mm256_set1_ps(inverse), halvings = _mm256_set1_ps(halving);
+    const __m256 zero = _mm256_setzero_ps(), negatives = _mm256_set1_ps(negativeDiscount);
+    const __m256 scales = _mm256_set1_ps(scale), inverses = _mm256_set1_ps(inverse), decays = _mm256_set1_ps(decay);
     for (; hand + 8 <= count; hand += 8)
     {
         const __m256 value = _mm256_loadu_ps(values + hand);
@@ -242,10 +243,11 @@ void UpdateNodeRegrets(
             const std::size_t i = action * count + hand;
             const __m256 old = _mm256_mul_ps(vector::Load(regrets + action * row + hand), decode);
             const __m256 discounted =
-                _mm256_blendv_ps(_mm256_mul_ps(old, halvings), _mm256_mul_ps(old, scales), _mm256_cmp_ps(old, zero, _CMP_GT_OQ));
+                _mm256_blendv_ps(_mm256_mul_ps(old, decays), _mm256_mul_ps(old, scales), _mm256_cmp_ps(old, zero, _CMP_GT_OQ));
             const __m256 regret = _mm256_add_ps(discounted, _mm256_sub_ps(_mm256_loadu_ps(rows + i), value));
-            const __m256 stored =
-                _mm256_blendv_ps(_mm256_mul_ps(regret, half), _mm256_mul_ps(regret, inverses), _mm256_cmp_ps(regret, zero, _CMP_GT_OQ));
+            const __m256 stored = _mm256_blendv_ps(
+                _mm256_mul_ps(regret, negatives), _mm256_mul_ps(regret, inverses), _mm256_cmp_ps(regret, zero, _CMP_GT_OQ)
+            );
             _mm256_storeu_ps(rows + i, stored);
             magnitude = _mm256_max_ps(magnitude, vector::Abs(stored));
         }
@@ -262,8 +264,8 @@ void UpdateNodeRegrets(
         {
             const std::size_t i = action * count + hand;
             const float old = gpu::Dequantize(static_cast<float>(regrets[action * row + hand]), exponent);
-            const float regret = (old > 0.0f ? old * scale : old * halving) + (rows[i] - value);
-            rows[i] = regret > 0.0f ? regret * inverse : regret * 0.5f;
+            const float regret = (old > 0.0f ? old * scale : old * decay) + (rows[i] - value);
+            rows[i] = regret > 0.0f ? regret * inverse : regret * negativeDiscount;
             magnitude = std::max(magnitude, std::fabs(rows[i]));
         }
         Encode(regrets + hand, row, exponents + hand, rows + hand, actions, count, magnitude, offset + hand, update);
@@ -414,7 +416,7 @@ const float* HandTraversal::PropagateChild(
     if (node.kind == Kind::Chance)
     {
         // Multiplying by an exact zero/one factor keeps the loop branch-free and vectorizable.
-        const float chance = 1.0f / (node.childCount - 4);
+        const float chance = HandTraversalData::OutcomeProbability(node.board);
         const float* factors = data_->tables.cardFactors[player].data() + std::size_t(dealtCards[node.childOffset + action]) * count;
         for (std::size_t hand = 0; hand < count; ++hand)
             child[hand] = parent[hand] * factors[hand] * chance;
@@ -465,7 +467,7 @@ void HandTraversal::EvaluateRunout(
     std::array<float, kMaxHands> accumulated{};
     std::array<float, kMaxHands> childReach;
     std::array<float, kMaxHands> childValues;
-    const float chance = 1.0f / (52 - board.CardCount() - 4);
+    const float chance = HandTraversalData::OutcomeProbability(board);
     const std::size_t opponentCount = hands[1 - player].size();
     for (int card = 0; card < 52; ++card)
     {
@@ -509,22 +511,27 @@ std::uint64_t HandTraversal::WorkspaceSize::Bytes() const
 HandTraversal::StorageEstimate HandTraversal::EstimateStorage(
     const game::CompiledGame& game,
     const std::array<std::size_t, 2>& handCounts,
+    const std::vector<HandTraversalData::SuitMap>& suitGroup,
     bool prepareTraining
 )
 {
     const auto size = game.Size();
+    const auto root = game.GetNode(game.Root());
     const auto totalHands = handCounts[0] + handCounts[1];
     const auto maxHands = std::max(handCounts[0], handCounts[1]);
     std::uint64_t chanceTasks = 0, chancePlanBytes = 0;
     VisitChanceGroups(
-        game.GetNode(game.Root()),
-        [&](const game::GameNode& node, std::uint32_t, const std::vector<std::uint32_t>& path)
+        root,
+        [&](const game::GameNode& node, const std::vector<std::uint32_t>& path)
         {
-            chanceTasks += node.ChanceOutcomeCount();
-            chancePlanBytes += sizeof(ChanceGroup) + path.size() * sizeof(std::uint32_t) + node.ChanceOutcomeCount() * sizeof(ChanceTask);
+            const auto outcomes = HandTraversalData::CanonicalOutcomes(suitGroup, HandTraversalData::BoardMask(node.State().board)).count;
+            chanceTasks += outcomes;
+            chancePlanBytes += sizeof(ChanceGroup) + path.size() * sizeof(std::uint32_t) + outcomes * sizeof(ChanceTask);
         }
     );
-    const std::uint64_t layout = size.traversalNodes * (sizeof(Node) + sizeof(std::uint32_t) + sizeof(std::uint8_t));
+    // Per node its record, its parent's child edge and dealt card, and an isomorphic layout's orbit mask.
+    const std::uint64_t layout = HandTraversalData::MeasureSubtree(root, suitGroup).nodes *
+                                 (sizeof(Node) + sizeof(std::uint32_t) + (suitGroup.empty() ? 1 : 2) * sizeof(std::uint8_t));
     const std::uint64_t rankBytes = 6 * sizeof(std::uint16_t) + 3 * sizeof(std::uint32_t);
     // Games start on the flop, so every turn/river pair has a rank row.
     const std::uint64_t undealt = 52 - game.Spec().initialBoard.CardCount();
@@ -866,6 +873,14 @@ bool HandTraversal::Walk(
         // Serial chance branches reuse one set of rows; decision rows survive until the regret update.
         float* child = childrenValues + ((parallel || node.kind == Kind::Decision) ? action * width : 0);
         live |= parallel ? workspace.parallelLive[firstTask + action] != 0 : descend(action, child);
+        // A chance child of an isomorphic layout sums its orbit (HandTraversalData::orbitMasks); images
+        // holds the hand images of its mask's elements past the identity.
+        const std::uint16_t* images[gpu::kMaxSuitGroup];
+        std::size_t imageCount = 0;
+        if (node.kind == Kind::Chance && data_->Isomorphic())
+            for (unsigned orbit = data_->orbitMasks[node.childOffset + action] >> 1, e = 1; orbit; orbit >>= 1, ++e)
+                if (orbit & 1u)
+                    images[imageCount++] = data_->handImages[e][player].data();
         for (std::size_t row = 0; row < rows; ++row)
         {
             const float* childRow = child + row * count;
@@ -887,6 +902,17 @@ bool HandTraversal::Walk(
                 const float* probability = nodeStrategy + action * count;
                 for (std::size_t hand = 0; hand < count; ++hand)
                     sum[hand] += probability[hand] * childRow[hand];
+            }
+            else if (imageCount)
+            {
+                // Summed in GPU BackupChance's order.
+                for (std::size_t hand = 0; hand < count; ++hand)
+                {
+                    float orbit = childRow[hand];
+                    for (std::size_t image = 0; image < imageCount; ++image)
+                        orbit += childRow[images[image][hand]];
+                    sum[hand] += orbit;
+                }
             }
             else
                 for (std::size_t hand = 0; hand < count; ++hand)
@@ -911,18 +937,9 @@ bool HandTraversal::Walk(
     if (acting && train && live)
     {
         const auto& weights = train->weights;
-        const float halving = gpu::Halving(weights.update - 1 - train->stamps[nodeIndex]);
+        const float decay = gpu::NegativeDecay(weights.update - 1 - train->stamps[nodeIndex], weights.negativeDiscount);
         UpdateNodeRegrets(
-            train->regrets + node.stateOffset,
-            node.strategyOffset,
-            node.childCount,
-            count,
-            childrenValues,
-            values,
-            weights.positiveScale,
-            weights.positiveInverse,
-            halving,
-            weights.update
+            train->regrets + node.stateOffset, node.strategyOffset, node.childCount, count, childrenValues, values, weights, decay
         );
         train->stamps[nodeIndex] = weights.update;
     }

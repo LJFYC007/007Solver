@@ -22,7 +22,7 @@ public:
 private:
     friend class DcfrSession;
     void Update(std::size_t player, const UpdateWeights& weights);
-    ExploitabilityMetrics EvaluateExploitability() const;
+    ExploitabilityMetrics EvaluateExploitability();
     StrategySnapshot ExportStrategy() &&;
     QuantizedState ReadTrainingState() const { return state_; }
     void WriteTrainingState(const QuantizedState& state);

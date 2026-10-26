@@ -6,11 +6,18 @@
 #else
 #define GPU_TYPES_INLINE inline
 #endif
+// Keeps the following loop rolled in device code.
+#if defined(__CUDA_ARCH__)
+#define GPU_ROLLED _Pragma("unroll 1")
+#else
+#define GPU_ROLLED
+#endif
 namespace solver::engine::gpu
 {
 using U32 = unsigned int;
 using U64 = unsigned long long;
-// Order of the kernels' buffer arguments, shared by host allocation.
+// Order of the kernels' buffer arguments up to StateBuffer, shared by host allocation; the buffers
+// after it serve only isomorphic evaluation's kernels.
 enum BufferIndex : U32
 {
     NodesBuffer,
@@ -32,11 +39,14 @@ enum BufferIndex : U32
     LocksBuffer,  // per node stamp: the node's first entry in the locked policies or kNoIndex (see HandTraversalData)
     LockedPoliciesBuffer,
     StateBuffer,
+    SymmetricBuffer, // the decisions whose sums isomorphic evaluation symmetrizes (see SymmetricDecision)
+    SavedSumsBuffer, // their stored sums while it does
     kBufferCount,
 };
 // Each player's card list starts with 52 card offsets and an end offset into the
 // cards buffer; hand indices follow both players' offsets, then each player's hands' cards
-// (see CardPairs).
+// (see CardPairs) and, under suit isomorphism, the hand images (see HandImages) and chance
+// nodes' orbit masks (see Node::rankCounts).
 enum : U32
 {
     kCardListStride = 53,
@@ -48,6 +58,7 @@ enum : U32
     kTerminalGroup = 128, // threads per Terminal group of a showdown's warp roles, which wide ranges double
     kRunoutGroup = 1024,  // most threads per Runout block, which its launch bounds assume
     kTileGroup = 256,     // most threads per Reach or Backup hand tile, which their launch bounds and Reach's compaction assume
+    kMaxSuitGroup = 6,    // most suit permutations that fix a flop (HandTraversalData::suitGroup)
     kNoIndex = 0xffffffffu,
 };
 // Words of a scratch row's reach mask (MasksBuffer): one bit per hand pair of a row of the given
@@ -87,8 +98,11 @@ struct alignas(16) Node
     // by PackInfo: a showdown's row is the rank row of its board, a forced runout's zero for
     // flop or card index + 1 for turn.
     U32 info;
-    U32 rankCounts; // Showdown: legal hands of player 0 | player 1 << 16 in its rank row
-    U32 stamp;      // index of this node's update stamp
+    // Showdown: legal hands of player 0 | player 1 << 16 in its rank row. Chance: the cards buffer's
+    // first word of its children's orbit masks (HandTraversalData::orbitMasks), one word per child,
+    // or kNoIndex where each child is its own orbit.
+    U32 rankCounts;
+    U32 stamp; // index of this node's update stamp
     // Showdown with a Fold sibling: that fold's slot, whose values this showdown's Terminal
     // block writes, and its per-player utilities; kNoIndex without one. Such a showdown's strategy,
     // count, actor and stamp are its parent's, fields a leaf does not use otherwise, its link
@@ -96,7 +110,7 @@ struct alignas(16) Node
     // when the two are the parent's only children, the block also backs the parent up. A region
     // root's boundary Reach record, and the Reach record of a child of a root whose boundary
     // pass a player skips (see Plan), instead holds the root's chance parent's reachSlot, the
-    // dealt card as board and the outcome probability 1 / (parent count - 4) as foldUtility[0];
+    // dealt card as board and the outcome probability (HandTraversalData::OutcomeProbability) as foldUtility[0];
     // other decision records hold zero fold utilities.
     U32 fold;
     float foldUtility[2];
@@ -104,7 +118,7 @@ struct alignas(16) Node
     // differences from that player's tie payoff per runout, scaling its win/loss counts.
     float utility[2][3];
 };
-// Training-state rows (HandTraversalData::StateUnits): each decision's action rows and exponent
+// Training-state rows (StateUnits): each decision's action rows and exponent
 // bytes start at multiples of kStateAlign 16-bit units, 128 bytes, so a thread's two adjacent
 // hands (an even first hand) share one 32-bit word and a warp's hands one cache line.
 enum : U32
@@ -115,6 +129,12 @@ enum : U32
 GPU_TYPES_INLINE U32 StateRow(U32 n)
 {
     return (n + kStateAlign - 1) & ~(kStateAlign - 1);
+}
+// Units of decisions of n hands with these actions in total: each decision's action rows, then its
+// hands' exponent bytes.
+GPU_TYPES_INLINE U64 StateUnits(U64 actions, U32 n, U64 decisions = 1)
+{
+    return actions * StateRow(n) + decisions * StateRow((n + 1) / 2);
 }
 // Floats of a locked decision's action row (see HandTraversalData::lockedPolicies): its actor's hands
 // padded to an even count, so a thread's hand pair loads as one 8-byte access.
@@ -202,9 +222,10 @@ struct alignas(16) State
     // UpdateWeights: positive regrets are stored divided by positiveScale.
     float positiveScale;
     float positiveInverse;
-    float averageWeight; // t^3 weight of this update's reach * policy in the strategy sums
-    U32 orderPitch;      // entries per rank row of the order buffer, a multiple of four so hand entries align
-    U32 orderSection;    // offset of player 1's section in a rank row of the order buffer (see Plan::order)
+    float averageWeight;    // t^3 weight of this update's reach * policy in the strategy sums
+    float negativeDiscount; // factor of a negative regret after this update
+    U32 orderPitch;         // entries per rank row of the order buffer, a multiple of four so hand entries align
+    U32 orderSection;       // offset of player 1's section in a rank row of the order buffer (see Plan::order)
 };
 // Player p's first entry in the per-hand tables (Plan::hands, weights and a rank row's ranks)
 // and, halved, its first hand pair in the per-pair ones (a rank row's order entries, CardPairs):
@@ -219,13 +240,30 @@ GPU_TYPES_INLINE U32 PaddedHands(const State& state)
 {
     return HandBase(state, 1) + ((state.hands[1] + 1) & ~1u);
 }
-// The cards buffer's last section, after both players' card lists, which list every hand
+// The cards buffer's section after both players' card lists, which list every hand
 // twice: each player's hands' cards, card0 | card1 << 8, two hands to a word, so the player's
 // hands h and h + 1, h even, share the word at CardPairs(shape, player) + h / 2.
 GPU_TYPES_INLINE U32 CardPairs(const State& shape, U32 player)
 {
     return kCardListHeader + 2 * (shape.hands[0] + shape.hands[1]) + HandBase(shape, player) / 2;
 }
+// Under suit isomorphism, the card pairs are followed by sections of the same layout for each
+// suit-group element e > 0, whose word for player p's hands h and h + 1 (h even) holds the indices of
+// e^-1 h | e^-1 (h + 1) << 16 (see HandTraversalData::handImages).
+GPU_TYPES_INLINE U32 HandImages(const State& shape, U32 e, U32 player, U32 h)
+{
+    return CardPairs(shape, player) + e * (PaddedHands(shape) / 2) + h / 2;
+}
+// A decision whose sums isomorphic evaluation symmetrizes (HandTraversalData::SymmetricElements):
+// its first state unit and its first unit in the saved sums, each over kStateAlign, its info (PackInfo)
+// and its SymmetricElements.
+struct alignas(16) SymmetricDecision
+{
+    U32 state;
+    U32 saved;
+    U32 info;
+    U32 elements;
+};
 // Terminal evaluates showdowns, with their fused folds and parents; Runout the other leaves, lone
 // folds and forced runouts, which need no rank order.
 enum class Kernel : U32

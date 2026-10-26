@@ -9,7 +9,7 @@
 namespace solver::engine
 {
 CpuDcfrSession::CpuDcfrSession(const SolveProblem& problem, int workers)
-    : traversal_(problem, problem.game->Root(), true), workerCount_(CpuWorkerCount(workers))
+    : traversal_(HandTraversalData::TrainingLayout(problem, true)), workerCount_(CpuWorkerCount(workers))
 {
     if (workerCount_ <= 0)
         throw std::invalid_argument("CPU DCFR worker count must be positive");
@@ -34,9 +34,15 @@ void CpuDcfrSession::Update(std::size_t updatingPlayer, const UpdateWeights& wei
     traversal_.WalkTraining(updatingPlayer, scales_[updatingPlayer].data(), workspace_, rootValues_.data(), workers_, train);
 }
 
-ExploitabilityMetrics CpuDcfrSession::EvaluateExploitability() const
+ExploitabilityMetrics CpuDcfrSession::EvaluateExploitability()
 {
-    return EvaluateAverageStrategy(traversal_, state_.strategySums.data());
+    // An isomorphic layout evaluates the strategy it exports (HandTraversalData::SymmetrizeSums), its
+    // sums symmetrized until the evaluation ends.
+    const auto& data = traversal_.Data();
+    const auto saved = data.SymmetrizeSums(state_.strategySums.data());
+    const auto metrics = EvaluateAverageStrategy(traversal_, state_.strategySums.data());
+    data.RestoreSums(state_.strategySums.data(), saved.get());
+    return metrics;
 }
 
 void CpuDcfrSession::WriteTrainingState(const QuantizedState& state)

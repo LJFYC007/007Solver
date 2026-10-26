@@ -13,6 +13,7 @@
 // and rounding, so equal float inputs quantize identically, and encoding a decoded state
 // reproduces its values.
 #include "engine/gpu/GpuTypes.h"
+#include <cmath>
 #include <cstring>
 
 namespace solver::engine::gpu
@@ -54,11 +55,12 @@ GPU_TYPES_INLINE float PowerOfTwo(int exponent)
     return BitsFloat((unsigned int)(exponent + 127) << 23);
 }
 
-// 2^-skipped, the halving of negative regrets over skipped updates, rounded to nearest: a
-// normal power of two, a denormal one, or zero below 2^-149.
-GPU_TYPES_INLINE float Halving(unsigned int skipped)
+// The decay of negative regrets over skipped updates: this update's negative discount once per
+// skipped update, discount^skipped, which exceeds the product of the skipped updates' own smaller
+// discounts, most for long skips early in training. Only longer skips round in the math library.
+GPU_TYPES_INLINE float NegativeDecay(unsigned int skipped, float discount)
 {
-    return skipped < 127u ? PowerOfTwo(-int(skipped)) : skipped < 150u ? BitsFloat(1u << (149u - skipped)) : 0.0f;
+    return skipped > 1 ? exp2f(float(skipped) * log2f(discount)) : skipped ? discount : 1.0f;
 }
 
 enum : unsigned int
@@ -127,5 +129,62 @@ GPU_TYPES_INLINE int Quantize(float value, unsigned int exponentByte, float dith
 GPU_TYPES_INLINE float Dequantize(float quantized, unsigned int exponentByte)
 {
     return quantized * PowerOfTwo(int(exponentByte) - kExponentBias);
+}
+
+// The mean cumulative sums of hand h's orbit at a decision (HandTraversalData::SymmetrizeSums), from
+// the decision's units: its action rows of row units, then its hands' exponent bytes. elements has a
+// bit per suit-group element fixing the decision's board, bit 0 the identity, and image(e, k) is the
+// index of e^-1 k. The orbit is listed from its smallest member, then that member's images in element
+// order, and mean[a] sums its members' sums in that order; both devices use this order and
+// arithmetic, so they evaluate equal units. Returns the exponent of the largest mean (SumExponent),
+// or kNoIndex for a hand that is its own orbit. The loops stay rolled on the device: unrolled, they
+// grow its kernel to tens of thousands of instructions.
+template<typename Image>
+GPU_TYPES_INLINE unsigned int OrbitMean(
+    const unsigned short* units,
+    unsigned int actions,
+    unsigned int row,
+    unsigned int h,
+    unsigned int elements,
+    const Image& image,
+    float* mean
+)
+{
+    unsigned int first = h;
+    GPU_ROLLED
+    for (unsigned int mask = elements >> 1, e = 1; mask; mask >>= 1, ++e)
+        if (mask & 1u)
+        {
+            const unsigned int member = image(e, h);
+            first = member < first ? member : first;
+        }
+    unsigned int orbit[kMaxSuitGroup] = {first}, size = 1;
+    GPU_ROLLED
+    for (unsigned int mask = elements >> 1, e = 1; mask; mask >>= 1, ++e)
+        if (mask & 1u)
+        {
+            const unsigned int member = image(e, first);
+            bool listed = false;
+            GPU_ROLLED
+            for (unsigned int k = 0; k < size; ++k)
+                listed |= orbit[k] == member;
+            if (!listed)
+                orbit[size++] = member;
+        }
+    if (size == 1)
+        return kNoIndex;
+    const unsigned char* exponents = (const unsigned char*)(units + (unsigned long long)actions * row);
+    float magnitude = 0.0f;
+    GPU_ROLLED
+    for (unsigned int a = 0; a < actions; ++a)
+    {
+        float sum = 0.0f;
+        GPU_ROLLED
+        for (unsigned int k = 0; k < size; ++k)
+            sum += Dequantize(float(units[(unsigned long long)a * row + orbit[k]]), exponents[orbit[k]]);
+        mean[a] = sum / float(size);
+        magnitude = mean[a] > magnitude ? mean[a] : magnitude;
+    }
+    return SumExponent(magnitude);
 }
 } // namespace solver::engine::gpu

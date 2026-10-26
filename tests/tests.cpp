@@ -165,6 +165,20 @@ TEST(BackendParityTest, GpuUpdatesMatchCpuFromSharedState)
     solver::test::CheckBackendParity("backend-parity");
 }
 
+TEST(BackendParityTest, TwoToneGpuUpdatesMatchCpuFromSharedState)
+{
+    if (!engine::GpuDcfrSession::Available())
+        GTEST_SKIP() << "No supported CUDA GPU is available";
+    solver::test::CheckBackendParity("two-tone-parity", 2);
+}
+
+TEST(BackendParityTest, MonotoneGpuUpdatesMatchCpuFromSharedState)
+{
+    if (!engine::GpuDcfrSession::Available())
+        GTEST_SKIP() << "No supported CUDA GPU is available";
+    solver::test::CheckBackendParity("monotone-parity", 6);
+}
+
 TEST(BackendParityTest, LockedGpuUpdatesMatchCpuFromSharedState)
 {
     if (!engine::GpuDcfrSession::Available())

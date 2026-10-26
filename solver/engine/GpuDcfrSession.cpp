@@ -13,13 +13,13 @@ GpuDcfrSession::GpuDcfrSession(const SolveProblem& problem)
     const auto budget = gpu::DeviceMemoryBudget();
     if (TrainingStateBytes(counts) > budget)
         throw std::runtime_error("Regret and cumulative strategy alone exceed GPU memory; reduce the tree or use CPU");
-    data_ = std::make_unique<const HandTraversalData>(problem, problem.game->Root());
+    data_ = HandTraversalData::TrainingLayout(problem, false);
     const gpu::Plan plan(*data_);
     const auto device = plan.DeviceBytes();
     if (device > budget)
         throw std::runtime_error("GPU training state and batch scratch exceed available GPU memory");
     state_ = plan.state;
-    const auto fixed = HandTraversal::EstimateStorage(*problem.game, counts.hands);
+    const auto fixed = HandTraversal::EstimateStorage(*problem.game, counts.hands, data_->suitGroup);
     // Combined host/device allocation estimate, not a claim about available VRAM.
     const auto host = size.storageBytes + fixed.fixedBytes;
     const auto sumsBytes = plan.Buffers()[gpu::SumsBuffer].bytes;
@@ -46,12 +46,16 @@ void GpuDcfrSession::Update(std::size_t player, const UpdateWeights& weights)
     state.positiveScale = weights.positiveScale;
     state.positiveInverse = weights.positiveInverse;
     state.averageWeight = weights.averageWeight;
+    state.negativeDiscount = weights.negativeDiscount;
     executor_->Update(state);
 }
 
 ExploitabilityMetrics GpuDcfrSession::EvaluateExploitability() const
 {
-    return RootExploitability(
+    // An isomorphic layout evaluates the strategy it exports (HandTraversalData::SymmetrizeSums), its
+    // sums symmetrized on the device until the evaluation ends.
+    executor_->SymmetrizeSums();
+    const auto metrics = RootExploitability(
         data_->tables,
         [&](std::size_t player, bool policy)
         {
@@ -68,6 +72,8 @@ ExploitabilityMetrics GpuDcfrSession::EvaluateExploitability() const
             return values;
         }
     );
+    executor_->RestoreSums();
+    return metrics;
 }
 
 void GpuDcfrSession::WriteTrainingState(const QuantizedState& state)
@@ -80,7 +86,8 @@ void GpuDcfrSession::WriteTrainingState(const QuantizedState& state)
 
 StrategySnapshot GpuDcfrSession::ExportStrategy() &&
 {
-    // 16 MB ranges: each normalizes while the next downloads.
+    // Exports the symmetrized sums in 16 MB ranges: each normalizes while the next downloads.
+    executor_->SymmetrizeSums();
     return data_->ExportStrategy(
         std::size_t{8} << 20,
         [&](const std::vector<std::size_t>& ends, const std::function<void(const std::uint16_t*)>& consume)

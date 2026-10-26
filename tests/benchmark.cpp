@@ -114,8 +114,8 @@ TEST(WideRangeBenchmark, UtgBbSingleRaisedFixedWork)
     if (computeDevice != engine::ComputeDevice::Cpu && engine::GpuDcfrSession::Available())
     {
         StartStage("wide_parity");
-        // Full ranges take the GPU's wide-range kernel paths, which the workload's ranges miss.
-        test::CheckBackendParity("wide-parity");
+        // Full ranges take the GPU's wide-range kernel paths, which the workload's ranges miss, on a two-tone flop.
+        test::CheckBackendParity("wide-parity", 2);
         FinishStage("wide_parity");
         ASSERT_FALSE(HasFailure());
         StartStage("locked_wide_parity");

@@ -129,6 +129,10 @@ struct Plan
     // HandTraversalData's node locks by node stamp, empty without any.
     std::vector<U32> locks;
     std::vector<float> lockedPolicies;
+    // The decisions whose sums isomorphic evaluation symmetrizes, in traversal order, empty without
+    // any, and the units of their saved sums.
+    std::vector<SymmetricDecision> symmetric;
+    std::size_t savedUnits = 0;
     std::vector<Pass> initialization;
     std::vector<Pass> passes;
     // Per pass, the earlier passes in other streams whose slot accesses conflict with it and
@@ -160,6 +164,10 @@ public:
     virtual void StreamSums(const std::vector<std::size_t>& ends, const std::function<void(const std::uint16_t*)>& consume) = 0;
     virtual QuantizedState DownloadTraining() = 0;
     virtual void UploadTraining(const QuantizedState& state) = 0;
+    // Isomorphic evaluation and export (see Plan::symmetric): SymmetrizeSums saves the listed decisions'
+    // sums and symmetrizes them as HandTraversalData::SymmetrizeSums; RestoreSums puts the saved ones back.
+    virtual void SymmetrizeSums() = 0;
+    virtual void RestoreSums() = 0;
     virtual const char* Name() const = 0;
 };
 std::unique_ptr<Executor> MakeExecutor(const Plan& plan);

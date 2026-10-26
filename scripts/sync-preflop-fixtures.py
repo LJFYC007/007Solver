@@ -148,6 +148,9 @@ parity["rangeSource"]["reduction"] = (
     "the 22.5bb pot includes the folded SB's 0.5bb. No range subsets or weight rescaling. "
     "The CPU backend is the reference; there is no independent answer."
 )
+# The same comparison on flops whose suit group swaps two suits or permutes three, so training runs suit-isomorphic.
+two_tone_parity = {**parity, "board": "Ah Kh Qs"}
+monotone_parity = {**parity, "board": "Ah Kh Qh"}
 # The same lockstep comparison over full ranges, which take the GPU's wide-range kernel paths.
 wide_parity = scenario(RAKED, None, None, 4.0, iterations=6)
 wide_parity["rangeSource"]["reduction"] = (
@@ -196,7 +199,7 @@ locked_wide_parity["locks"] = [
     lock(wide_parity, "BB", river + [1, 2], two, period=49),
 ]
 for name, value in [("weighted-flop", weighted), ("raise-flop", raised), ("utg-bb-wide", wide), ("backend-parity", parity),
-                    ("wide-parity", wide_parity), ("locked-flop", locked), ("locked-parity", locked_parity),
-                    ("locked-wide-parity", locked_wide_parity)]:
+                    ("two-tone-parity", two_tone_parity), ("monotone-parity", monotone_parity), ("wide-parity", wide_parity),
+                    ("locked-flop", locked), ("locked-parity", locked_parity), ("locked-wide-parity", locked_wide_parity)]:
     (fixtures / f"{name}.json").write_bytes((json.dumps(value, indent=4) + "\n").encode())
 print("Updated the input fixtures from GTO Wizard; regenerate independent references for changed referenced inputs next.")

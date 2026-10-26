@@ -5,31 +5,27 @@
 
 namespace solver::engine
 {
-// The first non-all-in chance boundary on each betting path, in traversal order.
-// Construction and allocation estimates must agree on paths and preorder indices.
+// The first non-all-in chance boundary on each betting path, in traversal order, with its path.
 template<typename Visitor>
 void VisitChanceGroups(const game::GameNode& root, Visitor visitGroup)
 {
     std::vector<std::uint32_t> path;
-    const auto visit = [&](const auto& self, const game::GameNode& node, std::uint32_t index) -> void
+    const auto visit = [&](const auto& self, const game::GameNode& node) -> void
     {
         if (node.IsForcedRunout() || node.Kind() == game::NodeKind::Terminal)
             return;
         if (node.Kind() == game::NodeKind::Chance)
         {
-            visitGroup(node, index, path);
+            visitGroup(node, path);
             return;
         }
-        auto childIndex = index + 1;
         for (std::uint32_t action = 0; action < node.BettingEdgeCount(); ++action)
         {
-            const auto child = node.Child(action);
             path.push_back(action);
-            self(self, child, childIndex);
+            self(self, node.Child(action));
             path.pop_back();
-            childIndex += static_cast<std::uint32_t>(child.TraversalNodeCount());
         }
     };
-    visit(visit, root, 0);
+    visit(visit, root);
 }
 } // namespace solver::engine
